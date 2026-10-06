@@ -1,6 +1,5 @@
 import Image from "next/image";
 import type { Attraction } from "@/types";
-import { openingDateLabel } from "@/lib/opening";
 import { siteConfig } from "@/services/config";
 import { ButtonLink } from "@/components/ui/ButtonLink";
 import { OpeningText } from "./OpeningText";
@@ -9,7 +8,7 @@ import { Reveal } from "@/components/ui/Reveal";
 import { Star } from "@/components/ui/Decor";
 
 function Marquee() {
-  const items = ["Boom Bala", siteConfig.city, `Открытие — ${openingDateLabel()}`, "Boom Bala", "Детский развлекательный центр"];
+  const items = ["Boom Bala", siteConfig.city, siteConfig.location.mall, "Boom Bala", "Детский развлекательный центр"];
   return (
     <div
       aria-hidden="true"
@@ -105,7 +104,7 @@ function Teaser() {
           <p className="mt-8 max-w-[34ch] text-lg leading-relaxed text-grape-900 md:text-xl">
             <OpeningText
               before="Игровые зоны Boom Bala скоро появятся на сайте. Фотографии и названия добавим ближе к открытию."
-              after="Скоро покажем игровые зоны Boom Bala подробнее."
+              working="Скоро покажем игровые зоны Boom Bala подробнее."
             />
           </p>
           <ButtonLink href={siteConfig.contacts.instagram} variant="primary" className="mt-8 w-full sm:w-auto">

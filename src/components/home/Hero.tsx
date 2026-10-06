@@ -4,6 +4,14 @@ import { Burst, Wave } from "@/components/ui/Decor";
 import { Container } from "@/components/ui/Container";
 import { OpeningStatus } from "./OpeningStatus";
 import { OpeningText } from "./OpeningText";
+import { grandOpeningLabel } from "@/lib/opening";
+
+const announce = (
+  <>
+    <strong className="font-semibold text-grape-800">{grandOpeningLabel()}.</strong> Узнайте цены и выберите
+    праздник для именинника.
+  </>
+);
 
 export function Hero() {
   return (
@@ -40,8 +48,9 @@ export function Hero() {
 
           <p className="mt-4 max-w-[40ch] text-base leading-relaxed text-muted sm:mt-6 sm:text-lg md:text-xl lg:max-w-[30ch] xl:max-w-[40ch]">
             <OpeningText
-              before="Boom Bala открывается 7 октября. Узнайте цены и выберите праздник для именинника."
-              after="Boom Bala уже открыт. Узнайте цены и выберите праздник для именинника."
+              before={announce}
+              working={announce}
+              open="Boom Bala открыт. Узнайте цены и выберите праздник для именинника."
             />
           </p>
 

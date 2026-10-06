@@ -26,9 +26,8 @@ function Countdown({ ms }: { ms: number }) {
 }
 
 /**
- * Opening badge. Server-renders the static "Открытие — 7 октября" and switches
- * to today / countdown / open once mounted. Countdown appears only when
- * `siteConfig.opening.time` is set.
+ * Status badge. Server-renders "Начинаем работу 7 октября в 12:00" and, once mounted,
+ * shows the right phase: countdown (before) / "BOOM BALA уже работает" / "BOOM BALA открыт".
  */
 export function OpeningStatus({ className = "" }: { className?: string }) {
   const [state, setState] = useState<OpeningState>(staticOpeningState);
@@ -36,11 +35,11 @@ export function OpeningStatus({ className = "" }: { className?: string }) {
   useEffect(() => {
     const tick = () => setState(getOpeningState());
     tick();
-    const interval = setInterval(tick, getOpeningState().kind === "countdown" ? 1000 : 30_000);
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const isOpen = state.kind === "open";
+  const isOpen = state.kind !== "before";
 
   return (
     <p
@@ -51,7 +50,7 @@ export function OpeningStatus({ className = "" }: { className?: string }) {
         <span className={`relative h-3 w-3 rounded-full ${isOpen ? "bg-emerald-500" : "bg-lava-500"}`} />
       </span>
       <span>{state.label}</span>
-      {state.kind === "countdown" ? <Countdown ms={state.ms} /> : null}
+      {state.kind === "before" && state.ms !== undefined ? <Countdown ms={state.ms} /> : null}
     </p>
   );
 }

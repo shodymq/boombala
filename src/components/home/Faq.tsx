@@ -4,6 +4,7 @@ import type { FaqItem } from "@/types";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import { OpeningText } from "./OpeningText";
 
 export function Faq({ items }: { items: FaqItem[] }) {
   return (
@@ -45,7 +46,12 @@ export function Faq({ items }: { items: FaqItem[] }) {
                     <Plus size={18} weight="bold" />
                   </span>
                 </summary>
-                <p className="max-w-[62ch] pb-6 pl-12 text-base leading-relaxed text-muted md:pl-16 md:text-lg">{item.answer}</p>
+                <p className="max-w-[62ch] pb-6 pl-12 text-base leading-relaxed text-muted md:pl-16 md:text-lg">{typeof item.answer === "string" ? (
+                    item.answer
+                  ) : (
+                    <OpeningText before={item.answer.before} working={item.answer.working} open={item.answer.open} />
+                  )}
+                </p>
               </details>
             ))}
           </div>

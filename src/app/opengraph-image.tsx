@@ -16,7 +16,7 @@ export default async function OpengraphImage() {
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 70px", width: 700 }}>
           <div style={{ fontSize: 120, fontWeight: 900, color: "#3b1485", lineHeight: 1 }}>BOOM</div>
           <div style={{ fontSize: 120, fontWeight: 900, color: "#ffc60a", lineHeight: 1, marginTop: 4 }}>BALA</div>
-          <div style={{ fontSize: 38, color: "#5c5075", marginTop: 36 }}>ALMATY · 07.10.2026</div>
+          <div style={{ fontSize: 34, color: "#5c5075", marginTop: 36 }}>KIDS ENTERTAINMENT · ALMATY</div>
         </div>
         <img src={src} alt="" width={420} height={560} style={{ position: "absolute", right: 60, bottom: 0, objectFit: "contain" }} />
       </div>

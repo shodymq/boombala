@@ -23,6 +23,7 @@ export const metadata: Metadata = {
     url: "/birthdays",
     locale: "ru_RU",
     type: "website",
+    images: ["/opengraph-image"],
   },
   twitter: {
     card: "summary_large_image",

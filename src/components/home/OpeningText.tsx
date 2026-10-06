@@ -1,19 +1,29 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { getOpeningState } from "@/lib/opening";
+import { getOpeningPhase, type OpeningPhase } from "@/lib/opening";
 
 /**
- * Text that must change once the venue has opened. Server-renders the "before" copy and
- * switches to "after" on the client when the opening moment has passed.
+ * Text that depends on the opening phase. Server-renders the "before" copy and switches on
+ * the client. A missing phase falls back to its neighbour: working -> open -> before.
  */
-export function OpeningText({ before, after }: { before: ReactNode; after: ReactNode }) {
-  const [open, setOpen] = useState(false);
+export function OpeningText({
+  before,
+  working,
+  open,
+}: {
+  before: ReactNode;
+  working?: ReactNode;
+  open?: ReactNode;
+}) {
+  const [phase, setPhase] = useState<OpeningPhase>("before");
   useEffect(() => {
-    const check = () => setOpen(getOpeningState().kind === "open");
+    const check = () => setPhase(getOpeningPhase());
     check();
-    const id = setInterval(check, 30_000);
+    const id = setInterval(check, 15_000);
     return () => clearInterval(id);
   }, []);
-  return <>{open ? after : before}</>;
+  if (phase === "open") return <>{open ?? working ?? before}</>;
+  if (phase === "working") return <>{working ?? open ?? before}</>;
+  return <>{before}</>;
 }

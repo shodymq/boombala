@@ -28,7 +28,7 @@ export function almatyToday(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: siteConfig.opening.timeZone }).format(now);
 }
 
-/** Earliest bookable date: not before today and not before the opening day. */
+/** Earliest bookable date: not before today and not before the first working day. */
 export function minBookingDate(now: Date = new Date()): string {
   const today = almatyToday(now);
   return today > siteConfig.opening.date ? today : siteConfig.opening.date;
@@ -71,7 +71,7 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
   const date = str(input.date);
   if (!date) errors.date = "Выберите дату";
   else if (!isRealDate(date)) errors.date = "Проверьте дату";
-  else if (date < minBookingDate()) errors.date = "Выберите дату не раньше открытия";
+  else if (date < minBookingDate()) errors.date = "Выберите дату не раньше начала работы";
   else if (date > "2100-01-01") errors.date = "Проверьте дату";
 
   let children: number | null = null;

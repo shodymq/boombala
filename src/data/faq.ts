@@ -3,7 +3,7 @@ import { pricingTable } from "./pricing";
 import { membership } from "./membership";
 import { formatTenge, formatPriceOrFree } from "@/lib/format";
 import { siteConfig } from "@/services/config";
-import { openingDateLabel } from "@/lib/opening";
+import { grandOpeningDayLabel, grandOpeningFullLabel, openingDateLabel, startFullLabel } from "@/lib/opening";
 
 const [weekday, weekend] = pricingTable.categories;
 const rowsText = (rows: typeof weekday.rows) =>
@@ -39,8 +39,12 @@ export const faqItems: FaqItem[] = [
   },
   {
     id: "opening",
-    question: "Когда открывается Boom Bala?",
-    answer: `Открытие Boom Bala — ${openingDateLabel()} 2026 года${siteConfig.opening.time ? ` в ${siteConfig.opening.time}` : ""}.`,
+    question: "Когда открытие Boom Bala?",
+    answer: {
+      before: `Начинаем работу ${startFullLabel()}. Большое открытие — ${grandOpeningFullLabel()}.`,
+      working: `Boom Bala уже работает с ${openingDateLabel()} 2026 года. Большое открытие — ${grandOpeningFullLabel()}.`,
+      open: `Boom Bala открыт: работаем с ${openingDateLabel()} 2026 года, большое открытие прошло ${grandOpeningDayLabel()}.`,
+    },
   },
   {
     id: "address",
@@ -50,6 +54,6 @@ export const faqItems: FaqItem[] = [
   {
     id: "kitchen",
     question: "Есть ли в Boom Bala кухня?",
-    answer: "Да, в Boom Bala есть кухня. Меню и подробные условия опубликуем после открытия.",
+    answer: "Да, в Boom Bala есть кухня. Меню и подробные условия опубликуем позже.",
   },
 ];

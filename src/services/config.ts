@@ -1,19 +1,27 @@
 /**
  * Single place for site-level configuration.
- * Fill `opening.time` / `contacts.whatsapp` when they are confirmed — the UI
- * switches on automatically (countdown, WhatsApp CTA).
+ * Opening timeline (Asia/Almaty):
+ *   opening      — 7 Oct 2026 12:00: the centre starts working and welcomes visitors.
+ *   grandOpening — 24 Oct 2026 10:00: the big public opening event.
+ * The UI switches phase automatically: before -> working -> open.
+ * Fill `contacts.whatsapp` when it is confirmed — the WhatsApp CTA switches on.
  */
 export const siteConfig = {
   name: "Boom Bala",
   city: "Алматы",
   opening: {
-    /** Local date in Asia/Almaty, YYYY-MM-DD. */
+    /** Start of work, local date in Asia/Almaty, YYYY-MM-DD. */
     date: "2026-10-07",
-    /** Local time "HH:mm". `null` until the exact time is announced. */
-    time: "12:00" as string | null,
+    /** Local time "HH:mm". */
+    time: "12:00",
     timeZone: "Asia/Almaty",
     /** Fixed UTC offset of the opening time zone (Kazakhstan is UTC+5 year-round). */
     utcOffset: "+05:00",
+  },
+  /** The big public opening. Same time zone as `opening`. */
+  grandOpening: {
+    date: "2026-10-24",
+    time: "10:00",
   },
   /** Confirmed venue address. Working hours are NOT confirmed yet, so none are shown. */
   location: {
