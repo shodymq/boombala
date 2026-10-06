@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Политика конфиденциальности — Boom Bala",
     description: "Как Boom Bala обрабатывает данные, отправленные через форму заявки на сайте.",
-    images: ["/opengraph-image.png"],
+    images: ["/opengraph-image"],
   },
 };
 

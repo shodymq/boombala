@@ -24,15 +24,21 @@ export function Hero() {
             id="hero-title"
             className="mt-3 font-display text-[2.6rem] font-black leading-[1.02] sm:mt-4 tracking-tight text-grape-800 sm:text-6xl lg:text-[4.25rem] xl:text-[5.25rem]"
           >
-            Boom Bala —
-            <br />
-            детский развлекательный центр
-            <br />
-            <span className="text-grape-600">в Алматы</span>
+            Место, где начинается{" "}
+            <span className="relative inline-block text-grape-600">
+              BOOM.
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 200 14"
+                preserveAspectRatio="none"
+                className="absolute -bottom-1 left-0 h-3 w-full text-sun-400 sm:-bottom-2 sm:h-4"
+              >
+                <path d="M3 9 C 40 2, 70 12, 100 7 S 165 3, 197 8" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" />
+              </svg>
+            </span>
           </h1>
 
           <p className="mt-4 max-w-[40ch] text-base leading-relaxed text-muted sm:mt-6 sm:text-lg md:text-xl lg:max-w-[30ch] xl:max-w-[40ch]">
-            Место, где начинается BOOM. {" "}
             <OpeningText
               before="Boom Bala открывается 7 октября. Узнайте цены и выберите праздник для именинника."
               after="Boom Bala уже открыт. Узнайте цены и выберите праздник для именинника."

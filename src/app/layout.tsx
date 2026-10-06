@@ -62,7 +62,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Boom Bala — детский развлекательный центр в Алматы",
     description: "Цены, развлечения, дни рождения и годовой абонемент в Boom Bala, Алматы.",
-    images: ["/opengraph-image.png"],
+    images: ["/opengraph-image"],
   },
 };
 

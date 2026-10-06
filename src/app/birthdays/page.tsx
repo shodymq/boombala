@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Дни рождения детей в Алматы — Boom Bala",
     description: "Праздничные пакеты Boom Bala для дня рождения ребёнка: состав, цены и скидка 30% в будние дни.",
-    images: ["/opengraph-image.png"],
+    images: ["/opengraph-image"],
   },
 };
 
