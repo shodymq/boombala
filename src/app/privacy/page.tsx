@@ -6,6 +6,19 @@ export const metadata: Metadata = {
   title: "Политика конфиденциальности",
   description: "Какие данные собирает форма заявки Boom Bala, зачем и как с ними связаться.",
   alternates: { canonical: "/privacy" },
+  openGraph: {
+    title: "Политика конфиденциальности — Boom Bala",
+    description: "Как Boom Bala обрабатывает данные, отправленные через форму заявки на сайте.",
+    url: "/privacy",
+    locale: "ru_RU",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Политика конфиденциальности — Boom Bala",
+    description: "Как Boom Bala обрабатывает данные, отправленные через форму заявки на сайте.",
+    images: ["/opengraph-image.png"],
+  },
 };
 
 const h2 = "mt-10 font-display text-2xl font-black tracking-tight text-grape-800 md:text-3xl";

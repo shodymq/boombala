@@ -24,25 +24,46 @@ const onest = Onest({
   display: "swap",
 });
 
+const siteUrl = getSiteUrl();
+
+const localBusinessJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "EntertainmentBusiness",
+  "@id": `${siteUrl}/#business`,
+  name: "Boom Bala",
+  url: siteUrl,
+  address: {
+    "@type": "PostalAddress",
+    streetAddress: "ул. Шолохова, 29, ТРК «Жібек жолы», 3 этаж",
+    addressLocality: "Алматы",
+    addressCountry: "KZ",
+  },
+  sameAs: ["https://www.instagram.com/boombala.almaty"],
+} as const;
 
 export const metadata: Metadata = {
-  metadataBase: new URL(getSiteUrl()),
+  metadataBase: new URL(siteUrl),
   alternates: { canonical: "/" },
   title: {
     default: "Boom Bala — детский развлекательный центр в Алматы",
     template: "%s — Boom Bala",
   },
   description:
-    "Boom Bala — детский развлекательный центр в Алматы. Открытие 7 октября. Цены, дни рождения и годовой абонемент.",
+    "Boom Bala — детский развлекательный центр в Алматы. Цены, дни рождения и годовой абонемент.",
   openGraph: {
-    title: "Boom Bala — место, где начинается BOOM",
-    description: "Детский развлекательный центр в Алматы. Открытие 7 октября.",
+    title: "Boom Bala — детский развлекательный центр в Алматы",
+    description: "Цены, развлечения, дни рождения и годовой абонемент в Boom Bala, Алматы.",
     siteName: "Boom Bala",
     url: "/",
     locale: "ru_RU",
     type: "website",
   },
-  twitter: { card: "summary_large_image" },
+  twitter: {
+    card: "summary_large_image",
+    title: "Boom Bala — детский развлекательный центр в Алматы",
+    description: "Цены, развлечения, дни рождения и годовой абонемент в Boom Bala, Алматы.",
+    images: ["/opengraph-image.png"],
+  },
 };
 
 export const viewport: Viewport = {
@@ -57,6 +78,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ru" className={`${nunito.variable} ${onest.variable}`}>
       <body className="min-h-dvh antialiased">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessJsonLd).replace(/</g, "\\u003c") }}
+        />
         <a
           href="#main"
           className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-full focus:bg-grape-700 focus:px-5 focus:py-3 focus:text-white"

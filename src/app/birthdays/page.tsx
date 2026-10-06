@@ -13,16 +13,22 @@ import { FlagshipDetail } from "@/components/birthdays/FlagshipDetail";
 import { PackageEditorial } from "@/components/birthdays/PackageEditorial";
 
 export const metadata: Metadata = {
-  title: "Дни рождения",
+  title: "Дни рождения детей в Алматы",
   description:
-    "Праздничные пакеты Boom Bala в Алматы: WOW PARTY, MAGIC PARTY и BOOM PARTY. Состав, цены и скидка 30% в будние дни.",
+    "День рождения ребёнка в Boom Bala, Алматы: пакеты WOW PARTY, MAGIC PARTY и BOOM PARTY, состав, цены и скидка 30% в будние дни.",
   alternates: { canonical: "/birthdays" },
   openGraph: {
-    title: "Дни рождения — Boom Bala",
-    description: "WOW PARTY, MAGIC PARTY и BOOM PARTY: состав, цены и скидка 30% в будние дни.",
+    title: "Дни рождения детей в Алматы — Boom Bala",
+    description: "Праздничные пакеты Boom Bala для дня рождения ребёнка: состав, цены и скидка 30% в будние дни.",
     url: "/birthdays",
     locale: "ru_RU",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Дни рождения детей в Алматы — Boom Bala",
+    description: "Праздничные пакеты Boom Bala для дня рождения ребёнка: состав, цены и скидка 30% в будние дни.",
+    images: ["/opengraph-image.png"],
   },
 };
 
