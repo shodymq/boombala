@@ -35,7 +35,7 @@ const THEMES = {
     tabOff: "text-white",
     title: "text-white",
     sub: "text-grape-200",
-    price: "text-white",
+    old: "text-grape-200",
     weekday: "text-sun-400",
     text: "text-grape-50",
     check: "text-sun-400",
@@ -50,8 +50,8 @@ const THEMES = {
     tabOff: "text-grape-800",
     title: "text-grape-800",
     sub: "text-muted",
-    price: "text-grape-800",
-    weekday: "text-grape-600",
+    old: "text-muted",
+    weekday: "text-grape-700",
     text: "text-grape-900",
     check: "text-grape-600",
     line: "border-grape-200",
@@ -150,16 +150,21 @@ export function MobilePackageSelector({
         <h3 className={`font-display text-[1.625rem] font-black leading-none tracking-tight ${t.title}`}>{active.name}</h3>
         <p className={`mt-1 text-sm ${t.sub}`}>{active.tagline}</p>
 
-        <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className={`font-display text-[1.875rem] font-black tabular-nums leading-none ${t.price}`}>
-            {formatTenge(active.price)}
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="rounded-full bg-lava-500 px-2.5 py-0.5 font-display text-xs font-extrabold text-ink">
-              в будни −{active.weekdayDiscountPercent}%
+        <div className="mt-3">
+          <p className="flex items-center gap-2">
+            <s className={`font-display text-base font-extrabold tabular-nums decoration-2 ${t.old}`}>
+              <span className="sr-only">Обычная цена </span>
+              {formatTenge(active.price)}
+            </s>
+            <span className="rounded-full bg-lava-500 px-2 py-0.5 font-display text-xs font-extrabold text-ink">
+              <span className="sr-only">Скидка </span>−{active.weekdayDiscountPercent}%
             </span>
-            <span className={`font-display text-xl font-black tabular-nums ${t.weekday}`}>{formatTenge(active.weekdayPrice)}</span>
-          </span>
+          </p>
+          <p className={`mt-0.5 font-display text-[2.25rem] font-black leading-none tabular-nums tracking-tight ${t.weekday}`}>
+            <span className="sr-only">Цена в будние дни </span>
+            {formatTenge(active.weekdayPrice)}
+          </p>
+          <p className={`mt-1 text-sm ${t.sub}`}>в будние дни</p>
         </div>
 
         <ul className={`mt-4 grid gap-2 text-[0.9375rem] leading-snug ${t.text}`} aria-label={`Главное в ${active.name}`}>
