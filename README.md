@@ -1,36 +1,26 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Boom Bala — сайт
 
-## Getting Started
-
-First, run the development server:
+Next.js (App Router) + TypeScript + Tailwind CSS v4. Готов к деплою на Vercel.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev     # http://localhost:3000
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Что менять, когда появятся данные
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Всё в `src/services/config.ts`:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `opening.time` — точное время открытия (`"HH:mm"`, Asia/Almaty). Пока `null`: на сайте «Открытие — 7 октября».
+  Как только время задано, включается обратный отсчёт, а после наступления — «BOOM BALA уже открыт».
+- `contacts.whatsapp` — номер цифрами с кодом страны. Пока `null`: все CTA ведут в Instagram.
+- `NEXT_PUBLIC_API_BASE_URL` — адрес общего backend. Пока не задан: данные берутся из `src/data`.
 
-## Learn More
+Игровые зоны: заполнить `src/data/attractions.ts` (название, описание, фото).
 
-To learn more about Next.js, take a look at the following resources:
+## Архитектура данных
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`UI → src/services/* → src/data/* (сейчас) → REST API (позже)`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Сервисы соответствуют будущим endpoint-ам: `/prices`, `/birthday-packages`, `/promotions`,
+`/attractions`, `/events`, `/membership`. Компоненты не знают, откуда пришли данные.
