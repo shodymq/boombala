@@ -10,9 +10,14 @@ export function Footer() {
     <footer className="bg-grape-900 text-grape-100">
       <Container className="grid gap-10 py-12 md:grid-cols-[1.2fr_1fr_1fr] md:py-16">
         <div>
-          <div className="inline-block rounded-2xl bg-paper px-4 py-3">
-            <Image src="/brand/logo.webp" alt="Boom Bala" width={2000} height={667} sizes="150px" className="h-auto w-[150px]" />
-          </div>
+          <Image
+            src="/brand/logo.webp"
+            alt="Boom Bala"
+            width={2000}
+            height={667}
+            sizes="180px"
+            className="-ml-2 h-auto w-[168px] select-none"
+          />
           <p className="mt-5 max-w-[34ch] text-base leading-relaxed text-grape-200">
             Детский развлекательный центр в {siteConfig.city}.
           </p>
