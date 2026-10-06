@@ -47,4 +47,9 @@ export const faqItems: FaqItem[] = [
     question: "Где находится Boom Bala?",
     answer: `${siteConfig.location.city}, ${siteConfig.location.street}, ${siteConfig.location.mall}, ${siteConfig.location.floor}.`,
   },
+  {
+    id: "kitchen",
+    question: "Есть ли в Boom Bala кухня?",
+    answer: "Да, в Boom Bala есть кухня. Меню и подробные условия опубликуем после открытия.",
+  },
 ];
