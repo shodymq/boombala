@@ -85,8 +85,11 @@ export const birthdayPackages: BirthdayPackage[] = [
     name: "BOOM PARTY",
     shortName: "BOOM",
     tagline: "Яркие эмоции для ваших детей!",
-    price: 79900,
+    price: 79990,
+    // NEEDS CONFIRMATION: the poster prints 55 930 ₸ with "−30%", but 79 990 × 0.7 = 55 993.
+    // Kept exactly as printed until the venue confirms the real weekday price.
     weekdayPrice: 55930,
+    weekdayPriceNeedsConfirmation: true,
     weekdayDiscountPercent: 30,
     freeChildren: 6,
     extraGuestDiscountPercent: 20,

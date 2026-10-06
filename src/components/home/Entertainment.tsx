@@ -3,6 +3,7 @@ import type { Attraction } from "@/types";
 import { openingDateLabel } from "@/lib/opening";
 import { siteConfig } from "@/services/config";
 import { ButtonLink } from "@/components/ui/ButtonLink";
+import { OpeningText } from "./OpeningText";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 import { Star } from "@/components/ui/Decor";
@@ -102,7 +103,10 @@ function Teaser() {
             </span>
           </h2>
           <p className="mt-8 max-w-[34ch] text-lg leading-relaxed text-grape-900 md:text-xl">
-            Игровые зоны Boom Bala скоро появятся на сайте. Фотографии и названия добавим ближе к открытию.
+            <OpeningText
+              before="Игровые зоны Boom Bala скоро появятся на сайте. Фотографии и названия добавим ближе к открытию."
+              after="Скоро покажем игровые зоны Boom Bala подробнее."
+            />
           </p>
           <ButtonLink href={siteConfig.contacts.instagram} variant="primary" className="mt-8 w-full sm:w-auto">
             Следить за новостями

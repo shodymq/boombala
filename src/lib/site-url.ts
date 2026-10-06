@@ -1,11 +1,12 @@
 /**
  * Canonical origin for metadata, sitemap and robots.
- * Priority: NEXT_PUBLIC_SITE_URL (custom domain) -> Vercel production URL -> local dev.
+ * NEXT_PUBLIC_SITE_URL overrides; production builds default to the real domain;
+ * local development uses localhost.
  */
+const PRODUCTION_URL = "https://boombala.kz";
+
 export function getSiteUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_SITE_URL;
   if (explicit) return explicit.replace(/\/$/, "");
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (vercel) return `https://${vercel}`;
-  return "http://localhost:3000";
+  return process.env.NODE_ENV === "production" ? PRODUCTION_URL : "http://localhost:3000";
 }

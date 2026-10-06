@@ -40,7 +40,7 @@ export const faqItems: FaqItem[] = [
   {
     id: "opening",
     question: "Когда открывается Boom Bala?",
-    answer: `Boom Bala открывается ${openingDateLabel()} 2026 года${siteConfig.opening.time ? ` в ${siteConfig.opening.time}` : ""}.`,
+    answer: `Открытие Boom Bala — ${openingDateLabel()} 2026 года${siteConfig.opening.time ? ` в ${siteConfig.opening.time}` : ""}.`,
   },
   {
     id: "address",

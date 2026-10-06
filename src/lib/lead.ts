@@ -15,6 +15,8 @@ export interface LeadFields {
   date: string; // YYYY-MM-DD
   children: string; // optional, digits
   package: LeadPackage;
+  /** Explicit consent to personal data processing (required). */
+  consent: boolean;
 }
 
 export type LeadErrors = Partial<Record<keyof LeadFields, string>>;
@@ -79,6 +81,8 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
     if (!Number.isInteger(n) || n < 1 || n > 60) errors.children = "От 1 до 60";
     else children = n;
   }
+
+  if (!(input.consent === true || input.consent === "true")) errors.consent = "Подтвердите согласие";
 
   const pkgRaw = str(input.package);
   const pkg = PACKAGE_OPTIONS.find((o) => o.value === pkgRaw)?.value;

@@ -120,6 +120,7 @@ export function buildLeadText(lead: LeadMessage): string {
     `Детей: ${dash(lead.children)}`,
     `Пакет: ${dash(lead.packageLabel)}`,
     "",
+    "Согласие на обработку данных: да",
     "Источник: website",
     `Страница: ${dash(lead.page)}`,
     `Referrer: ${dash(lead.referrer)}`,

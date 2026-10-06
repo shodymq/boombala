@@ -32,6 +32,11 @@ export interface BirthdayPackage {
   price: number;
   /** Price on weekdays in tenge. */
   weekdayPrice: number;
+  /**
+   * True when `weekdayPrice` is printed on the official materials but does not match
+   * `price` minus `weekdayDiscountPercent`. Needs confirmation from the venue; never auto-recalculate.
+   */
+  weekdayPriceNeedsConfirmation?: boolean;
   weekdayDiscountPercent: number;
   freeChildren: number;
   extraGuestDiscountPercent: number;

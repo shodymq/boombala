@@ -50,7 +50,12 @@ export function Footer() {
         </div>
       </Container>
       <div className="border-t border-white/10">
-        <Container className="pb-24 pt-5 text-sm text-grape-200 lg:pb-5">© 2026 Boom Bala, {siteConfig.city}</Container>
+        <Container className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pb-24 pt-5 text-sm text-grape-200 lg:pb-5">
+          <span>© 2026 Boom Bala, {siteConfig.city}</span>
+          <Link href="/privacy" className="py-1 underline decoration-grape-200/50 underline-offset-4 transition-colors hover:text-white">
+            Политика конфиденциальности
+          </Link>
+        </Container>
       </div>
     </footer>
   );

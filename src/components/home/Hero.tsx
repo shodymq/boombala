@@ -3,6 +3,7 @@ import { ButtonLink } from "@/components/ui/ButtonLink";
 import { Burst, Wave } from "@/components/ui/Decor";
 import { Container } from "@/components/ui/Container";
 import { OpeningStatus } from "./OpeningStatus";
+import { OpeningText } from "./OpeningText";
 
 export function Hero() {
   return (
@@ -38,7 +39,10 @@ export function Hero() {
           </h1>
 
           <p className="mt-4 max-w-[40ch] text-base leading-relaxed text-muted sm:mt-6 sm:text-lg md:text-xl lg:max-w-[30ch] xl:max-w-[40ch]">
-            Boom Bala открывается 7 октября. Узнайте цены и выберите праздник для именинника.
+            <OpeningText
+              before="Boom Bala открывается 7 октября. Узнайте цены и выберите праздник для именинника."
+              after="Boom Bala уже открыт. Узнайте цены и выберите праздник для именинника."
+            />
           </p>
 
           <div className="mt-6 flex flex-col gap-3 sm:mt-8 sm:gap-4 sm:flex-row sm:flex-wrap lg:flex-col lg:items-start xl:flex-row">

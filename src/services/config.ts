@@ -21,8 +21,8 @@ export const siteConfig = {
     street: "ул. Шолохова, 29",
     mall: "ТРК «Жібек жолы»",
     floor: "3 этаж",
-    /** Route/map link (2GIS, Google Maps...). `null` = route button is hidden. */
-    mapUrl: (process.env.NEXT_PUBLIC_MAP_URL || null) as string | null,
+    /** Route link (2GIS). NEXT_PUBLIC_MAP_URL overrides. `null` hides the route button. */
+    mapUrl: (process.env.NEXT_PUBLIC_MAP_URL || "https://go.2gis.com/6zqEx") as string | null,
   },
   contacts: {
     instagram: "https://www.instagram.com/boombala.almaty",

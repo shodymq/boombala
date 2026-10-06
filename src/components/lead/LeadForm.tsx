@@ -21,6 +21,7 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
     date: "",
     children: "",
     package: initialPackage,
+    consent: false,
   });
   const [errors, setErrors] = useState<LeadErrors>({});
   const [status, setStatus] = useState<Status>("idle");
@@ -229,6 +230,33 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
             ))}
           </select>
           {err("package")}
+        </div>
+
+        <div className="grid gap-1">
+          <label htmlFor={idOf("consent")} className="flex cursor-pointer items-start gap-3 py-1 text-sm leading-snug text-grape-900">
+            <input
+              id={idOf("consent")}
+              name="consent"
+              type="checkbox"
+              checked={values.consent}
+              onChange={(e) => set("consent", e.target.checked)}
+              className="mt-0.5 h-6 w-6 shrink-0 cursor-pointer accent-grape-700"
+              {...aria("consent")}
+            />
+            <span>
+              Я согласен(на) на{" "}
+              <a
+                href="/privacy"
+                target="_blank"
+                rel="noopener"
+                className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2"
+              >
+                обработку персональных данных
+              </a>{" "}
+              для связи по заявке.
+            </span>
+          </label>
+          {err("consent")}
         </div>
 
         {/* Honeypot: hidden from people and assistive tech, bots tend to fill it. */}
