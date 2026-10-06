@@ -76,7 +76,7 @@ function Teaser() {
     <section
       id="entertainment"
       aria-labelledby="entertainment-title"
-      className="relative overflow-x-clip bg-sun-400 pb-60 pt-6 sm:pb-52 lg:pb-56 lg:pt-10"
+      className="relative overflow-x-clip bg-sun-400 pb-52 pt-6 sm:pb-52 lg:pb-56 lg:pt-10"
     >
       <Container className="relative">
         <Reveal>

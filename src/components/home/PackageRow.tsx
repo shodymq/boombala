@@ -2,12 +2,14 @@ import Link from "next/link";
 import { Check } from "@phosphor-icons/react/dist/ssr";
 import type { BirthdayPackage } from "@/types";
 import { formatTenge } from "@/lib/format";
-import { ButtonLink } from "@/components/ui/ButtonLink";
+import { LeadButton } from "@/components/lead/LeadButton";
+import { TrackView } from "@/components/analytics/TrackView";
 
 /** Secondary packages: typographic rows on the dark section, no card chrome. */
-export function PackageRow({ pkg, contactHref }: { pkg: BirthdayPackage; contactHref: string }) {
+export function PackageRow({ pkg }: { pkg: BirthdayPackage }) {
   return (
-    <article aria-labelledby={`${pkg.id}-title`} className="py-9 md:py-11">
+    <article aria-labelledby={`${pkg.id}-title`} className="relative py-7 md:py-11">
+      <TrackView event="ViewPackage" params={{ package: pkg.id }} />
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h3 id={`${pkg.id}-title`} className="font-display text-4xl font-black tracking-tight text-white md:text-5xl">
           {pkg.name}
@@ -43,9 +45,9 @@ export function PackageRow({ pkg, contactHref }: { pkg: BirthdayPackage; contact
       </div>
 
       <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <ButtonLink href={contactHref} variant="accent" className="w-full sm:w-auto">
+        <LeadButton variant="accent" package={pkg.id} source={`package-${pkg.id}`} className="w-full sm:w-auto">
           Узнать о свободной дате
-        </ButtonLink>
+        </LeadButton>
         <Link
           href={`/birthdays#${pkg.id}`}
           className="inline-flex h-12 items-center justify-center px-4 font-display text-base font-extrabold text-white underline decoration-sun-400 decoration-2 underline-offset-4"

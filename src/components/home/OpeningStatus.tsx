@@ -44,7 +44,7 @@ export function OpeningStatus({ className = "" }: { className?: string }) {
 
   return (
     <p
-      className={`inline-flex items-center gap-2.5 rounded-full border-2 border-grape-700 bg-white py-2 pl-3 pr-4 font-display text-[0.9375rem] font-extrabold text-grape-800 shadow-[0_4px_0_0_var(--color-grape-200)] ${className}`}
+      className={`inline-flex items-center gap-2.5 rounded-full border-2 max-sm:max-w-full max-sm:flex-wrap max-sm:gap-y-1 max-sm:rounded-3xl border-grape-700 bg-white py-2 pl-3 pr-4 font-display text-[0.9375rem] font-extrabold text-grape-800 shadow-[0_4px_0_0_var(--color-grape-200)] ${className}`}
     >
       <span className="relative flex h-3 w-3" aria-hidden="true">
         <span className={`absolute inset-0 rounded-full ${isOpen ? "bg-emerald-500" : "bg-lava-500"} animate-pulse-dot`} />

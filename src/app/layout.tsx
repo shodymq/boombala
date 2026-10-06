@@ -4,6 +4,9 @@ import "./globals.css";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { HashScroll } from "@/components/layout/HashScroll";
+import { LeadFormProvider } from "@/components/lead/LeadFormProvider";
+import { StickyBookingCta } from "@/components/lead/StickyBookingCta";
+import { Analytics } from "@/components/analytics/Analytics";
 import { getSiteUrl } from "@/lib/site-url";
 
 const nunito = Nunito({
@@ -57,10 +60,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           К содержимому
         </a>
-        <HashScroll />
-        <Header />
-        <main id="main">{children}</main>
-        <Footer />
+        <LeadFormProvider>
+          <HashScroll />
+          <Header />
+          <main id="main">{children}</main>
+          <Footer />
+          <StickyBookingCta />
+        </LeadFormProvider>
+        <Analytics />
       </body>
     </html>
   );

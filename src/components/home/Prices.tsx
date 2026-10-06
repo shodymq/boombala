@@ -4,18 +4,19 @@ import { formatTenge } from "@/lib/format";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 import { SectionHeading } from "@/components/ui/SectionHeading";
+import { TrackView } from "@/components/analytics/TrackView";
 
-function Value({ price, dark }: { price: number; dark?: boolean }) {
+function Value({ price, dark, compact }: { price: number; dark?: boolean; compact?: boolean }) {
   if (price === 0) {
     return (
-      <span className="rounded-full bg-sun-400 px-4 py-1.5 font-display text-base font-extrabold text-grape-900 md:text-lg">
+      <span className={`rounded-full bg-sun-400 font-display font-extrabold text-grape-900 ${compact ? "px-2.5 py-1 text-xs" : "px-4 py-1.5 text-base md:text-lg"}`}>
         бесплатно
       </span>
     );
   }
   return (
     <span
-      className={`font-display text-2xl font-black tabular-nums md:text-3xl ${dark ? "text-white" : "text-grape-800"}`}
+      className={`font-display font-black tabular-nums ${compact ? "whitespace-nowrap text-lg" : "text-2xl md:text-3xl"} ${dark ? "text-white" : "text-grape-800"}`}
     >
       {formatTenge(price)}
     </span>
@@ -32,7 +33,8 @@ export function Prices({ pricing, membership }: { pricing: PricingTable; members
   ];
 
   return (
-    <section id="prices" aria-labelledby="prices-title" className="bg-grape-50 pb-20 pt-36 md:pb-28 md:pt-44 lg:pb-40 lg:pt-56">
+    <section id="prices" aria-labelledby="prices-title" className="relative bg-grape-50 pb-14 pt-28 md:pb-28 md:pt-44 lg:pb-40 lg:pt-56">
+      <TrackView event="ViewPrices" />
       <Container>
         <Reveal>
           <SectionHeading eyebrow="Цены" title={<span id="prices-title">Входные билеты</span>}>
@@ -40,8 +42,30 @@ export function Prices({ pricing, membership }: { pricing: PricingTable; members
           </SectionHeading>
         </Reveal>
 
-        <div className="mt-10 grid gap-5 md:mt-14 lg:grid-cols-12">
-          <Reveal className="lg:col-span-5">
+        <div className="mt-6 grid gap-4 md:mt-14 md:gap-5 lg:grid-cols-12">
+          {/* Mobile: one compact table, weekdays and weekends side by side */}
+          <Reveal className="md:hidden">
+            <div className="overflow-hidden rounded-3xl border border-line bg-white shadow-soft">
+              <div className="grid grid-cols-[1fr_6.75rem_6.75rem] text-center font-display text-sm font-extrabold">
+                <div className="px-4 py-3 text-left text-xs uppercase tracking-[0.1em] text-grape-600">Возраст</div>
+                <div className="flex items-center justify-center bg-grape-100 px-1 py-3 text-grape-800">Будни</div>
+                <div className="flex items-center justify-center bg-grape-700 px-1 py-3 leading-tight text-white">Выходные, праздники</div>
+              </div>
+              {weekday.rows.map((r, i) => (
+                <div key={r.id} className="grid grid-cols-[1fr_6.75rem_6.75rem] items-stretch border-t border-line">
+                  <div className="flex items-center px-4 py-4 text-base font-semibold text-grape-900">{r.label}</div>
+                  <div className="flex items-center justify-center bg-grape-50 px-1">
+                    <Value price={r.price} compact />
+                  </div>
+                  <div className="flex items-center justify-center bg-grape-700 px-1">
+                    <Value price={weekend.rows[i].price} dark compact />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Reveal>
+
+          <Reveal className="max-md:hidden lg:col-span-5">
             <div className="h-full rounded-[2rem] border border-line bg-white p-6 shadow-soft md:p-9">
               <h3 className="lg:max-xl:min-h-[4.25rem] font-display text-2xl font-black text-grape-800 md:text-3xl">{weekday.title}</h3>
               <ul className="mt-4 divide-y divide-line">
@@ -55,7 +79,7 @@ export function Prices({ pricing, membership }: { pricing: PricingTable; members
             </div>
           </Reveal>
 
-          <Reveal delay={0.06} className="lg:col-span-7">
+          <Reveal delay={0.06} className="max-md:hidden lg:col-span-7">
             <div className="relative h-full overflow-hidden rounded-[2rem] bg-grape-700 p-6 text-white md:p-9">
               <h3 className="lg:max-xl:min-h-[4.25rem] font-display text-2xl font-black md:text-3xl">{weekend.title}</h3>
               <ul className="mt-4 divide-y divide-white/15">
@@ -70,7 +94,7 @@ export function Prices({ pricing, membership }: { pricing: PricingTable; members
           </Reveal>
 
           <Reveal delay={0.1} className="lg:col-span-12">
-            <div className="relative rounded-[2rem] bg-sun-100 p-6 md:p-9 lg:pr-[34%]">
+            <div className="relative rounded-[2rem] bg-sun-100 p-5 md:p-9 lg:pr-[34%]">
               <h3 className="font-display text-2xl font-black text-grape-800 md:text-3xl">
                 Льготы и дополнительные условия
               </h3>
@@ -96,7 +120,7 @@ export function Prices({ pricing, membership }: { pricing: PricingTable; members
           </Reveal>
         </div>
 
-        <p className="mt-6 text-sm text-muted">Стоимость указана в тенге.</p>
+        <p className="mt-4 text-sm text-muted md:mt-6">Стоимость указана в тенге.</p>
       </Container>
     </section>
   );

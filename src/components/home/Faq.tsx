@@ -7,8 +7,8 @@ import { SectionHeading } from "@/components/ui/SectionHeading";
 
 export function Faq({ items }: { items: FaqItem[] }) {
   return (
-    <section id="faq" aria-labelledby="faq-title" className="relative overflow-hidden bg-grape-50 pt-20 md:pt-28 lg:pb-0">
-      <Container className="grid gap-10 pb-20 lg:grid-cols-12 lg:gap-16 lg:pb-28">
+    <section id="faq" aria-labelledby="faq-title" className="relative overflow-hidden bg-grape-50 pt-14 md:pt-28 lg:pb-0">
+      <Container className="grid gap-6 pb-14 md:gap-10 md:pb-20 lg:grid-cols-12 lg:gap-16 lg:pb-28">
         <Reveal className="relative lg:col-span-4">
           <SectionHeading eyebrow="FAQ" title={<span id="faq-title">Частые вопросы</span>}>
             Ответы по ценам и условиям.
@@ -31,7 +31,7 @@ export function Faq({ items }: { items: FaqItem[] }) {
           <div className="divide-y divide-grape-200 border-y-2 border-grape-800">
             {items.map((item, i) => (
               <details key={item.id} className="group">
-                <summary className="flex min-h-[4.75rem] cursor-pointer items-center gap-4 py-4 md:gap-6">
+                <summary className="flex min-h-[4.25rem] cursor-pointer md:min-h-[4.75rem] items-center gap-4 py-4 md:gap-6">
                   <span aria-hidden="true" className="w-8 shrink-0 font-display text-base font-black text-grape-500 md:w-10 md:text-lg">
                     {String(i + 1).padStart(2, "0")}
                   </span>

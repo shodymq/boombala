@@ -8,6 +8,11 @@ export type OpeningState =
 
 const { date, time, timeZone, utcOffset } = siteConfig.opening;
 
+/** "Открытие — 7 октября, 12:00" (time only once it is confirmed in config). */
+function upcomingLabel(): string {
+  return `Открытие — ${openingDateLabel()}${time ? `, ${time}` : ""}`;
+}
+
 /** "7 октября" */
 export function openingDateLabel(): string {
   return new Date(`${date}T00:00:00${utcOffset}`).toLocaleDateString("ru-RU", {
@@ -19,7 +24,7 @@ export function openingDateLabel(): string {
 
 /** Static state for SSR / before hydration. */
 export function staticOpeningState(): OpeningState {
-  return { kind: "upcoming", label: `Открытие — ${openingDateLabel()}` };
+  return { kind: "upcoming", label: upcomingLabel() };
 }
 
 /**
@@ -27,17 +32,15 @@ export function staticOpeningState(): OpeningState {
  * - no time yet     -> date only; "today" on the day, "open" after it
  */
 export function getOpeningState(now: number = Date.now()): OpeningState {
-  const dateLabel = openingDateLabel();
-
   if (time) {
     const target = new Date(`${date}T${time}:00${utcOffset}`).getTime();
     if (now >= target) return { kind: "open", label: "BOOM BALA уже открыт" };
-    return { kind: "countdown", label: `Открытие — ${dateLabel}`, ms: target - now };
+    return { kind: "countdown", label: upcomingLabel(), ms: target - now };
   }
 
   const dayStart = new Date(`${date}T00:00:00${utcOffset}`).getTime();
   const dayEnd = dayStart + 24 * 60 * 60 * 1000;
   if (now >= dayEnd) return { kind: "open", label: "BOOM BALA уже открыт" };
   if (now >= dayStart) return { kind: "today", label: "Открытие — сегодня" };
-  return { kind: "upcoming", label: `Открытие — ${dateLabel}` };
+  return { kind: "upcoming", label: upcomingLabel() };
 }

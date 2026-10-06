@@ -16,6 +16,11 @@ export function Footer() {
           <p className="mt-5 max-w-[34ch] text-base leading-relaxed text-grape-200">
             Детский развлекательный центр в {siteConfig.city}.
           </p>
+          <address className="mt-4 text-base not-italic leading-relaxed text-grape-200">
+            {siteConfig.location.street}
+            <br />
+            {siteConfig.location.mall}, {siteConfig.location.floor}
+          </address>
         </div>
 
         <nav aria-label="Разделы сайта">
@@ -45,7 +50,7 @@ export function Footer() {
         </div>
       </Container>
       <div className="border-t border-white/10">
-        <Container className="py-5 text-sm text-grape-200">© 2026 Boom Bala, {siteConfig.city}</Container>
+        <Container className="pb-24 pt-5 text-sm text-grape-200 lg:pb-5">© 2026 Boom Bala, {siteConfig.city}</Container>
       </div>
     </footer>
   );

@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { getBirthdayPackages } from "@/services/birthdays";
-import { getPrimaryContact } from "@/services/config";
 import { ButtonLink } from "@/components/ui/ButtonLink";
+import { LeadButton } from "@/components/lead/LeadButton";
+import { TrackView } from "@/components/analytics/TrackView";
+import { PackageQuickList } from "@/components/birthdays/PackageQuickList";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 import { Burst } from "@/components/ui/Decor";
@@ -26,13 +28,13 @@ export const metadata: Metadata = {
 
 export default async function BirthdaysPage() {
   const packages = await getBirthdayPackages();
-  const contact = getPrimaryContact();
   const byId = Object.fromEntries(packages.map((p) => [p.id, p]));
   const boom = byId["boom-party"];
   const others = packages.filter((p) => p.id !== "boom-party");
 
   return (
-    <>
+    <div className="flex flex-col">
+      <TrackView event="ViewBirthdays" />
       <section aria-labelledby="birthdays-hero" className="relative isolate flex flex-col overflow-hidden">
         <Container className="relative z-10 lg:grid lg:grid-cols-12">
           <div className="pb-4 pt-8 md:pt-12 lg:col-span-7 lg:py-24">
@@ -51,9 +53,9 @@ export default async function BirthdaysPage() {
               Три пакета на выбор. В будние дни действует скидка 30%.
             </p>
             <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:flex-wrap lg:flex-col lg:items-start xl:flex-row">
-              <ButtonLink href={contact.href} variant="primary" className="w-full sm:w-auto">
+              <LeadButton variant="primary" source="birthdays-hero" className="w-full sm:w-auto">
                 Узнать о свободной дате
-              </ButtonLink>
+              </LeadButton>
               <ButtonLink href="#compare" variant="outline" className="w-full sm:w-auto">
                 Сравнить пакеты
               </ButtonLink>
@@ -78,7 +80,10 @@ export default async function BirthdaysPage() {
         </div>
       </section>
 
-      <section id="compare" aria-labelledby="compare-title" className="bg-grape-800 pb-20 pt-16 text-white md:pt-24 lg:pb-72">
+      <PackageQuickList packages={packages} />
+
+      {/* Mobile: the comparison table goes last; desktop keeps the original order. */}
+      <section id="compare" aria-labelledby="compare-title" className="order-last bg-grape-800 pb-16 pt-14 text-white md:pt-24 lg:order-none lg:pb-72">
         <Container>
           <Reveal>
             <p className="mb-3 inline-flex items-center gap-2 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">
@@ -99,11 +104,11 @@ export default async function BirthdaysPage() {
         </Container>
       </section>
 
-      {boom ? <FlagshipDetail pkg={boom} contactHref={contact.href} /> : null}
+      {boom ? <FlagshipDetail pkg={boom} /> : null}
 
       {others.map((pkg) => (
-        <PackageEditorial key={pkg.id} pkg={pkg} contactHref={contact.href} />
+        <PackageEditorial key={pkg.id} pkg={pkg} />
       ))}
-    </>
+    </div>
   );
 }

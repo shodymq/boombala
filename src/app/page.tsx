@@ -27,7 +27,7 @@ export default async function Home() {
       <Hero />
       <Entertainment attractions={attractions} />
       <Prices pricing={pricing} membership={membership} />
-      <BirthdayShowcase packages={packages} contactHref={contact.href} />
+      <BirthdayShowcase packages={packages} />
       <MembershipSection membership={membership} contactHref={contact.href} />
       <Faq items={faq} />
       <Contacts />

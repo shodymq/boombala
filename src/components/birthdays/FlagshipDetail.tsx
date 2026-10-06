@@ -1,25 +1,27 @@
 import Image from "next/image";
 import type { BirthdayPackage } from "@/types";
 import { formatTenge } from "@/lib/format";
-import { ButtonLink } from "@/components/ui/ButtonLink";
+import { LeadButton } from "@/components/lead/LeadButton";
+import { TrackView } from "@/components/analytics/TrackView";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 
 /** BOOM PARTY: the strongest package. Full-bleed yellow, Boom breaks out of the dark section above. */
-export function FlagshipDetail({ pkg, contactHref }: { pkg: BirthdayPackage; contactHref: string }) {
+export function FlagshipDetail({ pkg }: { pkg: BirthdayPackage }) {
   return (
     <section
       id={pkg.id}
       aria-labelledby={`${pkg.id}-detail-title`}
       className="relative bg-sun-400 pb-20 pt-36 text-grape-900 md:pb-28 lg:pt-28"
     >
+      <TrackView event="ViewPackage" params={{ package: pkg.id }} />
       <Image
         src="/boom/jump.webp"
         alt=""
         width={1086}
         height={1448}
         sizes="(min-width: 1024px) 460px, 220px"
-        className="pointer-events-none absolute -top-28 right-2 z-10 h-60 w-auto drop-shadow-[0_16px_18px_rgba(20,6,50,0.35)] sm:right-[10%] md:-top-40 md:h-80 lg:-top-72 lg:right-[8%] lg:h-[40rem]"
+        className="pointer-events-none absolute -top-20 right-2 z-10 h-52 w-auto drop-shadow-[0_16px_18px_rgba(20,6,50,0.35)] sm:right-[10%] md:-top-40 md:h-80 lg:-top-72 lg:right-[8%] lg:h-[40rem]"
       />
 
       <Container>
@@ -90,9 +92,9 @@ export function FlagshipDetail({ pkg, contactHref }: { pkg: BirthdayPackage; con
             ))}
         </ul>
 
-        <ButtonLink href={contactHref} variant="primary" className="mt-8 w-full sm:w-auto">
+        <LeadButton variant="primary" package={pkg.id} source="package-boom-party" className="mt-8 w-full sm:w-auto">
           Узнать о свободной дате
-        </ButtonLink>
+        </LeadButton>
       </Container>
     </section>
   );

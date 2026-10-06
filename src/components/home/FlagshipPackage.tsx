@@ -3,7 +3,8 @@ import Link from "next/link";
 import { Check } from "@phosphor-icons/react/dist/ssr";
 import type { BirthdayPackage } from "@/types";
 import { formatTenge, pluralize } from "@/lib/format";
-import { ButtonLink } from "@/components/ui/ButtonLink";
+import { LeadButton } from "@/components/lead/LeadButton";
+import { TrackView } from "@/components/analytics/TrackView";
 
 function optionsNote(item: BirthdayPackage["program"][number]): string | null {
   if (!item.options?.length) return null;
@@ -14,12 +15,13 @@ function optionsNote(item: BirthdayPackage["program"][number]): string | null {
 }
 
 /** The complete package: yellow, tall, with Boom bursting out of the top edge. */
-export function FlagshipPackage({ pkg, contactHref }: { pkg: BirthdayPackage; contactHref: string }) {
+export function FlagshipPackage({ pkg }: { pkg: BirthdayPackage }) {
   return (
     <article
       aria-labelledby={`${pkg.id}-title`}
       className="relative rounded-bl-[1.25rem] rounded-br-[4.5rem] rounded-tl-[4.5rem] rounded-tr-[1.25rem] bg-sun-400 px-6 pb-10 pt-12 text-grape-900 md:px-10 md:pb-12 lg:-mr-6 xl:-mr-14 xl:pl-14 xl:pr-16"
     >
+      <TrackView event="ViewPackage" params={{ package: pkg.id }} />
       <Image
         src="/boom/wave.webp"
         alt=""
@@ -74,7 +76,7 @@ export function FlagshipPackage({ pkg, contactHref }: { pkg: BirthdayPackage; co
         </div>
       </dl>
 
-      <ul className="mt-6 grid gap-x-8 gap-y-3 sm:grid-cols-2" aria-label={`Что входит в ${pkg.name}`}>
+      <ul className="mt-6 grid gap-x-8 gap-y-3 max-md:hidden sm:grid-cols-2" aria-label={`Что входит в ${pkg.name}`}>
         {pkg.program
           .filter((i) => i.key !== "animators")
           .map((item) => {
@@ -96,10 +98,39 @@ export function FlagshipPackage({ pkg, contactHref }: { pkg: BirthdayPackage; co
           })}
       </ul>
 
+      <details className="group mt-6 border-b-2 border-grape-800/25 md:hidden">
+        <summary className="flex min-h-12 cursor-pointer items-center justify-between font-display text-base font-extrabold text-grape-800">
+          Что входит ({pkg.program.length - 1})
+          <span aria-hidden="true" className="faq-plus flex h-8 w-8 items-center justify-center rounded-full bg-grape-800 text-lg leading-none text-sun-400 transition-transform">+</span>
+        </summary>
+      <ul className="grid gap-y-3 pb-1 pt-4" aria-label={`Что входит в ${pkg.name}`}>
+        {pkg.program
+          .filter((i) => i.key !== "animators")
+          .map((item) => {
+            const note = optionsNote(item);
+            return (
+              <li key={item.key} className="flex items-start gap-3 text-base leading-snug">
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-grape-800 text-sun-400"
+                >
+                  <Check size={12} weight="bold" />
+                </span>
+                <span>
+                  <span className="font-bold">{item.title}</span>
+                  {note ? <span className="block text-sm text-grape-800">{note}</span> : null}
+                </span>
+              </li>
+            );
+          })}
+      </ul>
+
+      </details>
+
       <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <ButtonLink href={contactHref} variant="primary" className="w-full sm:w-auto">
+        <LeadButton variant="primary" package={pkg.id} source="package-boom-party" className="w-full sm:w-auto">
           Узнать о свободной дате
-        </ButtonLink>
+        </LeadButton>
         <Link
           href={`/birthdays#${pkg.id}`}
           className="inline-flex h-12 items-center justify-center px-4 font-display text-base font-extrabold text-grape-800 underline decoration-grape-800 decoration-2 underline-offset-4"

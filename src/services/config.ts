@@ -10,10 +10,19 @@ export const siteConfig = {
     /** Local date in Asia/Almaty, YYYY-MM-DD. */
     date: "2026-10-07",
     /** Local time "HH:mm". `null` until the exact time is announced. */
-    time: null as string | null,
+    time: "12:00" as string | null,
     timeZone: "Asia/Almaty",
     /** Fixed UTC offset of the opening time zone (Kazakhstan is UTC+5 year-round). */
     utcOffset: "+05:00",
+  },
+  /** Confirmed venue address. Working hours are NOT confirmed yet, so none are shown. */
+  location: {
+    city: "Алматы",
+    street: "ул. Шолохова, 29",
+    mall: "ТРК «Жібек жолы»",
+    floor: "3 этаж",
+    /** Route/map link (2GIS, Google Maps...). `null` = route button is hidden. */
+    mapUrl: (process.env.NEXT_PUBLIC_MAP_URL || null) as string | null,
   },
   contacts: {
     instagram: "https://www.instagram.com/boombala.almaty",

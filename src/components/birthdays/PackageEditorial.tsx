@@ -1,7 +1,8 @@
 import Image from "next/image";
 import type { BirthdayPackage } from "@/types";
 import { formatTenge } from "@/lib/format";
-import { ButtonLink } from "@/components/ui/ButtonLink";
+import { LeadButton } from "@/components/lead/LeadButton";
+import { TrackView } from "@/components/analytics/TrackView";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 
@@ -11,12 +12,13 @@ const art: Record<string, { src: string; alt: string }> = {
 };
 
 /** WOW / MAGIC: typographic, divided by one heavy rule; Boom stands on the rule. */
-export function PackageEditorial({ pkg, contactHref }: { pkg: BirthdayPackage; contactHref: string }) {
+export function PackageEditorial({ pkg }: { pkg: BirthdayPackage }) {
   const a = art[pkg.id];
   return (
-    <section id={pkg.id} aria-labelledby={`${pkg.id}-detail-title`} className="py-16 md:py-24">
+    <section id={pkg.id} aria-labelledby={`${pkg.id}-detail-title`} className="py-12 md:py-24">
       <Container>
         <div className="relative border-t-[3px] border-grape-800 pt-10">
+          <TrackView event="ViewPackage" params={{ package: pkg.id }} />
           {a ? (
             <div
               aria-hidden="true"
@@ -58,9 +60,9 @@ export function PackageEditorial({ pkg, contactHref }: { pkg: BirthdayPackage; c
               <p className="mt-6 text-lg font-semibold text-grape-900">Бесплатный вход: именинник + {pkg.freeChildren} детей</p>
               <p className="mt-1 text-base text-muted">−{pkg.extraGuestDiscountPercent}% на вход дополнительным гостям</p>
 
-              <ButtonLink href={contactHref} variant="primary" className="mt-8 w-full sm:w-auto">
+              <LeadButton variant="primary" package={pkg.id} source={`package-${pkg.id}`} className="mt-8 w-full sm:w-auto">
                 Узнать о свободной дате
-              </ButtonLink>
+              </LeadButton>
             </Reveal>
 
             <Reveal className="lg:col-span-7" delay={0.06}>

@@ -2,6 +2,8 @@ import type { FaqItem } from "@/types";
 import { pricingTable } from "./pricing";
 import { membership } from "./membership";
 import { formatTenge, formatPriceOrFree } from "@/lib/format";
+import { siteConfig } from "@/services/config";
+import { openingDateLabel } from "@/lib/opening";
 
 const [weekday, weekend] = pricingTable.categories;
 const rowsText = (rows: typeof weekday.rows) =>
@@ -38,6 +40,11 @@ export const faqItems: FaqItem[] = [
   {
     id: "opening",
     question: "Когда открывается Boom Bala?",
-    answer: "Boom Bala открывается 7 октября 2026 года в Алматы.",
+    answer: `Boom Bala открывается ${openingDateLabel()} 2026 года${siteConfig.opening.time ? ` в ${siteConfig.opening.time}` : ""}.`,
+  },
+  {
+    id: "address",
+    question: "Где находится Boom Bala?",
+    answer: `${siteConfig.location.city}, ${siteConfig.location.street}, ${siteConfig.location.mall}, ${siteConfig.location.floor}.`,
   },
 ];
