@@ -2,7 +2,16 @@
 
 import { useId, useState, type FormEvent } from "react";
 import { X } from "@phosphor-icons/react";
-import { PACKAGE_OPTIONS, minBookingDate, validateLead, type LeadErrors, type LeadFields, type LeadPackage } from "@/lib/lead";
+import {
+  PACKAGE_OPTIONS,
+  formatNationalPhone,
+  minBookingDate,
+  phoneDigits,
+  validateLead,
+  type LeadErrors,
+  type LeadFields,
+  type LeadPackage,
+} from "@/lib/lead";
 import { getAttribution } from "@/lib/attribution";
 import { track } from "@/lib/analytics";
 import { siteConfig } from "@/services/config";
@@ -36,7 +45,11 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (status === "submitting") return;
-    const check = validateLead(values);
+    // The field holds only the 10 national digits ("707 123 45 67"); +7 is a fixed prefix.
+    const national = phoneDigits(values.phone);
+    const payload = { ...values, phone: national ? `+7${national}` : "" };
+    const check = validateLead(payload);
+    if (check.errors.phone && national) check.errors.phone = "Введите 10 цифр после +7";
     if (!check.ok) {
       setErrors(check.errors);
       const first = (Object.keys(check.errors) as (keyof LeadFields)[])[0];
@@ -50,7 +63,7 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...values,
+          ...payload,
           website: honeypot,
           page: window.location.pathname + window.location.search,
           referrer: attr.referrer || document.referrer,
@@ -157,33 +170,47 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
 
         <div className="grid gap-2">
           <label htmlFor={idOf("phone")} className="font-display text-sm font-extrabold text-grape-800">
-            Телефон
+            Телефон<span className="sr-only"> (после +7 — 10 цифр)</span>
           </label>
-          <input
-            id={idOf("phone")}
-            name="phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            required
-            placeholder="+7"
-            value={values.phone}
-            onChange={(e) => set("phone", e.target.value)}
-            className={field}
-            {...aria("phone")}
-          />
+          <div className="relative">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-grape-800"
+            >
+              +7
+            </span>
+            <input
+              id={idOf("phone")}
+              name="phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel-national"
+              required
+              placeholder="707 123 45 67"
+              value={values.phone}
+              onChange={(e) => {
+                // One typed character is never a country code; paste/autofill/replace may contain one.
+                const ne = e.nativeEvent as InputEvent;
+                const typed = ne.inputType === "insertText" && ne.data?.length === 1;
+                set("phone", formatNationalPhone(phoneDigits(e.target.value, !typed)));
+              }}
+              className={`${field} pl-11`}
+              {...aria("phone")}
+            />
+          </div>
           {err("phone")}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-[1.4fr_1fr] sm:gap-3">
           <div className="grid content-start gap-2">
-            <label htmlFor={idOf("date")} className="font-display text-sm font-extrabold text-grape-800">
+            <label htmlFor={idOf("date")} className="font-display text-sm font-extrabold text-grape-800 sm:flex sm:min-h-10 sm:items-end">
               Желаемая дата
             </label>
             <input
               id={idOf("date")}
               name="date"
               type="date"
+              lang="ru"
               required
               min={minBookingDate()}
               value={values.date}
@@ -194,18 +221,22 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
             {err("date")}
           </div>
           <div className="grid content-start gap-2">
-            <label htmlFor={idOf("children")} className="font-display text-sm font-extrabold text-grape-800">
-              Количество детей <span className="font-medium text-muted">(по желанию)</span>
+            <label htmlFor={idOf("children")} className="font-display text-sm font-extrabold text-grape-800 sm:flex sm:min-h-10 sm:items-end">
+              <span>
+                Количество детей <span className="font-medium text-muted">(по желанию)</span>
+              </span>
             </label>
             <input
               id={idOf("children")}
               name="children"
-              type="number"
+              type="text"
               inputMode="numeric"
-              min={1}
-              max={60}
+              pattern="[0-9]*"
+              autoComplete="off"
+              maxLength={2}
+              placeholder="Например, 8"
               value={values.children}
-              onChange={(e) => set("children", e.target.value)}
+              onChange={(e) => set("children", e.target.value.replace(/\D/g, "").slice(0, 2))}
               className={field}
               {...aria("children")}
             />
@@ -235,14 +266,14 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
         </div>
 
         <div className="grid gap-1">
-          <label htmlFor={idOf("consent")} className="flex cursor-pointer items-start gap-3 py-1 text-sm leading-snug text-grape-900">
+          <label htmlFor={idOf("consent")} className="flex min-h-11 cursor-pointer items-center gap-3 py-1 text-[0.8125rem] leading-snug text-grape-900">
             <input
               id={idOf("consent")}
               name="consent"
               type="checkbox"
               checked={values.consent}
               onChange={(e) => set("consent", e.target.checked)}
-              className="mt-0.5 h-6 w-6 shrink-0 cursor-pointer accent-grape-700"
+              className="h-5 w-5 shrink-0 cursor-pointer accent-grape-700"
               {...aria("consent")}
             />
             <span>

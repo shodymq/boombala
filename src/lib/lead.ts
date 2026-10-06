@@ -34,6 +34,26 @@ export function minBookingDate(now: Date = new Date()): string {
   return today > siteConfig.opening.date ? today : siteConfig.opening.date;
 }
 
+/** "2026-10-14" -> "14.10.2026" */
+export function ruDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+/** Up to 10 national digits (after +7) from whatever the user typed or pasted. */
+export function phoneDigits(raw: string, pasted = false): string {
+  let d = raw.replace(/\D/g, "");
+  // A pasted/autofilled full number: "+7 707…", "8 707…" or "7707…" -> drop the country digit.
+  if (pasted && d.length > 10 && /^[78]/.test(d)) d = d.slice(1);
+  return d.slice(0, 10);
+}
+
+/** "7071234567" -> "707 123 45 67" (shown after the fixed "+7"). */
+export function formatNationalPhone(digits: string): string {
+  const parts = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 8), digits.slice(8, 10)];
+  return parts.filter(Boolean).join(" ");
+}
+
 /** Normalise to +7XXXXXXXXXX (KZ/RU) or +<international digits>. Returns null if invalid. */
 export function normalizePhone(raw: string): string | null {
   const digits = raw.replace(/\D/g, "");
@@ -71,7 +91,7 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
   const date = str(input.date);
   if (!date) errors.date = "Выберите дату";
   else if (!isRealDate(date)) errors.date = "Проверьте дату";
-  else if (date < minBookingDate()) errors.date = "Выберите дату не раньше начала работы";
+  else if (date < minBookingDate()) errors.date = `Выберите дату не раньше ${ruDate(minBookingDate())}`;
   else if (date > "2100-01-01") errors.date = "Проверьте дату";
 
   let children: number | null = null;
