@@ -80,16 +80,18 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
 
   const header = (
     <div className="flex items-start justify-between gap-4">
-      <h2 id="lead-title" className="font-display text-2xl font-black leading-tight tracking-tight text-grape-800 sm:text-3xl">
+      <h2 id="lead-title" className="font-display text-[1.375rem] font-black leading-tight tracking-tight text-grape-800 sm:text-3xl">
         {status === "success" ? "Спасибо!" : "Забронировать праздник"}
       </h2>
       <button
         type="button"
         onClick={onClose}
         aria-label="Закрыть"
-        className="-mr-2 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-grape-800 transition-colors hover:bg-grape-100"
+        className="group -mr-2.5 -mt-2.5 flex h-11 w-11 shrink-0 items-center justify-center"
       >
-        <X size={22} weight="bold" aria-hidden="true" />
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-grape-100 text-grape-800 transition-colors group-hover:bg-grape-200">
+          <X size={16} weight="bold" aria-hidden="true" />
+        </span>
       </button>
     </div>
   );
@@ -129,7 +131,7 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
   });
 
   return (
-    <form onSubmit={onSubmit} noValidate className="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-8">
+    <form onSubmit={onSubmit} noValidate className="px-5 pt-5 sm:p-8">
       {header}
       <p className="mt-1 text-base text-muted">Менеджер свяжется с вами.</p>
 
@@ -173,7 +175,7 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
           {err("phone")}
         </div>
 
-        <div className="grid grid-cols-[1.4fr_1fr] gap-3">
+        <div className="grid gap-4 sm:grid-cols-[1.4fr_1fr] sm:gap-3">
           <div className="grid content-start gap-2">
             <label htmlFor={idOf("date")} className="font-display text-sm font-extrabold text-grape-800">
               Желаемая дата
@@ -193,7 +195,7 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
           </div>
           <div className="grid content-start gap-2">
             <label htmlFor={idOf("children")} className="font-display text-sm font-extrabold text-grape-800">
-              Детей <span className="font-medium text-muted">(по желанию)</span>
+              Количество детей <span className="font-medium text-muted">(по желанию)</span>
             </label>
             <input
               id={idOf("children")}
@@ -284,9 +286,11 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
         </p>
       ) : null}
 
-      <button type="submit" disabled={status === "submitting"} className={buttonClass("primary", "mt-5 w-full disabled:opacity-60")}>
+      <div className="sticky bottom-0 -mx-5 mt-4 bg-paper px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_14px_-12px_rgb(41_13_92/0.25)] sm:static sm:mx-0 sm:mt-6 sm:p-0 sm:shadow-none">
+      <button type="submit" disabled={status === "submitting"} className={buttonClass("primary", "w-full disabled:opacity-60")}>
         {status === "submitting" ? "Отправляем…" : "Отправить заявку"}
       </button>
+      </div>
     </form>
   );
 }

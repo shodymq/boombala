@@ -6,6 +6,7 @@ import { Footer } from "@/components/layout/Footer";
 import { HashScroll } from "@/components/layout/HashScroll";
 import { LeadFormProvider } from "@/components/lead/LeadFormProvider";
 import { StickyBookingCta } from "@/components/lead/StickyBookingCta";
+import { SelectedPackageProvider } from "@/components/lead/SelectedPackage";
 import { Analytics } from "@/components/analytics/Analytics";
 import { getSiteUrl } from "@/lib/site-url";
 
@@ -48,6 +49,8 @@ export const viewport: Viewport = {
   themeColor: "#4d1ba3",
   width: "device-width",
   initialScale: 1,
+  // Android Chrome: resize the layout (not just the visual viewport) when the keyboard opens.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -60,6 +63,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           К содержимому
         </a>
+        <SelectedPackageProvider>
         <LeadFormProvider>
           <HashScroll />
           <Header />
@@ -67,6 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Footer />
           <StickyBookingCta />
         </LeadFormProvider>
+        </SelectedPackageProvider>
         <Analytics />
       </body>
     </html>

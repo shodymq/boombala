@@ -5,6 +5,7 @@ import { ButtonLink } from "@/components/ui/ButtonLink";
 import { TrackView } from "@/components/analytics/TrackView";
 import { FlagshipPackage } from "./FlagshipPackage";
 import { PackageRow } from "./PackageRow";
+import { MobilePackageSelector } from "@/components/birthdays/MobilePackageSelector";
 
 export function BirthdayShowcase({ packages }: { packages: BirthdayPackage[] }) {
   const byId = Object.fromEntries(packages.map((p) => [p.id, p])) as Record<BirthdayPackage["id"], BirthdayPackage>;
@@ -12,12 +13,32 @@ export function BirthdayShowcase({ packages }: { packages: BirthdayPackage[] }) 
   return (
     <section
       id="birthdays"
-      aria-labelledby="birthdays-title"
-      className="relative isolate bg-grape-800 pb-16 pt-16 text-white md:pb-32 lg:pt-32"
+      aria-label="Дни рождения"
+      className="relative isolate bg-grape-800 pb-12 pt-12 text-white lg:pb-32 lg:pt-32"
     >
       <TrackView event="ViewBirthdays" />
+
+      {/* < lg: one package at a time. Desktop markup below is untouched. */}
+      <Container className="lg:hidden">
+        <Reveal>
+          <p className="mb-3 inline-flex items-center gap-2 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">
+            <span aria-hidden="true" className="h-[3px] w-6 rounded-full bg-sun-400" />
+            Дни рождения
+          </p>
+          <h2 className="font-display text-[2rem] font-black leading-[1] tracking-tighter sm:text-5xl">
+            Три способа
+            <br />
+            устроить <span className="text-sun-400">BOOM</span>
+          </h2>
+          <p className="mt-3 text-base leading-relaxed text-grape-100">В будние дни действует скидка 30%.</p>
+        </Reveal>
+        <div className="mt-6">
+          <MobilePackageSelector packages={packages} tone="dark" showCompareLink />
+        </div>
+      </Container>
+
       {/* Mobile: heading -> strongest package -> the other two. Desktop: heading + rows left, flagship right. */}
-      <Container className="grid gap-x-16 gap-y-16 lg:grid-cols-12 lg:gap-y-0">
+      <Container className="grid gap-x-16 gap-y-16 max-lg:hidden lg:grid-cols-12 lg:gap-y-0">
         {/* contents on mobile so heading / flagship / rows can be reordered; one left column on desktop */}
         <div className="contents lg:col-span-6 lg:block">
           <Reveal className="order-1">

@@ -12,7 +12,7 @@ export function FlagshipDetail({ pkg }: { pkg: BirthdayPackage }) {
     <section
       id={pkg.id}
       aria-labelledby={`${pkg.id}-detail-title`}
-      className="relative bg-sun-400 pb-20 pt-36 text-grape-900 md:pb-28 lg:pt-28"
+      className="relative bg-sun-400 pb-20 pt-36 text-grape-900 max-lg:hidden md:pb-28 lg:pt-28"
     >
       <TrackView event="ViewPackage" params={{ package: pkg.id }} />
       <Image

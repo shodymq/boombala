@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useLeadForm } from "./LeadFormProvider";
+import { useSelectedPackage } from "./SelectedPackage";
 
 /** Mobile-only bottom bar. Appears after the first screen so it never competes with the hero CTAs. */
 export function StickyBookingCta() {
   const { open, isOpen } = useLeadForm();
+  const { selected } = useSelectedPackage();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -24,7 +26,7 @@ export function StickyBookingCta() {
       <button
         type="button"
         tabIndex={show ? 0 : -1}
-        onClick={() => open({ source: "sticky-bar" })}
+        onClick={() => open({ package: selected ?? undefined, source: "sticky-bar" })}
         className="flex h-14 w-full items-center justify-center rounded-full bg-sun-400 font-display text-base font-extrabold text-grape-900 shadow-[0_5px_0_0_#b98600] transition-[transform,box-shadow] duration-150 active:translate-y-[3px] active:shadow-[0_2px_0_0_#b98600]"
       >
         Забронировать праздник

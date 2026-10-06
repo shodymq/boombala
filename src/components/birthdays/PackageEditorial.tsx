@@ -15,7 +15,7 @@ const art: Record<string, { src: string; alt: string }> = {
 export function PackageEditorial({ pkg }: { pkg: BirthdayPackage }) {
   const a = art[pkg.id];
   return (
-    <section id={pkg.id} aria-labelledby={`${pkg.id}-detail-title`} className="py-12 md:py-24">
+    <section id={pkg.id} aria-labelledby={`${pkg.id}-detail-title`} className="py-12 max-lg:hidden md:py-24">
       <Container>
         <div className="relative border-t-[3px] border-grape-800 pt-10">
           <TrackView event="ViewPackage" params={{ package: pkg.id }} />

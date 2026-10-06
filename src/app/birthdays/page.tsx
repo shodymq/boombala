@@ -4,7 +4,7 @@ import { getBirthdayPackages } from "@/services/birthdays";
 import { ButtonLink } from "@/components/ui/ButtonLink";
 import { LeadButton } from "@/components/lead/LeadButton";
 import { TrackView } from "@/components/analytics/TrackView";
-import { PackageQuickList } from "@/components/birthdays/PackageQuickList";
+import { MobilePackageSelector } from "@/components/birthdays/MobilePackageSelector";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 import { Burst } from "@/components/ui/Decor";
@@ -80,7 +80,15 @@ export default async function BirthdaysPage() {
         </div>
       </section>
 
-      <PackageQuickList packages={packages} />
+      {/* < lg: single package selector instead of three long package sections */}
+      <section aria-labelledby="packages-title" className="pb-12 pt-2 lg:hidden">
+        <Container>
+          <h2 id="packages-title" className="mb-5 font-display text-2xl font-black tracking-tight text-grape-800">
+            Выберите пакет
+          </h2>
+          <MobilePackageSelector packages={packages} tone="light" />
+        </Container>
+      </section>
 
       {/* Mobile: the comparison table goes last; desktop keeps the original order. */}
       <section id="compare" aria-labelledby="compare-title" className="order-last bg-grape-800 pb-16 pt-14 text-white md:pt-24 lg:order-none lg:pb-72">
