@@ -3,6 +3,7 @@
 export type TrackEvent =
   | "ViewPrices"
   | "ViewBirthdays"
+  | "ViewMenu"
   | "ViewPackage"
   | "OpenLeadForm"
   | "SubmitLead"

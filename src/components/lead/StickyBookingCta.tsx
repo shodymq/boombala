@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useLeadForm } from "./LeadFormProvider";
 import { useSelectedPackage } from "./SelectedPackage";
@@ -9,6 +10,7 @@ export function StickyBookingCta() {
   const { open, isOpen } = useLeadForm();
   const { selected } = useSelectedPackage();
   const [visible, setVisible] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     const onScroll = () => setVisible(window.scrollY > 520);
@@ -17,7 +19,8 @@ export function StickyBookingCta() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const show = visible && !isOpen;
+  // The cafe page is informational: no booking bar there.
+  const show = visible && !isOpen && !pathname.startsWith("/menu");
   return (
     <div
       aria-hidden={!show}

@@ -11,6 +11,7 @@ import { Burst } from "@/components/ui/Decor";
 import { ComparisonMatrix } from "@/components/birthdays/ComparisonMatrix";
 import { FlagshipDetail } from "@/components/birthdays/FlagshipDetail";
 import { PackageEditorial } from "@/components/birthdays/PackageEditorial";
+import { MenuLink } from "@/components/birthdays/MenuLink";
 
 export const metadata: Metadata = {
   title: "Дни рождения детей в Алматы",
@@ -124,6 +125,8 @@ export default async function BirthdaysPage() {
       {others.map((pkg) => (
         <PackageEditorial key={pkg.id} pkg={pkg} />
       ))}
+
+      <MenuLink />
     </div>
   );
 }
