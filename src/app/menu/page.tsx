@@ -78,6 +78,7 @@ export default async function MenuPage() {
             Еда и напитки для маленьких и больших гостей.
           </p>
           <p className="mt-2 text-sm text-muted">Цены указаны в тенге.</p>
+          <p className="mt-1 text-xs text-muted">Изображения блюд носят иллюстративный характер.</p>
         </Container>
       </header>
 

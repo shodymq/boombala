@@ -2,7 +2,7 @@
  * Compares the menu catalog with the venue's list (scripts/menu-expected.json):
  * item count, names, prices, order and group coverage. Run: npm run verify:menu
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { menuCategories, menuGroups, menuItems } from "../src/data/menu.ts";
 
 const expected = JSON.parse(readFileSync(new URL("./menu-expected.json", import.meta.url), "utf8"));
@@ -29,7 +29,9 @@ if (ids.size !== menuItems.length) problems.push("duplicate item ids");
 for (const i of menuItems) {
   if (!Number.isInteger(i.price) || i.price <= 0) problems.push(`${i.id}: bad price ${i.price}`);
   if (!menuCategories.some((c) => c.id === i.categoryId)) problems.push(`${i.id}: unknown category ${i.categoryId}`);
-  if (i.image) problems.push(`${i.id}: image set before real photos were supplied`);
+  if (i.image && (!i.image.startsWith("/menu/") || !existsSync(new URL(`../public${i.image}`, import.meta.url)))) {
+    problems.push(`${i.id}: image path is not a valid public /menu asset`);
+  }
 }
 const covered = menuGroups.flatMap((g) => g.categoryIds);
 for (const c of menuCategories) {

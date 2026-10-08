@@ -27,7 +27,7 @@ export interface MenuItem {
   price: number;
   categoryId: string;
   subgroupId?: string;
-  /** Public path or URL of a real photo. `undefined` = text-only row. */
+  /** Public path or URL of a menu image. `undefined` = text-only row. */
   image?: string;
   /** Only when confirmed. Never invent composition, weight or calories. */
   description?: string;
