@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { ArrowRight, CaretLeft, CaretRight, Play, X } from "@phosphor-icons/react";
 import type { BirthdayRoom } from "@/types";
 import { useLeadForm } from "@/components/lead/LeadFormProvider";
@@ -18,6 +19,9 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   const [videoOn, setVideoOn] = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoBox = useRef<HTMLDivElement>(null);
 
   const room = rooms.find((r) => r.id === roomId) ?? null;
 
@@ -26,6 +30,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
     setRoomId(id);
     setIndex(0);
     setVideoOn(false);
+    setVideoError(false);
   };
 
   // Open the native dialog after the room is rendered into it.
@@ -43,15 +48,46 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
     };
   }, [room]);
 
+  // Start the clip from the visitor's click. The player is mounted synchronously and play() is called
+  // in the same event handler, so the browser (Safari included) still sees the user activation.
+  // Muted start is always allowed; the visitor unmutes in the controls. If play() is rejected the
+  // native Play button of the controls remains as the fallback.
+  const startVideo = () => {
+    flushSync(() => {
+      setVideoError(false);
+      setVideoOn(true);
+    });
+    const v = videoRef.current;
+    if (v) {
+      v.muted = true;
+      v.play().catch(() => {});
+    }
+    window.requestAnimationFrame(() => videoBox.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  };
+
+  // Stop playback and release the network/decoder resources of the current clip.
+  const stopVideo = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.pause();
+    v.removeAttribute("src");
+    v.load();
+  }, []);
+
+  // Safety net: leaving the room (or unmounting) always stops the clip.
+  useEffect(() => stopVideo, [room, stopVideo]);
+
   const finish = useCallback(() => {
+    stopVideo();
     setRoomId(null);
     setVideoOn(false);
+    setVideoError(false);
     returnFocus.current?.focus?.();
     // The booking form opens only after this dialog is gone (no stacked modals).
     const room = pendingLead.current;
     pendingLead.current = null;
     if (room) window.setTimeout(() => openLead({ room, package: selectedPackage ?? undefined, source: "room-gallery" }), 0);
-  }, [openLead, selectedPackage]);
+  }, [openLead, selectedPackage, stopVideo]);
 
   const close = useCallback(() => {
     const d = dialogRef.current;
@@ -83,6 +119,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
   const askToBook = () => {
     if (!room) return;
     pendingLead.current = room.id;
+    stopVideo();
     close();
   };
 
@@ -215,33 +252,49 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
               </ul>
             ) : null}
 
-            {/* Video: rendered only when a real clip exists. Loaded on demand, never autoplayed. */}
+            {/* Video: one real clip per room, fetched only after the visitor asks for it. Starts only from that click, never on open. */}
             {room.video ? (
-              <div className="relative mt-3 overflow-hidden rounded-2xl bg-grape-900 [aspect-ratio:16/9]">
-                {videoOn ? (
-                  <video
-                    src={room.video}
-                    poster={room.videoPoster?.src}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    autoPlay
-                    className="h-full w-full"
-                  />
-                ) : (
+              <div
+                ref={videoBox}
+                className="mx-auto mt-3 w-full"
+                style={{ maxWidth: `calc(60dvh * ${photo.width / photo.height})` }}
+              >
+                {!videoOn ? (
                   <button
                     type="button"
-                    onClick={() => setVideoOn(true)}
-                    aria-label={`Смотреть видео: ${room.name}`}
-                    className="group absolute inset-0 flex items-center justify-center"
+                    onClick={startVideo}
+                    className="flex min-h-[3.25rem] w-full items-center justify-center gap-2.5 rounded-2xl border-2 border-grape-700 bg-grape-50 px-5 py-3 font-display text-base font-extrabold text-grape-800 transition-colors hover:bg-grape-100 active:scale-[0.99]"
                   >
-                    {room.videoPoster ? (
-                      <Image src={room.videoPoster.src} alt="" fill sizes="(min-width: 640px) 52rem, 100vw" className="object-cover" />
-                    ) : null}
-                    <span className="relative flex h-16 w-16 items-center justify-center rounded-full bg-sun-400 text-grape-900 shadow-[0_5px_0_0_#b98600] transition-transform group-active:translate-y-[3px]">
-                      <Play size={26} weight="fill" aria-hidden="true" />
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sun-400 text-grape-900">
+                      <Play size={16} weight="fill" aria-hidden="true" />
                     </span>
+                    Смотреть видео комнаты
                   </button>
+                ) : videoError ? (
+                  <p role="alert" className="rounded-2xl bg-grape-50 px-4 py-4 text-sm leading-snug text-grape-800">
+                    Не удалось загрузить видео. Проверьте соединение и попробуйте ещё раз. Оставить заявку можно и без видео.
+                    <button
+                      type="button"
+                      onClick={startVideo}
+                      className="mt-2 block font-display font-extrabold underline decoration-sun-400 decoration-2 underline-offset-4"
+                    >
+                      Попробовать снова
+                    </button>
+                  </p>
+                ) : (
+                  <video
+                    key={room.id}
+                    ref={videoRef}
+                    src={room.video}
+                    poster={photo.src}
+                    controls
+                    playsInline
+                    muted
+                    preload="none"
+                    aria-label={`Видео комнаты: ${room.name}`}
+                    onError={() => setVideoError(true)}
+                    className="block aspect-video w-full rounded-2xl bg-grape-900 object-contain"
+                  />
                 )}
               </div>
             ) : null}

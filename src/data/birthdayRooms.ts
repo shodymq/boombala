@@ -25,10 +25,10 @@ const magic = photo("magic.webp", "Magic Room: комната с тематич�
 const rapunzel = photo("rapunzel.webp", "Rapunzel Room: комната с тематической стеной, длинный стол и красные кресла", 1672, 941);
 
 export const birthdayRooms: BirthdayRoom[] = [
-  { id: "roblox-room", name: "Roblox Room", coverImage: roblox, images: [roblox] },
-  { id: "ice-room", name: "Ice Room", coverImage: ice, images: [ice] },
-  { id: "magic-room", name: "Magic Room", coverImage: magic, images: [magic] },
-  { id: "rapunzel-room", name: "Rapunzel Room", coverImage: rapunzel, images: [rapunzel] },
+  { id: "roblox-room", name: "Roblox Room", coverImage: roblox, images: [roblox], video: "/rooms/videos/roblox.mp4" },
+  { id: "ice-room", name: "Ice Room", coverImage: ice, images: [ice], video: "/rooms/videos/ice.mp4" },
+  { id: "magic-room", name: "Magic Room", coverImage: magic, images: [magic], video: "/rooms/videos/magic.mp4" },
+  { id: "rapunzel-room", name: "Rapunzel Room", coverImage: rapunzel, images: [rapunzel], video: "/rooms/videos/rapunzel.mp4" },
 ];
 
 export type RoomId = (typeof birthdayRooms)[number]["id"];
