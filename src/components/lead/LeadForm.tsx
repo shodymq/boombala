@@ -12,6 +12,7 @@ import {
   type LeadFields,
   type LeadPackage,
 } from "@/lib/lead";
+import { birthdayRooms } from "@/data/birthdayRooms";
 import { getAttribution } from "@/lib/attribution";
 import { track } from "@/lib/analytics";
 import { siteConfig } from "@/services/config";
@@ -22,7 +23,15 @@ type Status = "idle" | "submitting" | "success" | "error";
 const field =
   "h-12 w-full rounded-2xl sm:h-14 border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500";
 
-export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPackage; onClose: () => void }) {
+export function LeadForm({
+  initialPackage,
+  initialRoom = "",
+  onClose,
+}: {
+  initialPackage: LeadPackage;
+  initialRoom?: string;
+  onClose: () => void;
+}) {
   const uid = useId();
   const [values, setValues] = useState<LeadFields>({
     name: "",
@@ -31,6 +40,7 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
     children: "",
     package: initialPackage,
     consent: false,
+    room: initialRoom,
   });
   const [errors, setErrors] = useState<LeadErrors>({});
   const [status, setStatus] = useState<Status>("idle");
@@ -263,6 +273,32 @@ export function LeadForm({ initialPackage, onClose }: { initialPackage: LeadPack
             ))}
           </select>
           {err("package")}
+        </div>
+
+        <div className="grid gap-2">
+          <label htmlFor={idOf("room")} className="font-display text-sm font-extrabold text-grape-800">
+            Предпочитаемая комната <span className="font-medium text-muted">(по желанию)</span>
+          </label>
+          <select
+            id={idOf("room")}
+            name="room"
+            value={values.room}
+            onChange={(e) => set("room", e.target.value)}
+            className={field}
+            aria-invalid={errors.room ? true : undefined}
+            aria-describedby={errors.room ? `${idOf("room")}-err ${idOf("room")}-hint` : `${idOf("room")}-hint`}
+          >
+            <option value="">Не выбрана</option>
+            {birthdayRooms.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <p id={`${idOf("room")}-hint`} className="text-[0.8125rem] leading-snug text-muted">
+            Это пожелание: выбор не гарантирует, что комната свободна на вашу дату.
+          </p>
+          {err("room")}
         </div>
 
         <div className="grid gap-1">

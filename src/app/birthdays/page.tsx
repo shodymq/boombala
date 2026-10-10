@@ -12,6 +12,7 @@ import { ComparisonMatrix } from "@/components/birthdays/ComparisonMatrix";
 import { FlagshipDetail } from "@/components/birthdays/FlagshipDetail";
 import { PackageEditorial } from "@/components/birthdays/PackageEditorial";
 import { MenuLink } from "@/components/birthdays/MenuLink";
+import { RoomsSection } from "@/components/birthdays/RoomsSection";
 
 export const metadata: Metadata = {
   title: "Дни рождения детей в Алматы",
@@ -97,6 +98,9 @@ export default async function BirthdaysPage() {
           <MobilePackageSelector packages={packages} tone="light" />
         </Container>
       </section>
+
+      {/* Right after the main package cards (mobile selector) and before the comparison. */}
+      <RoomsSection />
 
       {/* Mobile: the comparison table goes last; desktop keeps the original order. */}
       <section id="compare" aria-labelledby="compare-title" className="order-last bg-grape-800 pb-16 pt-14 text-white md:pt-24 lg:order-none lg:pb-72">

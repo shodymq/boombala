@@ -1,3 +1,4 @@
+import { getRoomName } from "@/data/birthdayRooms";
 import { PACKAGE_OPTIONS, validateLead } from "@/lib/lead";
 import { rateLimit } from "@/lib/rate-limit";
 import { sendTelegramLead, telegramConfig, telegramDiagnostics, TelegramError } from "@/lib/telegram";
@@ -90,6 +91,7 @@ export async function POST(request: Request) {
         date: lead.date,
         children: lead.children,
         packageLabel: PACKAGE_OPTIONS.find((o) => o.value === lead.package)?.label ?? lead.package,
+        roomLabel: (lead.room && getRoomName(lead.room)) || "",
         page: page.startsWith("/") ? page : "",
         referrer: clip(body.referrer, 300),
         utmSource: clip(body.utm_source, 100),

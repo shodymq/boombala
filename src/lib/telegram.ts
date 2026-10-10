@@ -72,6 +72,8 @@ export interface LeadMessage {
   date: string;
   children: number | null;
   packageLabel: string;
+  /** Preferred room name, or "" when none was chosen. A preference, not a booking. */
+  roomLabel: string;
   page: string;
   referrer: string;
   utmSource: string;
@@ -119,6 +121,7 @@ export function buildLeadText(lead: LeadMessage): string {
     `Дата: ${lead.date ? ruDate(lead.date) : "—"}`,
     `Детей: ${dash(lead.children)}`,
     `Пакет: ${dash(lead.packageLabel)}`,
+    `Предпочитаемая комната: ${dash(lead.roomLabel)}`,
     "",
     "Согласие на обработку данных: да",
     "Источник: website",

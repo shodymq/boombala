@@ -1,4 +1,5 @@
 import { siteConfig } from "@/services/config";
+import { ROOM_IDS } from "@/data/birthdayRooms";
 
 export const PACKAGE_OPTIONS = [
   { value: "wow-party", label: "WOW PARTY" },
@@ -17,6 +18,8 @@ export interface LeadFields {
   package: LeadPackage;
   /** Explicit consent to personal data processing (required). */
   consent: boolean;
+  /** Preferred room id, or "" for none. Optional; validated against ROOM_IDS. */
+  room: string;
 }
 
 export type LeadErrors = Partial<Record<keyof LeadFields, string>>;
@@ -75,7 +78,7 @@ function isRealDate(value: string): boolean {
 export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>): {
   ok: boolean;
   errors: LeadErrors;
-  data?: { name: string; phone: string; date: string; children: number | null; package: LeadPackage };
+  data?: { name: string; phone: string; date: string; children: number | null; package: LeadPackage; room: string | null };
 } {
   const errors: LeadErrors = {};
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -104,10 +107,15 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
 
   if (!(input.consent === true || input.consent === "true")) errors.consent = "Подтвердите согласие";
 
+  // Optional. Anything not in the allowed list is rejected; the client string is never trusted.
+  const roomRaw = str(input.room);
+  const roomWrongType = input.room !== undefined && input.room !== null && typeof input.room !== "string";
+  if (roomWrongType || (roomRaw && !ROOM_IDS.includes(roomRaw))) errors.room = "Выберите комнату из списка";
+
   const pkgRaw = str(input.package);
   const pkg = PACKAGE_OPTIONS.find((o) => o.value === pkgRaw)?.value;
   if (!pkg) errors.package = "Выберите пакет";
 
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg! } };
+  return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg!, room: roomRaw || null } };
 }
