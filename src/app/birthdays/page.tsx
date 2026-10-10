@@ -102,8 +102,9 @@ export default async function BirthdaysPage() {
       {/* Right after the main package cards (mobile selector) and before the comparison. */}
       <RoomsSection />
 
-      {/* Mobile: the comparison table goes last; desktop keeps the original order. */}
-      <section id="compare" aria-labelledby="compare-title" className="order-last bg-grape-800 pb-16 pt-14 text-white md:pt-24 lg:order-none lg:pb-72">
+      {/* Mobile order: packages > rooms > comparison > cafe menu. The per-package detail sections are
+          desktop-only, so the comparison follows the rooms directly (no forced reordering). */}
+      <section id="compare" aria-labelledby="compare-title" className="bg-grape-800 pb-16 pt-14 text-white md:pt-24 lg:pb-72">
         <Container>
           <Reveal>
             <p className="mb-3 inline-flex items-center gap-2 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">

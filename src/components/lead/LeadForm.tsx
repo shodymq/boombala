@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { X } from "@phosphor-icons/react";
 import {
   PACKAGE_OPTIONS,
@@ -14,9 +14,11 @@ import {
 } from "@/lib/lead";
 import { birthdayRooms } from "@/data/birthdayRooms";
 import { getAttribution } from "@/lib/attribution";
-import { track } from "@/lib/analytics";
+import { errorTypeFromStatus, trackBirthday } from "@/lib/funnel";
+import type { ErrorType } from "@/lib/funnel-core";
 import { siteConfig } from "@/services/config";
 import { buttonClass } from "@/components/ui/buttonStyles";
+import { useSelectedPackage } from "./SelectedPackage";
 
 type Status = "idle" | "submitting" | "success" | "error";
 
@@ -42,10 +44,14 @@ export function LeadForm({
     consent: false,
     room: initialRoom,
   });
+  const { setRoom: rememberRoom } = useSelectedPackage();
   const [errors, setErrors] = useState<LeadErrors>({});
   const [status, setStatus] = useState<Status>("idle");
   const [errorKind, setErrorKind] = useState<"generic" | "rate">("generic");
   const [honeypot, setHoneypot] = useState("");
+  // Synchronous guards: state updates are async, a fast double tap would otherwise get through.
+  const inFlight = useRef(false);
+  const succeeded = useRef(false);
 
   const set = <K extends keyof LeadFields>(key: K, value: LeadFields[K]) => {
     setValues((v) => ({ ...v, [key]: value }));
@@ -54,7 +60,12 @@ export function LeadForm({
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (status === "submitting") return;
+    if (inFlight.current || succeeded.current) return;
+
+    const funnel = { package_id: values.package, room_id: values.room, cta_source: "lead_form" };
+    const fail = (error_type: ErrorType) => trackBirthday("birthday_lead_error", { ...funnel, error_type });
+    trackBirthday("birthday_lead_submit_attempt", funnel);
+
     // The field holds only the 10 national digits ("707 123 45 67"); +7 is a fixed prefix.
     const national = phoneDigits(values.phone);
     const payload = { ...values, phone: national ? `+7${national}` : "" };
@@ -62,10 +73,13 @@ export function LeadForm({
     if (check.errors.phone && national) check.errors.phone = "Введите 10 цифр после +7";
     if (!check.ok) {
       setErrors(check.errors);
+      fail("validation_client");
       const first = (Object.keys(check.errors) as (keyof LeadFields)[])[0];
       document.getElementById(`${uid}-${first}`)?.focus();
       return;
     }
+
+    inFlight.current = true;
     setStatus("submitting");
     try {
       const attr = getAttribution();
@@ -83,11 +97,16 @@ export function LeadForm({
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.ok) {
-        track("SubmitLead", { package: values.package, page: window.location.pathname });
+      // Success only when the server confirms that Telegram accepted the lead (HTTP 200 + ok:true).
+      if (res.ok && data.ok === true) {
+        succeeded.current = true;
+        // Also true for a repeat of an already delivered lead (e.g. the first answer was lost): the server
+        // only says duplicate for leads it really delivered. Counted once per open form (`succeeded`).
+        trackBirthday("birthday_lead_success", funnel);
         setStatus("success");
         return;
       }
+      fail(errorTypeFromStatus(res.status));
       if (res.status === 400 && data.fieldErrors) {
         setErrors(data.fieldErrors);
         setStatus("idle");
@@ -96,8 +115,11 @@ export function LeadForm({
       setErrorKind(res.status === 429 ? "rate" : "generic");
       setStatus("error");
     } catch {
+      fail("network");
       setErrorKind("generic");
       setStatus("error");
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -262,7 +284,11 @@ export function LeadForm({
             id={idOf("package")}
             name="package"
             value={values.package}
-            onChange={(e) => set("package", e.target.value as LeadPackage)}
+            onChange={(e) => {
+              const next = e.target.value as LeadPackage;
+              if (next !== values.package) trackBirthday("birthday_package_select", { package_id: next, room_id: values.room, cta_source: "form" });
+              set("package", next);
+            }}
             className={field}
             {...aria("package")}
           >
@@ -283,7 +309,12 @@ export function LeadForm({
             id={idOf("room")}
             name="room"
             value={values.room}
-            onChange={(e) => set("room", e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next && next !== values.room) trackBirthday("birthday_room_select", { package_id: values.package, room_id: next, cta_source: "form" });
+              set("room", next);
+              rememberRoom(next);
+            }}
             className={field}
             aria-invalid={errors.room ? true : undefined}
             aria-describedby={errors.room ? `${idOf("room")}-err ${idOf("room")}-hint` : `${idOf("room")}-hint`}

@@ -7,7 +7,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "verify:menu": "node --no-warnings scripts/verify-menu.mjs"
+    "verify:menu": "node --no-warnings scripts/verify-menu.mjs",
+    "test:funnel": "node --no-warnings --test scripts/test-funnel.mjs",
+    "test:lead-api": "node --no-warnings scripts/test-lead-api.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LeadForm } from "./LeadForm";
-import { track } from "@/lib/analytics";
+import { trackBirthday } from "@/lib/funnel";
 import type { LeadPackage } from "@/lib/lead";
 
 interface OpenOptions {
@@ -40,7 +40,11 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
     setInitialRoom(options.room ?? "");
     setSession((n) => n + 1);
     setIsOpen(true);
-    track("OpenLeadForm", { source: options.source ?? "unknown", package: options.package ?? "undecided", room: options.room ?? "none" });
+    trackBirthday("birthday_lead_form_open", {
+      package_id: options.package ?? "undecided",
+      room_id: options.room ?? "",
+      cta_source: options.source ?? "unknown",
+    });
   }, []);
 
   // Idempotent: called by our own close buttons and by the native "close" event (Escape).

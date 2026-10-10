@@ -2,9 +2,9 @@
 
 import Script from "next/script";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { captureAttribution } from "@/lib/attribution";
-import { track } from "@/lib/analytics";
+import { CONSENT_EVENT, hasAnalyticsConsent, track } from "@/lib/analytics";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
 const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID;
@@ -17,6 +17,15 @@ const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID;
 export function Analytics() {
   const pathname = usePathname();
   const first = useRef(true);
+  // External scripts (GA4, Meta Pixel) are not even requested until the visitor agrees to analytics.
+  const [consent, setConsent] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setConsent(hasAnalyticsConsent());
+    sync();
+    window.addEventListener(CONSENT_EVENT, sync);
+    return () => window.removeEventListener(CONSENT_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     captureAttribution();
@@ -51,18 +60,20 @@ export function Analytics() {
 
   return (
     <>
-      {GA_ID ? (
+      {GA_ID && consent ? (
         <>
           <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />
           <Script id="ga4-init" strategy="afterInteractive">{`
             window.dataLayer = window.dataLayer || [];
             window.gtag = function(){ dataLayer.push(arguments); };
+            // This script is only rendered after the visitor granted analytics consent. Ad signals stay off.
+            gtag('consent', 'default', { analytics_storage: 'granted', ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied' });
             gtag('js', new Date());
-            gtag('config', '${GA_ID}');
+            gtag('config', '${GA_ID}', { allow_google_signals: false, allow_ad_personalization_signals: false });
           `}</Script>
         </>
       ) : null}
-      {PIXEL_ID ? (
+      {PIXEL_ID && consent ? (
         <Script id="meta-pixel" strategy="afterInteractive">{`
           !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
           fbq('init', '${PIXEL_ID}');

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CaretDown, Check } from "@phosphor-icons/react";
 import type { BirthdayPackage, ProgramItem, PackageId } from "@/types";
 import { formatTenge } from "@/lib/format";
-import { track } from "@/lib/analytics";
+import { trackBirthday } from "@/lib/funnel";
 import { useSelectedPackage } from "@/components/lead/SelectedPackage";
 
 /** Mobile-only (< lg) package picker: one package at a time, details behind an accordion. */
@@ -104,9 +104,9 @@ export function MobilePackageSelector({
   }, [activeId, setSelected]);
 
   const choose = (id: PackageId) => {
+    if (id !== activeId) trackBirthday("birthday_package_select", { package_id: id, cta_source: "package_tab" });
     setActiveId(id);
     setSelected(id);
-    track("ViewPackage", { package: id, source: "tab" });
   };
 
   const onKeyDown = (e: React.KeyboardEvent, index: number) => {

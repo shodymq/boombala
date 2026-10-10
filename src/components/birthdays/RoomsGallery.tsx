@@ -8,6 +8,7 @@ import type { BirthdayRoom } from "@/types";
 import { useLeadForm } from "@/components/lead/LeadFormProvider";
 import { useSelectedPackage } from "@/components/lead/SelectedPackage";
 import { buttonClass } from "@/components/ui/buttonStyles";
+import { trackBirthday } from "@/lib/funnel";
 
 /** Cover grid + a native <dialog> viewer. Nothing is loaded for a room until its dialog is opened. */
 export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
@@ -15,7 +16,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
   const returnFocus = useRef<HTMLElement | null>(null);
   const pendingLead = useRef<string | null>(null);
   const { open: openLead } = useLeadForm();
-  const { selected: selectedPackage } = useSelectedPackage();
+  const { selected: selectedPackage, setRoom: rememberRoom } = useSelectedPackage();
   const [roomId, setRoomId] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   const [videoOn, setVideoOn] = useState(false);
@@ -31,6 +32,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
     setIndex(0);
     setVideoOn(false);
     setVideoError(false);
+    trackBirthday("birthday_room_open", { room_id: id, package_id: selectedPackage ?? "", cta_source: "room_card" });
   };
 
   // Open the native dialog after the room is rendered into it.
@@ -119,7 +121,9 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
   const askToBook = () => {
     if (!room) return;
     pendingLead.current = room.id;
+    rememberRoom(room.id);
     stopVideo();
+    trackBirthday("birthday_room_select", { room_id: room.id, package_id: selectedPackage ?? "", cta_source: "room_dialog" });
     close();
   };
 
