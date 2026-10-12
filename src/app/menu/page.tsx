@@ -58,7 +58,9 @@ export default async function MenuPage() {
   };
 
   return (
-    <>
+    // One root element: after a client navigation Next scrolls to the first node of the page, and with
+    // several root nodes it ended up on a later sibling (the page opened below its heading).
+    <div>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
@@ -138,6 +140,6 @@ export default async function MenuPage() {
           </Link>
         </Container>
       </section>
-    </>
+    </div>
   );
 }

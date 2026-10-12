@@ -11,8 +11,10 @@ const target = (hash: string) => {
 };
 
 /**
- * 1. On a fresh load of /page#section some browsers/hydration orders leave the page at the top:
- *    jump to the target once after mount.
+ * 1. Direct load of /page#section. Browsers scroll to the fragment themselves and honour
+ *    `scroll-padding-top`, so normally there is nothing to do. An extra jump of our own used to fight the
+ *    browser's smooth fragment scroll that was already in flight and left the section ~50 px too far down,
+ *    so we only step in when the browser left the page at the very top (checked once the page has loaded).
  * 2. Next's router ignores a link to the URL we are already on, so a click on "/#prices" while the
  *    address already ends with #prices (reload, shared link, previous click) did nothing. Handle that
  *    case here. Links to a different hash are still handled by Next itself.
@@ -24,8 +26,15 @@ export function HashScroll() {
   useEffect(() => {
     const el = target(window.location.hash);
     if (!el) return;
-    const t = window.setTimeout(() => el.scrollIntoView({ behavior: "instant", block: "start" }), 60);
-    return () => window.clearTimeout(t);
+    const settle = () => {
+      if (window.scrollY === 0) el.scrollIntoView({ behavior: "instant", block: "start" });
+    };
+    if (document.readyState === "complete") {
+      settle();
+      return;
+    }
+    window.addEventListener("load", settle, { once: true });
+    return () => window.removeEventListener("load", settle);
   }, []);
 
   useEffect(() => {

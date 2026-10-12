@@ -31,7 +31,9 @@ export default async function AttractionsPage() {
   const items = await getAttractions();
 
   return (
-    <>
+    // One root element: after a client navigation Next scrolls to the first node of the page, and with
+    // several root nodes it ended up on a later sibling (the page opened below its heading).
+    <div>
       <header className="pb-6 pt-8 md:pb-10 md:pt-14">
         <Container>
           <p className="mb-3 inline-flex items-center gap-2 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-grape-600">
@@ -84,6 +86,6 @@ export default async function AttractionsPage() {
           </div>
         </Container>
       </section>
-    </>
+    </div>
   );
 }

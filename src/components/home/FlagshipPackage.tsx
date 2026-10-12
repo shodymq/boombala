@@ -14,12 +14,16 @@ function optionsNote(item: BirthdayPackage["program"][number]): string | null {
     : `${n} ${pluralize(n, ["вариант", "варианта", "вариантов"])}`;
 }
 
-/** The complete package: yellow, tall, with Boom bursting out of the top edge. */
+/**
+ * The complete package: yellow, tall, with Boom bursting out of the top edge.
+ * The card bleeds past the container on the right (3.5rem). Near 1280 px the container has no outer margin
+ * left, so the bleed is capped at 1.75rem + the margin that exists: the card never leaves the viewport.
+ */
 export function FlagshipPackage({ pkg }: { pkg: BirthdayPackage }) {
   return (
     <article
       aria-labelledby={`${pkg.id}-title`}
-      className="relative rounded-bl-[1.25rem] rounded-br-[4.5rem] rounded-tl-[4.5rem] rounded-tr-[1.25rem] bg-sun-400 px-6 pb-10 pt-12 text-grape-900 md:px-10 md:pb-12 lg:-mr-6 xl:-mr-14 xl:pl-14 xl:pr-16"
+      className="relative rounded-bl-[1.25rem] rounded-br-[4.5rem] rounded-tl-[4.5rem] rounded-tr-[1.25rem] bg-sun-400 px-6 pb-10 pt-12 text-grape-900 md:px-10 md:pb-12 lg:-mr-6 xl:-mr-[min(3.5rem,calc(1.75rem_+_max(0px,(100vw-1280px)/2)))] xl:pl-14 xl:pr-16"
     >
       <TrackView event="ViewPackage" params={{ package: pkg.id }} />
       <Image

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { LeadForm } from "./LeadForm";
 import { trackBirthday } from "@/lib/funnel";
 import type { LeadPackage } from "@/lib/lead";
+import { useSelectedPackage } from "./SelectedPackage";
 
 interface OpenOptions {
   package?: LeadPackage;
@@ -33,10 +34,13 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState(0); // remount the form on each open
   const [initialPackage, setInitialPackage] = useState<LeadPackage>("undecided");
   const [initialRoom, setInitialRoom] = useState("");
+  const { setSelected } = useSelectedPackage();
 
   const open = useCallback((options: OpenOptions = {}) => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setInitialPackage(options.package ?? "undecided");
+    // Remember the package this visit asked for, so later CTAs (header, sticky bar) open with it.
+    if (options.package) setSelected(options.package);
     setInitialRoom(options.room ?? "");
     setSession((n) => n + 1);
     setIsOpen(true);
@@ -45,7 +49,7 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
       room_id: options.room ?? "",
       cta_source: options.source ?? "unknown",
     });
-  }, []);
+  }, [setSelected]);
 
   // Idempotent: called by our own close buttons and by the native "close" event (Escape).
   const finish = useCallback(() => {

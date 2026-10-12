@@ -44,7 +44,7 @@ export function LeadForm({
     consent: false,
     room: initialRoom,
   });
-  const { setRoom: rememberRoom } = useSelectedPackage();
+  const { setRoom: rememberRoom, setSelected: rememberPackage } = useSelectedPackage();
   const [errors, setErrors] = useState<LeadErrors>({});
   const [status, setStatus] = useState<Status>("idle");
   const [errorKind, setErrorKind] = useState<"generic" | "rate">("generic");
@@ -288,6 +288,7 @@ export function LeadForm({
               const next = e.target.value as LeadPackage;
               if (next !== values.package) trackBirthday("birthday_package_select", { package_id: next, room_id: values.room, cta_source: "form" });
               set("package", next);
+              rememberPackage(next);
             }}
             className={field}
             {...aria("package")}

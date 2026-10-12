@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useMenuState } from "@/components/layout/MenuState";
 import { useLeadForm } from "./LeadFormProvider";
 import { useSelectedPackage } from "./SelectedPackage";
 
@@ -9,6 +10,7 @@ import { useSelectedPackage } from "./SelectedPackage";
 export function StickyBookingCta() {
   const { open, isOpen } = useLeadForm();
   const { selected, room } = useSelectedPackage();
+  const { menuOpen } = useMenuState();
   const [visible, setVisible] = useState(false);
   const pathname = usePathname();
 
@@ -20,11 +22,12 @@ export function StickyBookingCta() {
   }, []);
 
   // The cafe page is informational: no booking bar there.
-  const show = visible && !isOpen && !pathname.startsWith("/menu");
+  // Hidden while the menu is open: the menu carries its own booking button.
+  const show = visible && !isOpen && !menuOpen && !pathname.startsWith("/menu");
   return (
     <div
       aria-hidden={!show}
-      className={`fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-transform duration-300 ease-out lg:hidden ${show ? "translate-y-0" : "translate-y-full"}`}
+      className={`fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-transform duration-300 ease-out min-[1080px]:hidden ${show ? "translate-y-0" : "translate-y-full"}`}
     >
       <button
         type="button"

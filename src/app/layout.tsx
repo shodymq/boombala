@@ -4,6 +4,7 @@ import "./globals.css";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { HashScroll } from "@/components/layout/HashScroll";
+import { MenuStateProvider } from "@/components/layout/MenuState";
 import { LeadFormProvider } from "@/components/lead/LeadFormProvider";
 import { StickyBookingCta } from "@/components/lead/StickyBookingCta";
 import { SelectedPackageProvider } from "@/components/lead/SelectedPackage";
@@ -89,6 +90,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           К содержимому
         </a>
         <SelectedPackageProvider>
+        <MenuStateProvider>
         <LeadFormProvider>
           <HashScroll />
           <Header />
@@ -96,6 +98,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Footer />
           <StickyBookingCta />
         </LeadFormProvider>
+        </MenuStateProvider>
         </SelectedPackageProvider>
         <Analytics />
       </body>

@@ -2,13 +2,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { InstagramLogo } from "@phosphor-icons/react/dist/ssr";
 import { siteConfig } from "@/services/config";
-import { navItems } from "@/lib/nav";
+import { homeLink, infoLinks, pageLinks } from "@/lib/nav";
 import { Container } from "@/components/ui/Container";
 
 export function Footer() {
   return (
     <footer className="bg-grape-900 text-grape-100">
-      <Container className="grid gap-10 py-12 md:grid-cols-[1.2fr_1fr_1fr] md:py-16">
+      <Container className="grid gap-10 py-12 md:grid-cols-[1.2fr_2fr] md:py-16">
         <div>
           <Image
             src="/brand/logo.webp"
@@ -28,34 +28,49 @@ export function Footer() {
           </address>
         </div>
 
-        <nav aria-label="Разделы сайта">
-          <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Разделы</p>
-          <ul className="grid gap-1">
-            {navItems.map((item) => (
-              <li key={item.href}>
-                <Link href={item.href} className="inline-block py-1.5 text-base transition-colors hover:text-white">
-                  {item.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <div className="grid grid-cols-2 gap-8 min-[1200px]:grid-cols-3">
+          <nav aria-label="Страницы сайта">
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Страницы</p>
+            <ul className="grid gap-1">
+              {[homeLink, ...pageLinks].map((item) => (
+                <li key={item.href}>
+                  <Link href={item.href} className="inline-block py-1.5 text-base transition-colors hover:text-white">
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
 
-        <div>
-          <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Мы в соцсетях</p>
-          <a
-            href={siteConfig.contacts.instagram}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 py-1.5 text-base transition-colors hover:text-white"
-          >
-            <InstagramLogo size={22} weight="bold" aria-hidden="true" />
-            {siteConfig.contacts.instagramHandle}
-          </a>
+          <nav aria-label="Информация на главной">
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Информация</p>
+            <ul className="grid gap-1">
+              {infoLinks.map((item) => (
+                <li key={item.href}>
+                  <Link href={item.href} className="inline-block py-1.5 text-base transition-colors hover:text-white">
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          <div className="col-span-2 min-[1200px]:col-span-1">
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Мы в соцсетях</p>
+            <a
+              href={siteConfig.contacts.instagram}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 py-1.5 text-base transition-colors hover:text-white"
+            >
+              <InstagramLogo size={22} weight="bold" aria-hidden="true" />
+              {siteConfig.contacts.instagramHandle}
+            </a>
+          </div>
         </div>
       </Container>
       <div className="border-t border-white/10">
-        <Container className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pb-24 pt-5 text-sm text-grape-200 lg:pb-5">
+        <Container className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pb-24 pt-5 text-sm text-grape-200 min-[1080px]:pb-5">
           <span>© 2026 Boom Bala, {siteConfig.city}</span>
           <Link href="/privacy" className="py-1 underline decoration-grape-200/50 underline-offset-4 transition-colors hover:text-white">
             Политика конфиденциальности
