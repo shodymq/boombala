@@ -32,6 +32,7 @@ const localBusinessJsonLd = {
   "@type": "EntertainmentBusiness",
   "@id": `${siteUrl}/#business`,
   name: "Boom Bala",
+  alternateName: "Бум Бала",
   url: siteUrl,
   address: {
     "@type": "PostalAddress",
@@ -50,10 +51,10 @@ export const metadata: Metadata = {
     template: "%s — Boom Bala",
   },
   description:
-    "Boom Bala — детский развлекательный центр в Алматы. Цены, дни рождения и годовой абонемент.",
+    "Бум Бала (Boom Bala) — детский игровой и развлекательный центр в Алматы. Цены, дни рождения и меню.",
   openGraph: {
     title: "Boom Bala — детский развлекательный центр в Алматы",
-    description: "Цены, развлечения, дни рождения и годовой абонемент в Boom Bala, Алматы.",
+    description: "Бум Бала (Boom Bala) — детский игровой и развлекательный центр в Алматы. Цены, дни рождения и меню.",
     siteName: "Boom Bala",
     url: "/",
     locale: "ru_RU",

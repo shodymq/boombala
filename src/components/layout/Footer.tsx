@@ -19,10 +19,10 @@ export function Footer() {
             className="-ml-2 h-auto w-[168px] select-none"
           />
           <p className="mt-5 max-w-[34ch] text-base leading-relaxed text-grape-200">
-            Детский развлекательный центр в {siteConfig.city}.
+            Бум Бала (Boom Bala) — детский игровой и развлекательный центр в {siteConfig.city}.
           </p>
           <address className="mt-4 text-base not-italic leading-relaxed text-grape-200">
-            {siteConfig.location.street}
+            Адрес: {siteConfig.location.street}
             <br />
             {siteConfig.location.mall}, {siteConfig.location.floor}
           </address>
