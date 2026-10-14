@@ -1,16 +1,9 @@
-export interface MenuSubgroup {
+/** A heading of the printed menu (14 of them). */
+export interface MenuCategory {
   id: string;
   name: string;
   /** Cheap add-ons (e.g. sauces) should not define the "from X ₸" teaser price of their group. */
   excludeFromMinPrice?: boolean;
-}
-
-/** An original category of the printed menu (13 of them). */
-export interface MenuCategory {
-  id: string;
-  name: string;
-  /** Optional UI split inside one original category (e.g. "Суши и соусы" -> Суши / Соусы). */
-  subgroups?: MenuSubgroup[];
 }
 
 /** A UI group on /menu: several original categories shown together. */
@@ -26,7 +19,6 @@ export interface MenuItem {
   /** Price in KZT (tenge). */
   price: number;
   categoryId: string;
-  subgroupId?: string;
   /** Public path or URL of a menu image. `undefined` = text-only row. */
   image?: string;
   /** Only when confirmed. Never invent composition, weight or calories. */

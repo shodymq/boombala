@@ -12,7 +12,7 @@ export function MenuLink() {
             <h2 id="birthday-menu-title" className="font-display text-xl font-black tracking-tight text-grape-800 md:text-2xl">
               Меню кафе Boom Bala
             </h2>
-            <p className="mt-1 text-base text-muted">Детское меню, пицца, напитки и банкетные блюда.</p>
+            <p className="mt-1 text-base text-muted">Пицца, фастфуд и суши, напитки и банкетные блюда.</p>
           </div>
           <Link
             href="/menu"

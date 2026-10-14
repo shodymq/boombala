@@ -8,7 +8,7 @@ import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 
 /** Which menu groups to tease on the home page (everything else is one tap away on /menu). */
-const FEATURED = ["kids", "main", "pizza-fastfood", "drinks"];
+const FEATURED = ["main", "pizza-fastfood", "salads-soups", "drinks"];
 
 export function CafeTeaser({ catalog }: { catalog: MenuCatalog }) {
   const rows = buildMenuView(catalog).filter((v) => FEATURED.includes(v.group.id));
@@ -45,7 +45,7 @@ export function CafeTeaser({ catalog }: { catalog: MenuCatalog }) {
                   <span className="font-display text-xl font-black tracking-tight text-grape-800 md:text-2xl">
                     {group.name}
                   </span>
-                  <span className="flex items-center gap-3 text-base text-muted">
+                  <span className="flex shrink-0 items-center gap-3 whitespace-nowrap text-base text-muted">
                     <span className="tabular-nums">от {formatTenge(minPrice)}</span>
                     <ArrowRight
                       size={18}

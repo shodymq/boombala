@@ -11,7 +11,7 @@ import { MenuRow } from "@/components/menu/MenuRow";
 
 const title = "Меню кафе";
 const description =
-  "Меню кафе Boom Bala в Алматы: детское меню, основные блюда, пицца и фастфуд, салаты и супы, напитки и банкетные блюда с ценами.";
+  "Меню кафе Boom Bala в Алматы: вторые блюда, пицца, фастфуд и суши, салаты и супы, хлеб и гарниры, напитки и банкетные блюда с ценами.";
 
 export const metadata: Metadata = {
   title,
@@ -80,6 +80,7 @@ export default async function MenuPage() {
             Еда и напитки для маленьких и больших гостей.
           </p>
           <p className="mt-2 text-sm text-muted">Цены указаны в тенге.</p>
+          <p className="mt-1 font-display text-base font-extrabold text-grape-800">Обслуживание — 10%.</p>
           <p className="mt-1 text-xs text-muted">Изображения блюд носят иллюстративный характер.</p>
         </Container>
       </header>
@@ -93,7 +94,7 @@ export default async function MenuPage() {
             key={group.id}
             id={group.id}
             aria-labelledby={`${group.id}-title`}
-            className={`scroll-mt-14 py-9 md:scroll-mt-16 md:py-14 ${group.id === "kids" ? "bg-sun-100" : ""}`}
+            className="scroll-mt-14 py-9 md:scroll-mt-16 md:py-14"
           >
             <Container>
               <div className="flex items-baseline justify-between gap-4 border-b-[3px] border-grape-800 pb-3">
