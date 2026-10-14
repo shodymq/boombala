@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, type FormEvent } from "react";
-import { X } from "@phosphor-icons/react";
+import { WhatsappLogo, X } from "@phosphor-icons/react";
 import {
   PACKAGE_OPTIONS,
   formatNationalPhone,
@@ -23,8 +23,9 @@ import { useSelectedPackage } from "./SelectedPackage";
 
 type Status = "idle" | "submitting" | "success" | "error";
 
+// scroll-mb-56: a focused control scrolls into view ABOVE the sticky action bar, not under it.
 const field =
-  "h-12 w-full rounded-2xl sm:h-14 border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500";
+  "scroll-mb-56 h-12 w-full rounded-2xl sm:h-14 border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500";
 
 export function LeadForm({
   initialPackage,
@@ -344,7 +345,7 @@ export function LeadForm({
               type="checkbox"
               checked={values.consent}
               onChange={(e) => set("consent", e.target.checked)}
-              className="h-5 w-5 shrink-0 cursor-pointer accent-grape-700"
+              className="h-5 w-5 shrink-0 scroll-mb-56 cursor-pointer accent-grape-700"
               {...aria("consent")}
             />
             <span>
@@ -390,10 +391,28 @@ export function LeadForm({
         </p>
       ) : null}
 
-      <div className="sticky bottom-0 -mx-5 mt-4 bg-paper px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_14px_-12px_rgb(41_13_92/0.25)] sm:static sm:mx-0 sm:mt-6 sm:p-0 sm:shadow-none">
+      <div className="sticky bottom-0 -mx-5 mt-4 bg-paper px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_14px_-12px_rgb(41_13_92/0.25)] sm:-mx-8 sm:-mb-8 sm:mt-6 sm:px-8 sm:pb-8 sm:pt-4 [@media(max-height:600px)]:static [@media(max-height:600px)]:shadow-none">
       <button type="submit" disabled={status === "submitting"} className={buttonClass("primary", "w-full disabled:opacity-60")}>
         {status === "submitting" ? "Отправляем…" : "Отправить заявку"}
       </button>
+      {/* Second, equal way to reach us. A plain link built from the CURRENT form fields: it does not validate or
+          submit the form, needs no consent tick, is not a lead and fires no analytics. */}
+      {whatsappLink ? (
+        <>
+          <div aria-hidden="true" className="my-2 flex items-center gap-3 text-sm font-semibold text-muted">
+            <span className="h-px flex-1 bg-line" />
+            или
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className={buttonClass("outline", "w-full")}>
+            <WhatsappLogo size={22} weight="bold" aria-hidden="true" />
+            Написать в WhatsApp
+          </a>
+          <p className="mt-1.5 text-center text-[0.8125rem] leading-snug text-muted">
+            Откроется WhatsApp с готовым сообщением
+          </p>
+        </>
+      ) : null}
       </div>
     </form>
   );
