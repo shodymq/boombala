@@ -4,7 +4,7 @@
  *   opening      — 7 Oct 2026 12:00: the centre starts working and welcomes visitors.
  *   grandOpening — 24 Oct 2026 10:00: the big public opening event.
  * The UI switches phase automatically: before -> working -> open.
- * Fill `contacts.whatsapp` when it is confirmed — the WhatsApp CTA switches on.
+ * `contacts.whatsapp` / `contacts.phone`: the official Boom Bala number, used for calls and WhatsApp.
  */
 export const siteConfig = {
   name: "Boom Bala",
@@ -35,8 +35,14 @@ export const siteConfig = {
   contacts: {
     instagram: "https://www.instagram.com/boombala.almaty",
     instagramHandle: "@boombala.almaty",
-    /** Digits only with country code, e.g. "77001234567". `null` until confirmed. */
-    whatsapp: null as string | null,
+    /** Official number for calls and WhatsApp (+7 747 595 62 67). Digits only with country code. */
+    whatsapp: "77475956267" as string | null,
+    phone: {
+      /** As shown on the site. */
+      display: "+7 747 595 62 67",
+      /** For tel: links and structured data (E.164). */
+      tel: "+77475956267",
+    },
   },
   /** Base URL of the shared REST backend. `null` = use local data. */
   apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? null,

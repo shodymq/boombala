@@ -10,6 +10,7 @@ import { StickyBookingCta } from "@/components/lead/StickyBookingCta";
 import { SelectedPackageProvider } from "@/components/lead/SelectedPackage";
 import { Analytics } from "@/components/analytics/Analytics";
 import { getSiteUrl } from "@/lib/site-url";
+import { siteConfig } from "@/services/config";
 
 const nunito = Nunito({
   subsets: ["latin", "cyrillic"],
@@ -34,6 +35,7 @@ const localBusinessJsonLd = {
   name: "Boom Bala",
   alternateName: "Бум Бала",
   url: siteUrl,
+  telephone: siteConfig.contacts.phone.tel,
   address: {
     "@type": "PostalAddress",
     streetAddress: "ул. Шолохова, 29, ТРК «Жібек жолы», 3 этаж",

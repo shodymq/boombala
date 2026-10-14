@@ -12,6 +12,7 @@ import { ComparisonMatrix } from "@/components/birthdays/ComparisonMatrix";
 import { FlagshipDetail } from "@/components/birthdays/FlagshipDetail";
 import { PackageEditorial } from "@/components/birthdays/PackageEditorial";
 import { MenuLink } from "@/components/birthdays/MenuLink";
+import { WhatsAppCta } from "@/components/birthdays/WhatsAppCta";
 import { RoomsSection } from "@/components/birthdays/RoomsSection";
 
 export const metadata: Metadata = {
@@ -130,6 +131,8 @@ export default async function BirthdaysPage() {
       {others.map((pkg) => (
         <PackageEditorial key={pkg.id} pkg={pkg} />
       ))}
+
+      <WhatsAppCta />
 
       <MenuLink />
     </div>

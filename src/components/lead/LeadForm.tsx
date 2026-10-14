@@ -18,6 +18,7 @@ import { errorTypeFromStatus, trackBirthday } from "@/lib/funnel";
 import type { ErrorType } from "@/lib/funnel-core";
 import { siteConfig } from "@/services/config";
 import { buttonClass } from "@/components/ui/buttonStyles";
+import { birthdayMessage, whatsappUrl } from "@/lib/whatsapp";
 import { useSelectedPackage } from "./SelectedPackage";
 
 type Status = "idle" | "submitting" | "success" | "error";
@@ -163,6 +164,8 @@ export function LeadForm({
     );
   }
 
+  // Fallback when delivery fails: WhatsApp with the package and room chosen in this form (a click is not a lead).
+  const whatsappLink = whatsappUrl(birthdayMessage({ packageId: values.package, roomId: values.room }));
   const idOf = (k: keyof LeadFields) => `${uid}-${k}`;
   const err = (k: keyof LeadFields) =>
     errors[k] ? (
@@ -373,14 +376,16 @@ export function LeadForm({
         <p role="alert" className="mt-5 rounded-2xl bg-sun-100 p-4 text-base font-semibold text-grape-900">
           {errorKind === "rate"
             ? "Слишком много попыток. Попробуйте чуть позже."
-            : "Не удалось отправить заявку. Попробуйте ещё раз или напишите нам в Instagram."}{" "}
+            : whatsappLink
+              ? "Не удалось отправить заявку. Попробуйте ещё раз или напишите нам в WhatsApp."
+              : "Не удалось отправить заявку. Попробуйте ещё раз или напишите нам в Instagram."}{" "}
           <a
-            href={siteConfig.contacts.instagram}
+            href={whatsappLink ?? siteConfig.contacts.instagram}
             target="_blank"
             rel="noopener noreferrer"
             className="underline decoration-2 underline-offset-2"
           >
-            {siteConfig.contacts.instagramHandle}
+            {whatsappLink ? "Написать в WhatsApp" : siteConfig.contacts.instagramHandle}
           </a>
         </p>
       ) : null}

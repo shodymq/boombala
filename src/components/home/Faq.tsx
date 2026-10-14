@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { Plus } from "@phosphor-icons/react/dist/ssr";
 import type { FaqItem } from "@/types";
 import { Container } from "@/components/ui/Container";
@@ -46,12 +47,23 @@ export function Faq({ items }: { items: FaqItem[] }) {
                     <Plus size={18} weight="bold" />
                   </span>
                 </summary>
-                <p className="max-w-[62ch] pb-6 pl-12 text-base leading-relaxed text-muted md:pl-16 md:text-lg">{typeof item.answer === "string" ? (
-                    item.answer
-                  ) : (
-                    <OpeningText before={item.answer.before} working={item.answer.working} open={item.answer.open} />
-                  )}
-                </p>
+                <div className="pb-6 pl-12 md:pl-16">
+                  <p className="max-w-[62ch] text-base leading-relaxed text-muted md:text-lg">
+                    {typeof item.answer === "string" ? (
+                      item.answer
+                    ) : (
+                      <OpeningText before={item.answer.before} working={item.answer.working} open={item.answer.open} />
+                    )}
+                  </p>
+                  {item.link ? (
+                    <Link
+                      href={item.link.href}
+                      className="mt-2 inline-flex min-h-11 items-center font-display text-base font-extrabold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-4 md:text-lg"
+                    >
+                      {item.link.label}
+                    </Link>
+                  ) : null}
+                </div>
               </details>
             ))}
           </div>

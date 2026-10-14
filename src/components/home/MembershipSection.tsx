@@ -5,7 +5,16 @@ import { ButtonLink } from "@/components/ui/ButtonLink";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 
-export function MembershipSection({ membership, contactHref }: { membership: Membership; contactHref: string }) {
+export function MembershipSection({
+  membership,
+  contactHref,
+  channel,
+}: {
+  membership: Membership;
+  contactHref: string;
+  /** Where `contactHref` leads; the sentence below the price names it. */
+  channel: "whatsapp" | "instagram";
+}) {
   return (
     <section
       id="membership"
@@ -34,7 +43,7 @@ export function MembershipSection({ membership, contactHref }: { membership: Mem
             </span>
           </p>
           <p className="mt-4 max-w-[36ch] text-base leading-relaxed text-muted sm:mt-6 sm:text-lg">
-            Подробности об абонементе — в нашем Instagram.
+            {channel === "whatsapp" ? "Подробности об абонементе — в WhatsApp." : "Подробности об абонементе — в нашем Instagram."}
           </p>
           <ButtonLink href={contactHref} variant="primary" className="mt-6 w-full sm:mt-8 sm:w-auto">
             Узнать об абонементе

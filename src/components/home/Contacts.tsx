@@ -1,13 +1,15 @@
 import Image from "next/image";
-import { ArrowUpRight, InstagramLogo, MapPin, WhatsappLogo } from "@phosphor-icons/react/dist/ssr";
+import { ArrowUpRight, InstagramLogo, MapPin, Phone, WhatsappLogo } from "@phosphor-icons/react/dist/ssr";
 import { siteConfig } from "@/services/config";
+import { whatsappUrl } from "@/lib/whatsapp";
 import { ButtonLink } from "@/components/ui/ButtonLink";
 import { LeadButton } from "@/components/lead/LeadButton";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 
 export function Contacts() {
-  const { instagram, instagramHandle, whatsapp } = siteConfig.contacts;
+  const { instagram, instagramHandle, phone } = siteConfig.contacts;
+  const whatsapp = whatsappUrl();
   const { city, street, mall, floor, mapUrl } = siteConfig.location;
   return (
     <section
@@ -44,7 +46,7 @@ export function Contacts() {
             </p>
           </address>
 
-          <div className="order-3 mt-6 flex flex-col gap-3 sm:flex-row lg:order-5 lg:mt-8 lg:gap-4">
+          <div className="order-3 mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap lg:order-5 lg:mt-8 lg:gap-4">
             <LeadButton variant="accent" source="contacts" className="w-full sm:w-auto">
               Забронировать праздник
             </LeadButton>
@@ -59,12 +61,25 @@ export function Contacts() {
               Открыть Instagram
             </ButtonLink>
             {whatsapp ? (
-              <ButtonLink href={`https://wa.me/${whatsapp}`} variant="outline" className="w-full sm:w-auto">
+              <ButtonLink href={whatsapp} variant="outline" className="w-full sm:w-auto">
                 <WhatsappLogo size={22} weight="bold" aria-hidden="true" />
-                WhatsApp
+                Написать в WhatsApp
               </ButtonLink>
             ) : null}
           </div>
+
+          <p className="order-4 mt-5 lg:order-6 lg:mt-6">
+            <span className="mb-1 block font-display text-xs font-extrabold uppercase tracking-[0.14em] text-sun-400">
+              Звонки и WhatsApp
+            </span>
+            <a
+              href={`tel:${phone.tel}`}
+              className="inline-flex min-h-11 items-center gap-2 font-display text-2xl font-black tracking-tight text-white underline decoration-sun-400 decoration-2 underline-offset-4 sm:text-3xl"
+            >
+              <Phone size={26} weight="bold" aria-hidden="true" className="text-sun-400" />
+              {phone.display}
+            </a>
+          </p>
 
           <a
             href={instagram}

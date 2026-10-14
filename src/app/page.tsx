@@ -1,6 +1,7 @@
 import { getAttractions } from "@/services/attractions";
 import { getBirthdayPackages } from "@/services/birthdays";
 import { getPrimaryContact } from "@/services/config";
+import { whatsappUrl } from "@/lib/whatsapp";
 import { getFaq } from "@/services/faq";
 import { getMembership } from "@/services/memberships";
 import { getPricing } from "@/services/pricing";
@@ -38,6 +39,8 @@ export default async function Home() {
     getMenu(),
   ]);
   const contact = getPrimaryContact();
+  // The membership button opens WhatsApp with a ready question when WhatsApp is the primary channel.
+  const membershipHref = (contact.kind === "whatsapp" && whatsappUrl("Здравствуйте! Хочу узнать об абонементе Boom Bala.")) || contact.href;
 
   return (
     // One root element: after a client navigation Next scrolls to the first node of the page, and with
@@ -51,7 +54,7 @@ export default async function Home() {
       <Entertainment attractions={attractions} />
       <Prices pricing={pricing} membership={membership} />
       <BirthdayShowcase packages={packages} />
-      <MembershipSection membership={membership} contactHref={contact.href} />
+      <MembershipSection membership={membership} contactHref={membershipHref} channel={contact.kind} />
       <CafeTeaser catalog={menu} />
       <Faq items={faq} />
       <Contacts />
