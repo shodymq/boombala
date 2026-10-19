@@ -1,0 +1,96 @@
+import { createHash, randomBytes } from "node:crypto";
+import type { Queryable } from "./db.ts";
+import { isRole, type Role } from "./rbac.ts";
+
+/** Absolute lifetime and idle timeout of a staff session. */
+export const SESSION_ABSOLUTE_SECONDS = 7 * 24 * 3600;
+export const SESSION_IDLE_SECONDS = 12 * 3600;
+/** `last_seen_at` is refreshed at most this often (saves a write on every request). */
+const TOUCH_EVERY_SECONDS = 60;
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+}
+
+export interface ValidSession {
+  sessionId: string;
+  user: SessionUser;
+}
+
+export function hashToken(token: string): Buffer {
+  return createHash("sha256").update(token).digest();
+}
+
+export interface SessionMeta {
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+/** Creates a session and returns the raw token (shown to the browser once, never stored). */
+export async function createSession(
+  db: Queryable,
+  userId: string,
+  meta: SessionMeta = {},
+): Promise<{ token: string; expiresAt: Date }> {
+  const token = randomBytes(32).toString("base64url");
+  const { rows } = await db.query<{ expires_at: Date }>(
+    `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent)
+     VALUES ($1, $2, now() + make_interval(secs => $3), $4, $5)
+     RETURNING expires_at`,
+    [hashToken(token), userId, SESSION_ABSOLUTE_SECONDS, meta.ip ?? null, meta.userAgent ? meta.userAgent.slice(0, 400) : null],
+  );
+  return { token, expiresAt: rows[0].expires_at };
+}
+
+/** Returns the user behind a token, or null when it is unknown, revoked, expired, idle too long or the user is disabled. */
+export async function validateSession(db: Queryable, token: string | undefined): Promise<ValidSession | null> {
+  if (!token || token.length < 20 || token.length > 100) return null;
+  const { rows } = await db.query<{
+    session_id: string;
+    last_seen_at: Date;
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    stale: boolean;
+  }>(
+    `SELECT s.id AS session_id, s.last_seen_at, u.id, u.email, u.name, u.role::text AS role,
+            (s.last_seen_at < now() - make_interval(secs => $3)) AS stale
+       FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = $1
+        AND s.revoked_at IS NULL
+        AND s.expires_at > now()
+        AND s.last_seen_at > now() - make_interval(secs => $2)
+        AND u.is_active`,
+    [hashToken(token), SESSION_IDLE_SECONDS, TOUCH_EVERY_SECONDS],
+  );
+  const row = rows[0];
+  if (!row || !isRole(row.role)) return null;
+  if (row.stale) await db.query("UPDATE sessions SET last_seen_at = now() WHERE id = $1", [row.session_id]);
+  return { sessionId: row.session_id, user: { id: row.id, email: row.email, name: row.name, role: row.role } };
+}
+
+export async function revokeSession(db: Queryable, token: string): Promise<void> {
+  await db.query("UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL", [hashToken(token)]);
+}
+
+/** Used after password/role changes and deactivation. `exceptSessionId` keeps the current device logged in. */
+export async function revokeUserSessions(db: Queryable, userId: string, exceptSessionId?: string): Promise<number> {
+  const res = await db.query(
+    `UPDATE sessions SET revoked_at = now()
+      WHERE user_id = $1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2::uuid)`,
+    [userId, exceptSessionId ?? null],
+  );
+  return res.rowCount ?? 0;
+}
+
+/** Housekeeping: drops sessions that can never be valid again. */
+export async function purgeExpiredSessions(db: Queryable): Promise<number> {
+  const res = await db.query(
+    "DELETE FROM sessions WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '30 days'",
+  );
+  return res.rowCount ?? 0;
+}
