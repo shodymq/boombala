@@ -97,8 +97,11 @@ export function ChoiceField({
         ref={triggerRef}
         id={id}
         type="button"
+        // ARIA 1.2 "select-only combobox": the role that supports aria-invalid / aria-expanded for a button that opens a listbox.
+        role="combobox"
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-invalid={invalid ? true : undefined}
         aria-controls={open ? listId : undefined}
         aria-labelledby={`${labelledBy} ${id}`}
         aria-describedby={describedBy}

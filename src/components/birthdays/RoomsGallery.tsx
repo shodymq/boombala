@@ -10,12 +10,14 @@ import { useSelectedPackage } from "@/components/lead/SelectedPackage";
 import { buttonClass } from "@/components/ui/buttonStyles";
 import { Sheet } from "@/components/ui/Sheet";
 import { trackBirthday } from "@/lib/funnel";
+import { rememberScroll } from "@/lib/scroll-restore";
 
 /** Cover grid + a native <dialog> viewer. Nothing is loaded for a room until its dialog is opened. */
 export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const pendingLead = useRef<string | null>(null);
+  const restoreScroll = useRef<(() => void) | null>(null);
   const { open: openLead } = useLeadForm();
   const { selected: selectedPackage, setRoom: rememberRoom } = useSelectedPackage();
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -29,6 +31,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
 
   const openRoom = (id: string) => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    restoreScroll.current = rememberScroll();
     setRoomId(id);
     setIndex(0);
     setVideoOn(false);
@@ -85,7 +88,9 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
     setRoomId(null);
     setVideoOn(false);
     setVideoError(false);
-    returnFocus.current?.focus?.();
+    returnFocus.current?.focus?.({ preventScroll: true });
+    restoreScroll.current?.();
+    restoreScroll.current = null;
     // The booking form opens only after this dialog is gone (no stacked modals).
     const room = pendingLead.current;
     pendingLead.current = null;

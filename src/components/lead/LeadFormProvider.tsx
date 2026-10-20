@@ -5,6 +5,7 @@ import { Sheet } from "@/components/ui/Sheet";
 import { LeadForm } from "./LeadForm";
 import { trackBirthday } from "@/lib/funnel";
 import type { LeadPackage } from "@/lib/lead";
+import { rememberScroll } from "@/lib/scroll-restore";
 import { useSelectedPackage } from "./SelectedPackage";
 
 interface OpenOptions {
@@ -31,6 +32,7 @@ export function useLeadForm(): LeadFormContextValue {
 export function LeadFormProvider({ children }: { children: ReactNode }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  const restoreScroll = useRef<(() => void) | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [session, setSession] = useState(0); // remount the form on each open
   const [initialPackage, setInitialPackage] = useState<LeadPackage>("undecided");
@@ -39,6 +41,7 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
 
   const open = useCallback((options: OpenOptions = {}) => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    restoreScroll.current = rememberScroll();
     setInitialPackage(options.package ?? "undecided");
     // Remember the package this visit asked for, so later CTAs (header, sticky bar) open with it.
     if (options.package) setSelected(options.package);
@@ -55,7 +58,9 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
   // Idempotent: called by our own close buttons and by the native "close" event (Escape).
   const finish = useCallback(() => {
     setIsOpen(false);
-    returnFocus.current?.focus?.();
+    returnFocus.current?.focus?.({ preventScroll: true });
+    restoreScroll.current?.();
+    restoreScroll.current = null;
   }, []);
 
   const close = useCallback(() => {

@@ -218,6 +218,30 @@ for (const prof of PROFILES) {
   await page.locator('input[name="phone"]').fill(phone);
   await page.locator('input[name="children"]').fill("6");
   await page.locator('input[name="consent"]').check();
+
+  // The server can refuse a field (tampered request, outdated list): the pickers must say so to assistive technology.
+  await page.route("**/api/lead", (r) =>
+    r.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, error: "validation", fieldErrors: { package: "Выберите пакет", room: "Выберите комнату из списка" } }) }),
+  );
+  await page.getByRole("button", { name: "Отправить заявку" }).click();
+  await page.locator("dialog [role=combobox][aria-invalid=true]").first().waitFor();
+  const a11y = await page.evaluate(() =>
+    [...document.querySelectorAll("dialog [role=combobox]")].map((c) => ({
+      invalid: c.getAttribute("aria-invalid"),
+      described: (c.getAttribute("aria-describedby") || "").split(" ").filter(Boolean).map((id) => document.getElementById(id)?.textContent?.trim() || null),
+      name: c.getAttribute("aria-labelledby")?.split(" ").map((id) => document.getElementById(id)?.textContent?.trim()).join(" "),
+      expanded: c.getAttribute("aria-expanded"),
+    })),
+  );
+  ok(a11y.length === 2 && a11y.every((x) => x.invalid === "true"), "package and room comboboxes are aria-invalid when the server refuses them");
+  ok(a11y[0].described.includes("Выберите пакет") && a11y[1].described.includes("Выберите комнату из списка"), "aria-describedby points to the visible error text");
+  ok(a11y.every((x) => x.name && x.expanded === "false"), `each combobox has an accessible name and aria-expanded ("${a11y.map((x) => x.name.slice(0, 22)).join('", "')}")`);
+  await page.unroute("**/api/lead");
+  await page.locator("dialog button[aria-haspopup=listbox]").nth(0).click();
+  await page.locator('dialog [role=option][data-value="boom-party"]').click();
+  ok((await page.locator('dialog [role=combobox][aria-invalid=true]').count()) === 1, "changing a field clears only its own error state");
+  await page.locator("dialog button[aria-haspopup=listbox]").nth(1).click();
+  await page.locator('dialog [role=option][data-value="rapunzel-room"]').click();
   await page.getByRole("button", { name: "Отправить заявку" }).click();
   await page.getByText("Заявка отправлена").waitFor({ timeout: 10000 });
   ok(true, "a valid enquiry is accepted");
