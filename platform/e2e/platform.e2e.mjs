@@ -255,7 +255,7 @@ console.log("## CRM: machine endpoints, pages, export (needs PLATFORM_INTAKE_TOK
   ok(Number(await scalar("SELECT count(*) AS v FROM bb.export_log")) >= 1, "the export is written to the log");
   await ctx.close();
 
-  for (const [email, expectExport] of [["manager@qa.test", false], ["editor@qa.test", false]]) {
+  for (const email of ["manager@qa.test", "editor@qa.test"]) {
     const o = await open(1280, 800, false);
     await login(o.page, email, PW);
     const r = await o.ctx.request.post(B + "/api/export", { headers: { origin: B }, form: { format: "csv" } });

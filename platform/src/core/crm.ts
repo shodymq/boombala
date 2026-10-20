@@ -62,7 +62,7 @@ const SELECT_CONTACT = `
          (SELECT count(*) FROM bb.contacts o WHERE o.phone_e164 = c.phone_e164 AND o.id <> c.id)::int AS same_phone_others
     FROM bb.contacts c`;
 
-function mapContact(r: Record<string, any>): ContactRow {
+function mapContact(r: Record<string, never>): ContactRow {
   return {
     id: r.id,
     name: r.name,
