@@ -22,7 +22,7 @@ export default async function DashboardPage() {
   const { user } = await requirePermission("dashboard.view");
   const pool = getPool();
   const [migrations, summary] = await Promise.all([
-    pool.query<{ name: string }>("SELECT name FROM schema_migrations ORDER BY name DESC"),
+    pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
   ]);
   const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(new Date());

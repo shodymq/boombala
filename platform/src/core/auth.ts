@@ -32,7 +32,7 @@ async function lockedFor(pool: Pool, emailNorm: string, ip: string): Promise<num
        count(*) FILTER (WHERE ip = $2)::int AS by_ip,
        ceil(extract(epoch FROM (min(at) FILTER (WHERE email_norm = $1) + make_interval(secs => $3) - now())))::int AS wait_email,
        ceil(extract(epoch FROM (min(at) FILTER (WHERE ip = $2) + make_interval(secs => $3) - now())))::int AS wait_ip
-       FROM login_attempts
+       FROM bb.login_attempts
       WHERE success = false AND at > now() - make_interval(secs => $3) AND (email_norm = $1 OR ip = $2)`,
     [emailNorm, ip, LOGIN_WINDOW_SECONDS],
   );
@@ -54,14 +54,14 @@ export async function authenticate(pool: Pool, input: LoginInput): Promise<Login
   if (wait > 0) return { ok: false, reason: "locked", retryAfterSeconds: wait };
 
   const { rows } = await pool.query<{ id: string; password_hash: string; is_active: boolean }>(
-    "SELECT id, password_hash, is_active FROM users WHERE email = $1",
+    "SELECT id, password_hash, is_active FROM bb.users WHERE email = $1",
     [emailNorm],
   );
   const user = rows[0];
   const passwordOk = user ? await verifyPassword(user.password_hash, input.password) : (await dummyVerify(input.password), false);
 
   if (!user || !user.is_active || !passwordOk) {
-    await pool.query("INSERT INTO login_attempts (email_norm, ip, success) VALUES ($1, $2, false)", [emailNorm, ip]);
+    await pool.query("INSERT INTO bb.login_attempts (email_norm, ip, success) VALUES ($1, $2, false)", [emailNorm, ip]);
     await writeAudit(pool, {
       actorUserId: user?.id ?? null,
       action: "auth.login_failed",
@@ -76,9 +76,9 @@ export async function authenticate(pool: Pool, input: LoginInput): Promise<Login
 
   return withTx(pool, async (tx) => {
     const session = await createSession(tx, user.id, { ip, userAgent: input.userAgent });
-    await tx.query("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
+    await tx.query("UPDATE bb.users SET last_login_at = now() WHERE id = $1", [user.id]);
     // A successful login clears the failure counter for this e-mail.
-    await tx.query("DELETE FROM login_attempts WHERE email_norm = $1 AND success = false", [emailNorm]);
+    await tx.query("DELETE FROM bb.login_attempts WHERE email_norm = $1 AND success = false", [emailNorm]);
     await writeAudit(tx, { actorUserId: user.id, action: "auth.login", entityType: "user", entityId: user.id, ip, userAgent: input.userAgent });
     return { ok: true as const, token: session.token, expiresAt: session.expiresAt, userId: user.id };
   });
@@ -86,6 +86,6 @@ export async function authenticate(pool: Pool, input: LoginInput): Promise<Login
 
 /** Housekeeping for the throttling table. */
 export async function purgeOldLoginAttempts(pool: Pool): Promise<number> {
-  const res = await pool.query("DELETE FROM login_attempts WHERE at < now() - interval '2 days'");
+  const res = await pool.query("DELETE FROM bb.login_attempts WHERE at < now() - interval '2 days'");
   return res.rowCount ?? 0;
 }

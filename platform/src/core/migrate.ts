@@ -12,7 +12,10 @@ export interface MigrationResult {
 
 /**
  * Applies `*.sql` files in name order, each in its own transaction, once.
- * A file that was already applied and has since been edited is a hard error (checksum).
+ * - Everything lives in the closed schema `bb` (never exposed by a Data API); migrations are written unqualified and
+ *   run with `search_path = bb, public`, so the same files work on any PostgreSQL.
+ * - Needs a SESSION connection (advisory lock, DDL): use the direct/session URL, not a transaction pooler.
+ * - A file that was already applied and has since been edited is a hard error (checksum).
  * Never run against production without the owner's approval (see docs/platform/OPERATIONS.md).
  */
 export async function migrate(pool: Pool, dir: string): Promise<MigrationResult> {
@@ -21,12 +24,19 @@ export async function migrate(pool: Pool, dir: string): Promise<MigrationResult>
   const result: MigrationResult = { applied: [], skipped: [] };
   try {
     await client.query("SELECT pg_advisory_lock($1)", [LOCK_KEY]);
+    await client.query("CREATE SCHEMA IF NOT EXISTS bb");
+    // Databases created by the first version of this runner kept the tracking table in `public`.
+    await client.query(`DO $$ BEGIN
+      IF to_regclass('public.schema_migrations') IS NOT NULL AND to_regclass('bb.schema_migrations') IS NULL THEN
+        ALTER TABLE public.schema_migrations SET SCHEMA bb;
+      END IF; END $$`);
+    await client.query("SET search_path TO bb, public");
     await client.query(
-      `CREATE TABLE IF NOT EXISTS schema_migrations (
+      `CREATE TABLE IF NOT EXISTS bb.schema_migrations (
          name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`,
     );
     const done = new Map<string, string>(
-      (await client.query<{ name: string; checksum: string }>("SELECT name, checksum FROM schema_migrations")).rows.map(
+      (await client.query<{ name: string; checksum: string }>("SELECT name, checksum FROM bb.schema_migrations")).rows.map(
         (r) => [r.name, r.checksum],
       ),
     );
@@ -42,7 +52,7 @@ export async function migrate(pool: Pool, dir: string): Promise<MigrationResult>
       try {
         await client.query("BEGIN");
         await client.query(sql);
-        await client.query("INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)", [file, checksum]);
+        await client.query("INSERT INTO bb.schema_migrations (name, checksum) VALUES ($1, $2)", [file, checksum]);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
@@ -52,6 +62,7 @@ export async function migrate(pool: Pool, dir: string): Promise<MigrationResult>
     }
     return result;
   } finally {
+    await client.query("RESET search_path").catch(() => {});
     await client.query("SELECT pg_advisory_unlock($1)", [LOCK_KEY]).catch(() => {});
     client.release();
   }
