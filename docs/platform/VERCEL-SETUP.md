@@ -4,7 +4,7 @@
 
 **Проект**
 - [ ] Add New → Project → репозиторий `shodymq/boombala`, **Root Directory = `platform`**, Framework = Next.js, имя `boombala-platform`.
-- [ ] Settings → Build & Deployment → **Ignored Build Step** → Custom: `case "$VERCEL_GIT_COMMIT_REF" in feat/platform-*) exit 1;; *) exit 0;; esac`. Настроить сразу после создания: первый автодеплой из `main` в любом случае не соберётся (в `main` ещё нет `platform/`), это безвредно; после слияния PR шаг пропускает `main`.
+- [ ] Settings → Build & Deployment → **Ignored Build Step** → Custom: `case "$VERCEL_GIT_COMMIT_REF" in feat/platform-*|release/*) exit 1;; *) exit 0;; esac`. Настроить сразу после создания: первый автодеплой из `main` в любом случае не соберётся (в `main` ещё нет `platform/`), это безвредно; после слияния PR шаг пропускает `main`.
 - [ ] Settings → Deployment Protection → **Vercel Authentication** для Preview (и Production, если доступно). Своя авторизация платформы остаётся обязательной.
 - [ ] Settings → Domains: только `*.vercel.app`. Не добавлять `admin.boombala.kz`.
 - [ ] Settings → Git: не включать «Production branch» на `main` для сборок (шаг выше их пропускает); не подключать Cron/Integrations.
@@ -39,7 +39,7 @@
 | Root Directory | `platform` |
 | Framework | Next.js |
 | Адрес | автоматический `*.vercel.app` (без `admin.boombala.kz`) |
-| **Ignored Build Step** | `case "$VERCEL_GIT_COMMIT_REF" in feat/platform-*) exit 1;; *) exit 0;; esac` |
+| **Ignored Build Step** | `case "$VERCEL_GIT_COMMIT_REF" in feat/platform-*|release/*) exit 1;; *) exit 0;; esac` |
 | Vercel Authentication (Deployment Protection) | **Standard / All Deployments** (если тариф позволяет), внутренняя авторизация платформы остаётся обязательной |
 | Production | не использовать: `main` не содержит сборки платформы; Ignored Build Step пропускает все ветки, кроме `feat/platform-*` |
 
