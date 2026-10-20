@@ -1,0 +1,24 @@
+# Внешний планировщик для повторной отправки Telegram-уведомлений (outbox).
+# Почему не Vercel Cron: частота и количество cron-задач на бесплатном тарифе ограничены (проверьте в Settings → Cron Jobs своего проекта),
+# а уведомления должны повторяться минут через 1–5. Эта задача вызывает защищённый эндпоинт платформы раз в 5 минут.
+#
+# Как включить (ничего не включено, пока файл лежит как .example):
+#   1. Скопировать в .github/workflows/outbox-cron.yml.
+#   2. В GitHub: Settings → Secrets and variables → Actions → добавить секреты PLATFORM_URL (https://<платформа>.vercel.app) и CRON_SECRET
+#      (то же значение, что в переменных платформы). Значения в репозиторий не записывать.
+#   3. Включать только после решения о размещении персональных данных (PII_INTAKE_ENABLED=1 на платформе).
+name: outbox-cron
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.PLATFORM_URL != '' && secrets.CRON_SECRET != '' }}
+    steps:
+      - name: Retry pending Telegram notifications
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 25 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ secrets.PLATFORM_URL }}/api/cron/outbox")
+          echo "outbox worker answered $code"
+          test "$code" = "200"

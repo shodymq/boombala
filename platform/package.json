@@ -20,7 +20,9 @@
     "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
     "verify:remote": "node --no-warnings scripts/verify-remote.ts",
-    "e2e:news": "node --no-warnings e2e/news.e2e.mjs"
+    "e2e:news": "node --no-warnings e2e/news.e2e.mjs",
+    "e2e:release": "node --no-warnings e2e/release.e2e.mjs",
+    "backup:check": "node --no-warnings scripts/backup-restore-check.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
