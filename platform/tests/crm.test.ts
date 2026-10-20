@@ -215,6 +215,27 @@ describe("CRM: intake, outbox, Telegram, export", () => {
       assert.equal(empty.rowCount, 0);
     });
 
+    it("phone numbers keep their +7 and stay TEXT in XLSX (never a number or a formula); CSV keeps the plain value", async () => {
+      await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "+7 Имя с плюсом", phone: "+7 701 000 00 02", acceptRules: true, acceptPersonalData: true });
+      const x = await exportContacts(db.pool, owner, { format: "xlsx", columns: ["name", "phone"], filters: { q: "00 00 02".replace(/ /g, "") } });
+      const dir = mkdtempSync(join(tmpdir(), "bbx-"));
+      try {
+        writeFileSync(join(dir, "p.xlsx"), x.body);
+        const sheet = execFileSync("unzip", ["-p", join(dir, "p.xlsx"), "xl/worksheets/sheet1.xml"]).toString();
+        const strings = execFileSync("unzip", ["-p", join(dir, "p.xlsx"), "xl/sharedStrings.xml"]).toString();
+        assert.ok(strings.includes("+77010000002"), "phone is stored as a string with its +");
+        assert.ok(strings.includes("&apos;+7 Имя с плюсом") || strings.includes("'+7 Имя с плюсом"), "a NAME that starts with + is neutralised");
+        const dataCells = [...sheet.matchAll(/<c [^>]*>/g)].map((m) => m[0]);
+        assert.ok(dataCells.length > 0 && dataCells.every((c) => /t="(s|inlineStr)"/.test(c)), "every cell is text, none numeric");
+        assert.ok(!sheet.includes("<f"), "no formulas");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+      const csv = (await exportContacts(db.pool, owner, { format: "csv", columns: ["name", "phone"], filters: { q: "00 00 02".replace(/ /g, "") } })).body.toString("utf8");
+      assert.match(csv, /\+77010000002\r\n/);
+      assert.match(csv, /'\+7 Имя с плюсом/);
+    });
+
     it("neutralises formula injection in CSV and XLSX", async () => {
       assert.equal(guardCell("=1+1"), "'=1+1");
       assert.equal(guardCell("+cmd|' /C calc'!A0"), "'+cmd|' /C calc'!A0");

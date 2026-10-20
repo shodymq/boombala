@@ -14,6 +14,7 @@ export default async function ExportPage() {
     <div className="grid gap-5">
       <h1 className="text-3xl font-black tracking-tight text-grape-800">Выгрузка клиентов</h1>
       <p className="text-sm text-muted">Файл содержит персональные данные. Каждая выгрузка записывается в журнал. Используйте только для служебных целей, не рассылайте и не храните на личных устройствах.</p>
+      <p className="text-sm text-muted">Телефоны в XLSX сохраняются как текст с «+7». Если открыть CSV двойным щелчком, Excel может убрать «+»: используйте XLSX или импорт CSV с типом столбца «Текст». Значения, начинающиеся с «=», «+», «-», «@», защищены апострофом.</p>
       <form method="post" action="/api/export" className="grid gap-4 rounded-3xl border border-line bg-white p-5">
         <fieldset className="grid gap-2">
           <legend className="text-sm font-extrabold text-grape-800">Формат</legend>
