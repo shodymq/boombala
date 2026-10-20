@@ -15,6 +15,7 @@ export interface StaffUser {
   isActive: boolean;
   createdAt: Date;
   lastLoginAt: Date | null;
+  canExport: boolean;
 }
 
 export interface RequestMeta {
@@ -40,10 +41,10 @@ function fieldErrors(error: z.ZodError): Record<string, string> {
   return out;
 }
 
-const COLUMNS = "id, email, name, role::text AS role, is_active, created_at, last_login_at";
-function mapUser(r: { id: string; email: string; name: string; role: string; is_active: boolean; created_at: Date; last_login_at: Date | null }): StaffUser {
+const COLUMNS = "id, email, name, role::text AS role, is_active, created_at, last_login_at, can_export";
+function mapUser(r: { id: string; email: string; name: string; role: string; is_active: boolean; created_at: Date; last_login_at: Date | null; can_export: boolean }): StaffUser {
   if (!isRole(r.role)) throw new Error("unknown role in database");
-  return { id: r.id, email: r.email, name: r.name, role: r.role, isActive: r.is_active, createdAt: r.created_at, lastLoginAt: r.last_login_at };
+  return { id: r.id, email: r.email, name: r.name, role: r.role, isActive: r.is_active, createdAt: r.created_at, lastLoginAt: r.last_login_at, canExport: r.can_export };
 }
 
 /**
@@ -96,6 +97,19 @@ export async function changeRole(pool: Pool, actor: Actor, userId: string, role:
     await tx.query("UPDATE bb.users SET role = $2, updated_at = now() WHERE id = $1", [userId, role]);
     await revokeUserSessions(tx, userId); // permissions changed: sign the person in again
     await writeAudit(tx, { actorUserId: actor.id, action: "user.role_changed", entityType: "user", entityId: userId, before: { role: rows[0].role }, after: { role }, ...meta });
+  });
+}
+
+/** Grants or withdraws the right to export the client base. Owner only; the Owner always may export. */
+export async function setCanExport(pool: Pool, actor: Actor, userId: string, allowed: boolean, meta: RequestMeta = {}): Promise<void> {
+  assertCan(actor, "users.manage");
+  await withTx(pool, async (tx) => {
+    const { rows } = await tx.query<{ can_export: boolean }>("SELECT can_export FROM bb.users WHERE id = $1 FOR UPDATE", [userId]);
+    if (!rows[0]) throw new ValidationError({ user: "Пользователь не найден" });
+    if (rows[0].can_export === allowed) return;
+    await tx.query("UPDATE bb.users SET can_export = $2, updated_at = now() WHERE id = $1", [userId, allowed]);
+    await revokeUserSessions(tx, userId); // permissions changed: sign the person in again
+    await writeAudit(tx, { actorUserId: actor.id, action: "user.export_permission_changed", entityType: "user", entityId: userId, before: { canExport: rows[0].can_export }, after: { canExport: allowed }, ...meta });
   });
 }
 

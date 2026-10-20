@@ -21,3 +21,11 @@ export class ConflictError extends Error {
     this.name = "ConflictError";
   }
 }
+
+/** The documents a visitor must accept are not published yet, so no personal data may be collected. */
+export class ConsentUnavailableError extends Error {
+  constructor() {
+    super("consent_unavailable");
+    this.name = "ConsentUnavailableError";
+  }
+}

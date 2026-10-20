@@ -13,6 +13,7 @@ export interface SessionUser {
   email: string;
   name: string;
   role: Role;
+  canExport: boolean;
 }
 
 export interface ValidSession {
@@ -55,9 +56,10 @@ export async function validateSession(db: Queryable, token: string | undefined):
     email: string;
     name: string;
     role: string;
+    can_export: boolean;
     stale: boolean;
   }>(
-    `SELECT s.id AS session_id, s.last_seen_at, u.id, u.email, u.name, u.role::text AS role,
+    `SELECT s.id AS session_id, s.last_seen_at, u.id, u.email, u.name, u.role::text AS role, u.can_export,
             (s.last_seen_at < now() - make_interval(secs => $3)) AS stale
        FROM bb.sessions s JOIN bb.users u ON u.id = s.user_id
       WHERE s.token_hash = $1
@@ -70,7 +72,7 @@ export async function validateSession(db: Queryable, token: string | undefined):
   const row = rows[0];
   if (!row || !isRole(row.role)) return null;
   if (row.stale) await db.query("UPDATE bb.sessions SET last_seen_at = now() WHERE id = $1", [row.session_id]);
-  return { sessionId: row.session_id, user: { id: row.id, email: row.email, name: row.name, role: row.role } };
+  return { sessionId: row.session_id, user: { id: row.id, email: row.email, name: row.name, role: row.role, canExport: row.can_export } };
 }
 
 export async function revokeSession(db: Queryable, token: string): Promise<void> {
