@@ -66,6 +66,7 @@ export interface LeadNotification {
   children: number | null;
   packageName: string | null;
   roomName: string | null;
+  slotLabel: string | null;
   consentVersion: number | null;
   page: string | null;
   referrer: string | null;
@@ -102,6 +103,7 @@ export function buildLeadMessage(n: LeadNotification, level: "full" | "minimal")
     `Детей: ${dash(n.children)}`,
     `Пакет: ${dash(n.packageName)}`,
     `Предпочитаемая комната: ${dash(n.roomName)}`,
+    `Предпочитаемый слот: ${dash(n.slotLabel)}`,
     "",
     `Согласие на обработку данных: да (редакция ${dash(n.consentVersion)})`,
     "Источник: website",

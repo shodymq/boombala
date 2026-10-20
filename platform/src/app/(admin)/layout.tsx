@@ -5,6 +5,8 @@ import { NavLinks, type NavItem } from "./nav-links";
 
 const NAV: Array<NavItem & { permission: Permission }> = [
   { href: "/", label: "Обзор", permission: "dashboard.view" },
+  { href: "/bookings", label: "Календарь", permission: "bookings.manage" },
+  { href: "/requests", label: "Заявки", permission: "requests.manage" },
   { href: "/contacts", label: "Клиенты", permission: "contacts.view" },
   { href: "/legal", label: "Документы", permission: "legal.manage" },
   { href: "/users", label: "Сотрудники", permission: "users.manage" },
@@ -12,7 +14,7 @@ const NAV: Array<NavItem & { permission: Permission }> = [
   { href: "/account", label: "Мой пароль", permission: "dashboard.view" },
 ];
 
-const ORDER = ["/", "/contacts", "/export", "/legal", "/users", "/audit", "/account"];
+const ORDER = ["/", "/bookings", "/requests", "/contacts", "/export", "/legal", "/users", "/audit", "/account"];
 
 const ROLE_LABEL = { owner: "Владелец", manager: "Менеджер", editor: "Редактор" } as const;
 

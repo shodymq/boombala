@@ -20,6 +20,7 @@ import { siteConfig } from "@/services/config";
 import { buttonClass } from "@/components/ui/buttonStyles";
 import { birthdayMessage, whatsappUrl } from "@/lib/whatsapp";
 import { useSelectedPackage } from "./SelectedPackage";
+import { AvailabilityPanel, calendarEnabled } from "@/components/booking/AvailabilityPanel";
 
 /** A random UUID; `crypto.randomUUID` exists only in secure contexts, so fall back to getRandomValues. */
 function newKey(): string {
@@ -55,6 +56,7 @@ export function LeadForm({
     package: initialPackage,
     consent: false,
     room: initialRoom,
+    slot: "",
   });
   const { setRoom: rememberRoom, setSelected: rememberPackage } = useSelectedPackage();
   const [errors, setErrors] = useState<LeadErrors>({});
@@ -294,6 +296,17 @@ export function LeadForm({
             {err("children")}
           </div>
         </div>
+
+        {calendarEnabled ? (
+          <AvailabilityPanel
+            date={values.date}
+            packageId={values.package}
+            slot={values.slot}
+            onSlot={(id) => set("slot", id)}
+            onPickDate={(d) => set("date", d)}
+            minDate={minBookingDate()}
+          />
+        ) : null}
 
         <div className="grid gap-2">
           <label htmlFor={idOf("package")} className="font-display text-sm font-extrabold text-grape-800">

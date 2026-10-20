@@ -32,7 +32,7 @@
 | `PLATFORM_IP_PEPPER` | секрет для хэша IP в истории согласий (IP не хранится открытым) |
 
 Переменные публичного сайта (проект «site»): `LEAD_PIPELINE` (`telegram-only` по умолчанию | `dual` | `strict`), `PLATFORM_URL`,
-`PLATFORM_INTAKE_TOKEN` (тот же, что у платформы), `CONSENT_FORM_ENABLED` (`1` включает `/consent`). Без них сайт работает как раньше.
+`PLATFORM_INTAKE_TOKEN` (тот же, что у платформы), `CONSENT_FORM_ENABLED` (`1` включает `/consent`). `NEXT_PUBLIC_BOOKING_CALENDAR=1` включает календарь в форме заявки ([BOOKINGS.md](BOOKINGS.md)). Без них сайт работает как раньше.
 Переменные меняются только с новым деплоем; откат `LEAD_PIPELINE` на `telegram-only` возвращает прежний процесс.
 
 Ключи Supabase `anon` и `service_role` **не используются и не добавляются никуда**. **Data API у проекта отключить.**
