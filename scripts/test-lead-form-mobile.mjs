@@ -266,7 +266,8 @@ for (const prof of PROFILES) {
   ok((await page.locator("dialog.sheet[open]").count()) === 0, "a tap on the dimmed backdrop closes the form");
   ok(await page.evaluate(() => getComputedStyle(document.documentElement).overflow !== "hidden"), "page scrolling is released after closing");
 
-  // room gallery sheet
+  // room gallery sheet (let the scroll restoration of the form that just closed finish first)
+  await page.waitForTimeout(300);
   await page.evaluate(() => document.querySelector('button[aria-haspopup="dialog"]')?.scrollIntoView({ block: "center", behavior: "instant" }));
   await page.waitForTimeout(250);
   const gScroll = await page.evaluate(() => Math.round(scrollY));
