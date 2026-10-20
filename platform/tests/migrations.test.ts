@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, cpSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -18,7 +18,7 @@ describe("migrations and DB-level guarantees", () => {
   it("is idempotent: a second run applies nothing", async () => {
     const second = await migrate(db.pool, MIGRATIONS_DIR);
     assert.deepEqual(second.applied, []);
-    assert.equal(second.skipped.length, 2);
+    assert.equal(second.skipped.length, readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).length);
   });
 
   it("refuses an already applied migration that was edited", async () => {

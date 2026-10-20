@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
 import { isRole } from "../../../core/rbac.ts";
-import { changeRole, createUser, setActive, setPassword } from "../../../core/users.ts";
+import { changeRole, createUser, setActive, setCanExport, setPassword } from "../../../core/users.ts";
 import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
@@ -72,4 +72,16 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
     return failure(error);
   }
   redirect("/users?notice=password");
+}
+
+export async function setCanExportAction(formData: FormData): Promise<void> {
+  const { user } = await requirePermission("users.manage");
+  const id = uuid.safeParse(formData.get("id"));
+  if (!id.success) return failure(new ValidationError({ user: "Некорректные данные" }));
+  try {
+    await setCanExport(getPool(), { id: user.id, role: user.role }, id.data, formData.get("allowed") === "1", await requestMeta());
+  } catch (error) {
+    return failure(error);
+  }
+  redirect("/users?notice=export");
 }

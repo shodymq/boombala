@@ -19,7 +19,7 @@ export default async function AuditPage() {
   const { rows } = await getPool().query<Row>(
     `SELECT a.id, a.at, a.action, a.entity_type, a.entity_id, u.name AS actor,
             left(coalesce(a.after, a.before)::text, 160) AS detail
-       FROM audit_log a LEFT JOIN users u ON u.id = a.actor_user_id
+       FROM bb.audit_log a LEFT JOIN bb.users u ON u.id = a.actor_user_id
       ORDER BY a.id DESC LIMIT 200`,
   );
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "medium", timeZone: "Asia/Almaty" });

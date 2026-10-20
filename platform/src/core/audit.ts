@@ -15,7 +15,7 @@ export interface AuditEntry {
 /** Append-only (a trigger forbids UPDATE/DELETE). Pass the transaction client so the entry commits with the change. */
 export async function writeAudit(db: Queryable, entry: AuditEntry): Promise<void> {
   await db.query(
-    `INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, before, after, ip, user_agent)
+    `INSERT INTO bb.audit_log (actor_user_id, action, entity_type, entity_id, before, after, ip, user_agent)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       entry.actorUserId,

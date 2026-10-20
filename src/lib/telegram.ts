@@ -79,6 +79,8 @@ export interface LeadMessage {
   utmSource: string;
   utmMedium: string;
   utmCampaign: string;
+  /** Set only when the lead could NOT be saved in the CRM (dual-mode fallback): staff must know it exists only here. */
+  crmNote?: string;
 }
 
 const dash = (v: string | number | null | undefined) => {
@@ -115,6 +117,7 @@ function almatyTimestamp(now = new Date()): string {
 export function buildLeadText(lead: LeadMessage): string {
   return [
     "🎂 НОВАЯ ЗАЯВКА — BOOM BALA",
+    ...(lead.crmNote ? ["", lead.crmNote] : []),
     "",
     `Имя: ${dash(lead.name)}`,
     `Телефон: ${dash(prettyPhone(lead.phone))}`,

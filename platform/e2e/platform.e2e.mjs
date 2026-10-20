@@ -65,7 +65,7 @@ console.log("## login (390x844)");
   const cookie = (await ctx.cookies()).find((c) => c.name === "bb_session");
   ok(!!cookie && cookie.httpOnly && cookie.sameSite === "Lax" && cookie.path === "/", "session cookie is HttpOnly, SameSite=Lax, Path=/");
   ok(!(await page.evaluate(() => document.cookie)).includes("bb_session"), "cookie is not readable from JavaScript");
-  ok((await scalar(`SELECT count(*) AS v FROM sessions WHERE encode(token_hash,'hex') = '${cookie.value}'`)) === "0", "the raw token is not stored in the database");
+  ok((await scalar(`SELECT count(*) AS v FROM bb.sessions WHERE encode(token_hash,'hex') = '${cookie.value}'`)) === "0", "the raw token is not stored in the database");
   const text = (await page.locator("main").innerText()).replace(/[\u00a0\u202f]/g, " ");
   ok(text.includes("QA Owner") && text.includes("37 900") && text.includes("79 990") && text.includes("Roblox Room") && text.includes("10:00–14:00"), "dashboard shows the real catalog from the database");
   await shot(page, "390-dashboard-owner", { fullPage: true });
@@ -87,7 +87,8 @@ for (const [email, role] of [["manager@qa.test", "manager"], ["editor@qa.test", 
   await login(page, email, PW);
   ok(new URL(page.url()).pathname === "/", `${role} signs in`);
   const nav = (await page.locator("nav[aria-label=Разделы]").innerText()).split("\n").map((s) => s.trim()).filter(Boolean);
-  ok(JSON.stringify(nav) === JSON.stringify(["Обзор", "Мой пароль"]), `${role} sees only: ${nav.join(", ")}`);
+  const expectedNav = role === "manager" ? ["Обзор", "Клиенты", "Мой пароль"] : ["Обзор", "Мой пароль"];
+  ok(JSON.stringify(nav) === JSON.stringify(expectedNav), `${role} sees only: ${nav.join(", ")}`);
   for (const path of ["/users", "/audit"]) {
     await page.goto(B + path, { waitUntil: "networkidle" });
     ok(new URL(page.url()).pathname === "/", `${role} typing ${path} is sent back to the dashboard`);
@@ -100,14 +101,14 @@ for (const [email, role] of [["manager@qa.test", "manager"], ["editor@qa.test", 
     await owner.page.goto(B + "/users", { waitUntil: "networkidle" });
     const id = await owner.page.locator("form:has(input[name=email]) input[name^='$ACTION_ID_']").first().getAttribute("name");
     await owner.ctx.close();
-    const before = await scalar("SELECT count(*) AS v FROM users");
+    const before = await scalar("SELECT count(*) AS v FROM bb.users");
     const res = await ctx.request.post(B + "/users", {
       multipart: { [id]: "", name: "Hacker", email: "hacker@qa.test", role: "owner", password: "hacker password 12345" },
       maxRedirects: 0,
       headers: { Origin: B },
     });
-    ok((await scalar("SELECT count(*) AS v FROM users")) === before, `a forged createUser action sent as manager creates nothing (HTTP ${res.status()})`);
-    ok((await scalar("SELECT count(*) AS v FROM users WHERE email = 'hacker@qa.test'")) === "0", "no hacker account exists");
+    ok((await scalar("SELECT count(*) AS v FROM bb.users")) === before, `a forged createUser action sent as manager creates nothing (HTTP ${res.status()})`);
+    ok((await scalar("SELECT count(*) AS v FROM bb.users WHERE email = 'hacker@qa.test'")) === "0", "no hacker account exists");
   }
   await ctx.close();
 }
@@ -126,10 +127,10 @@ console.log("## a state-changing request from another origin is refused (CSRF)")
       headers: { Origin: origin },
     });
   const evil = await post("https://evil.example");
-  ok((await scalar(`SELECT count(*) AS v FROM users WHERE email = '${victim}'`)) === "0", `createUser posted with the Owner's cookie from https://evil.example is rejected (HTTP ${evil.status()})`);
+  ok((await scalar(`SELECT count(*) AS v FROM bb.users WHERE email = '${victim}'`)) === "0", `createUser posted with the Owner's cookie from https://evil.example is rejected (HTTP ${evil.status()})`);
   const same = await post(B);
-  ok((await scalar(`SELECT count(*) AS v FROM users WHERE email = '${victim}'`)) === "1", `the same request from the real origin works (HTTP ${same.status()}), so the refusal above was the origin check`);
-  await pool.query("UPDATE users SET is_active = false WHERE email = $1", [victim]);
+  ok((await scalar(`SELECT count(*) AS v FROM bb.users WHERE email = '${victim}'`)) === "1", `the same request from the real origin works (HTTP ${same.status()}), so the refusal above was the origin check`);
+  await pool.query("UPDATE bb.users SET is_active = false WHERE email = $1", [victim]);
   await ctx.close();
 }
 
@@ -159,7 +160,117 @@ console.log("## lockout through the UI");
   const msg = await page.locator("form [role=alert]").innerText();
   ok(/Слишком много/.test(msg), "the 6th attempt with the RIGHT password is locked: " + msg);
   await ctx.close();
-  await pool.query("DELETE FROM login_attempts");
+  await pool.query("DELETE FROM bb.login_attempts");
+}
+
+console.log("## CRM: machine endpoints, pages, export (needs PLATFORM_INTAKE_TOKEN, CRON_SECRET and a mock Telegram, see README)");
+{
+  const TOKEN = process.env.PLATFORM_INTAKE_TOKEN;
+  const CRON = process.env.CRON_SECRET;
+  if (!TOKEN || !CRON) throw new Error("PLATFORM_INTAKE_TOKEN and CRON_SECRET are required for the CRM section");
+  const call = (path, init = {}) => fetch(B + path, { redirect: "manual", ...init });
+  const post = (path, body, token = TOKEN) =>
+    call(path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
+  const key = crypto.randomUUID();
+  const date = new Date(Date.now() + 40 * 864e5).toISOString().slice(0, 10);
+  const lead = { idempotencyKey: key, name: "E2E Гость", phone: "+77470000001", date, children: 5, consent: true };
+
+  ok((await post("/api/intake/lead", lead, null)).status === 401, "intake without a token is refused");
+  ok((await post("/api/intake/lead", lead, "x".repeat(40))).status === 401, "intake with a wrong token is refused");
+  ok((await call("/api/cron/outbox")).status === 401, "cron without a secret is refused");
+  ok((await call("/api/public/legal")).status === 401, "public legal endpoint needs the server token too");
+  ok((await call("/api/export", { method: "POST", headers: { origin: B } })).status !== 200, "export without a session is not served");
+
+  // Local dev DB only: retire what earlier runs published, so "nothing published" is the starting point of this run.
+  await pool.query("UPDATE bb.legal_documents SET status = 'retired' WHERE status = 'published'");
+  await pool.query("DELETE FROM bb.legal_documents WHERE status = 'draft' AND kind = 'privacy_policy'");
+  const noDoc = await post("/api/intake/lead", lead);
+  ok(noDoc.status === 503 && (await noDoc.json()).error === "consent_unavailable", "no published consent document: enquiry is refused (503)");
+
+  const { ctx, page } = await open(1280, 800, false);
+  await login(page, "owner@qa.test", PW);
+  await page.goto(B + "/legal", { waitUntil: "networkidle" });
+  const KIND_LABEL = { personal_data_consent: "Согласие на обработку данных", visit_rules: "Правила посещения", privacy_policy: "Политика обработки данных" };
+  const draftVia = async (kind, title, body) => {
+    await page.goto(B + "/legal", { waitUntil: "networkidle" });
+    await page.locator("form:has(textarea[name=body]) select[name=kind]").first().selectOption(kind);
+    await page.locator("form:has(textarea[name=body]) input[name=title]").first().fill(title);
+    await page.locator("form:has(textarea[name=body]) textarea[name=body]").first().fill(body);
+    await page.getByRole("button", { name: "Создать черновик" }).click();
+    await page.waitForTimeout(800);
+    const version = await scalar(`SELECT max(version) AS v FROM bb.legal_documents WHERE kind = '${kind}'`);
+    return page.locator("article", { hasText: `${KIND_LABEL[kind]} · редакция ${version}` });
+  };
+  for (const [kind, title] of [["personal_data_consent", "Согласие E2E"], ["visit_rules", "Правила E2E"]]) {
+    const card = await draftVia(kind, title, "Тестовый текст документа");
+    await card.getByRole("button", { name: "Утвердить" }).click();
+    await page.waitForTimeout(800);
+    await card.getByRole("button", { name: "Опубликовать" }).click();
+    await page.waitForTimeout(800);
+  }
+  ok((await scalar("SELECT count(*) AS v FROM bb.legal_documents WHERE status = 'published'")) === "2", "owner drafted, approved and published two documents through the UI");
+  // placeholder text cannot be approved
+  const ph = await draftVia("privacy_policy", "Политика E2E", "ТОО [ТРЕБУЕТСЯ: название]");
+  await ph.getByRole("button", { name: "Утвердить" }).click();
+  await page.waitForTimeout(800);
+  ok((await page.locator("[role=alert]").first().innerText()).includes("ТРЕБУЕТСЯ"), "a draft with placeholders cannot be approved");
+  ok((await scalar("SELECT count(*) AS v FROM bb.legal_documents WHERE kind = 'privacy_policy' AND status <> 'draft'")) === "0", "and it stays a draft");
+
+  const docs = await (await call("/api/public/legal", { headers: { authorization: `Bearer ${TOKEN}` } })).json();
+  ok(docs.ok && docs.documents.length === 2 && !JSON.stringify(docs).includes("@"), "published documents are served to the site without personal data");
+
+  const first = await post("/api/intake/lead", lead);
+  const firstBody = await first.json();
+  ok(first.status === 201 && firstBody.ok && !firstBody.duplicate, "enquiry is saved (201) after the database commit");
+  const again = await post("/api/intake/lead", lead);
+  ok(again.status === 200 && (await again.json()).duplicate === true, "the same idempotency key returns the first result");
+  ok((await scalar(`SELECT count(*) AS v FROM bb.lead_requests WHERE idempotency_key = '${key}'`)) === "1", "one enquiry in the database");
+  await new Promise((r) => setTimeout(r, 1500));
+  ok((await scalar(`SELECT o.status AS v FROM bb.outbox o JOIN bb.lead_requests l ON l.id = o.ref_id WHERE l.idempotency_key = '${key}'`)) === "sent", "Telegram message was sent (mock)");
+  const bad = await post("/api/intake/lead", { ...lead, idempotencyKey: crypto.randomUUID(), phone: "12" });
+  ok(bad.status === 422, "invalid enquiry is refused (422)");
+
+  const reg = { idempotencyKey: crypto.randomUUID(), name: "E2E QR", phone: "+77470000002", acceptRules: true, acceptPersonalData: true };
+  const r1 = await post("/api/intake/consent", reg);
+  ok(r1.status === 201, "QR registration saved");
+  ok((await post("/api/intake/consent", reg)).status === 200, "QR registration is idempotent");
+  ok((await post("/api/intake/consent", { ...reg, idempotencyKey: crypto.randomUUID(), acceptPersonalData: false })).status === 422, "QR without the data consent is refused");
+
+  const cron = await call("/api/cron/outbox", { headers: { authorization: `Bearer ${CRON}` } });
+  ok(cron.status === 200 && (await cron.json()).ok, "cron endpoint works with the secret");
+
+  await page.goto(B + "/contacts?q=E2E", { waitUntil: "networkidle" });
+  const list = await page.locator("main").innerText();
+  ok(list.includes("E2E Гость") && list.includes("E2E QR"), "contacts list finds both people");
+  await page.getByRole("link", { name: /E2E Гость/ }).click();
+  await page.waitForURL(/\/contacts\/[0-9a-f-]{36}$/);
+  await page.waitForLoadState("networkidle");
+  const card = await page.locator("main").innerText();
+  ok(/Заявки \(\d+\)/.test(card) && card.includes("Согласие на обработку данных") && card.includes("не является электронной цифровой подписью"), "contact card shows the enquiry and the consent history");
+  await page.goto(B + "/export", { waitUntil: "networkidle" });
+  ok((await page.locator("h1").innerText()).includes("Выгрузка"), "owner sees the export page");
+  const dl = await ctx.request.post(B + "/api/export", { headers: { origin: B }, multipart: (() => { const f = new FormData(); f.append("format", "csv"); f.append("columns", "name"); f.append("columns", "phone"); return f; })() });
+  ok(dl.status() === 200 && (await dl.text()).includes("E2E Гость") && dl.headers()["content-disposition"].includes("attachment"), "owner downloads a CSV");
+  ok((await ctx.request.post(B + "/api/export", { headers: { origin: "https://evil.example" }, form: { format: "csv" } })).status() === 403, "export from a foreign origin is refused");
+  ok(Number(await scalar("SELECT count(*) AS v FROM bb.export_log")) >= 1, "the export is written to the log");
+  await ctx.close();
+
+  for (const email of ["manager@qa.test", "editor@qa.test"]) {
+    const o = await open(1280, 800, false);
+    await login(o.page, email, PW);
+    const r = await o.ctx.request.post(B + "/api/export", { headers: { origin: B }, form: { format: "csv" } });
+    ok(r.status() === 403, `${email} cannot export (403)`);
+    await o.page.goto(B + "/export", { waitUntil: "networkidle" });
+    ok(new URL(o.page.url()).pathname === "/", `${email} is sent away from the export page`);
+    if (email.startsWith("editor")) {
+      await o.page.goto(B + "/contacts", { waitUntil: "networkidle" });
+      ok(new URL(o.page.url()).pathname === "/", "editor cannot open clients");
+    } else {
+      await o.page.goto(B + "/legal", { waitUntil: "networkidle" });
+      ok(new URL(o.page.url()).pathname === "/", "manager cannot manage legal documents");
+    }
+    await o.ctx.close();
+  }
 }
 
 console.log(fails ? `\nFAILS: ${fails}` : "\nALL OK");

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BUSINESS_TIME_ZONE, catalogSummary } from "@/core/catalog";
+import { outboxStats } from "@/core/outbox";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermission } from "@/server/dal";
@@ -12,6 +13,7 @@ const ACCESS: Array<{ permission: Permission; label: string }> = [
   { permission: "requests.manage", label: "Заявки" },
   { permission: "bookings.manage", label: "Бронирования" },
   { permission: "contacts.view", label: "Клиенты" },
+  { permission: "legal.manage", label: "Документы" },
   { permission: "news.manage", label: "Новости" },
   { permission: "prices.manage", label: "Цены" },
   { permission: "users.manage", label: "Сотрудники" },
@@ -21,9 +23,10 @@ const ACCESS: Array<{ permission: Permission; label: string }> = [
 export default async function DashboardPage() {
   const { user } = await requirePermission("dashboard.view");
   const pool = getPool();
-  const [migrations, summary] = await Promise.all([
-    pool.query<{ name: string }>("SELECT name FROM schema_migrations ORDER BY name DESC"),
+  const [migrations, summary, outbox] = await Promise.all([
+    pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
+    can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
   ]);
   const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(new Date());
 
@@ -33,6 +36,14 @@ export default async function DashboardPage() {
         <h1 className="text-3xl font-black tracking-tight text-grape-800">Здравствуйте, {user.name}</h1>
         <p className="mt-1 text-sm text-muted">Сейчас {now} (Алматы)</p>
       </header>
+
+      {outbox ? (
+        <section aria-labelledby="ob" className="rounded-3xl border border-line bg-white p-5">
+          <h2 id="ob" className="text-lg font-black text-grape-800">Уведомления в Telegram</h2>
+          <p className="mt-2 text-sm">Ожидают отправки: <b>{outbox.pending}</b> · Не доставлены после всех попыток: <b className={outbox.dead ? "text-red-700" : ""}>{outbox.dead}</b></p>
+          {outbox.dead ? <p className="mt-1 text-sm font-bold text-red-700">Есть недоставленные уведомления. Заявки сохранены в разделе «Клиенты».</p> : null}
+        </section>
+      ) : null}
 
       <section aria-labelledby="sys" className="rounded-3xl border border-line bg-white p-5">
         <h2 id="sys" className="text-lg font-black text-grape-800">Система</h2>

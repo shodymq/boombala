@@ -11,7 +11,8 @@ const dev = process.env.NODE_ENV === "development";
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isPublic = pathname === "/login" || pathname === "/api/health";
+  // Machine endpoints authenticate themselves (Bearer secrets) and must not be redirected to the login page.
+  const isPublic = pathname === "/login" || pathname === "/api/health" || pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/") || pathname.startsWith("/api/cron/");
   if (!isPublic && !request.cookies.get(SESSION_COOKIE)) {
     return NextResponse.redirect(new URL("/login", request.url));
   }

@@ -21,18 +21,18 @@ export interface TimeSlot {
 }
 
 export async function listPackages(db: Queryable): Promise<CatalogItem[]> {
-  const { rows } = await db.query("SELECT id, name, sort_order, is_active FROM packages ORDER BY sort_order, id");
+  const { rows } = await db.query("SELECT id, name, sort_order, is_active FROM bb.packages ORDER BY sort_order, id");
   return rows.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, isActive: r.is_active }));
 }
 
 export async function listRooms(db: Queryable): Promise<CatalogItem[]> {
-  const { rows } = await db.query("SELECT id, name, sort_order, is_active FROM rooms ORDER BY sort_order, id");
+  const { rows } = await db.query("SELECT id, name, sort_order, is_active FROM bb.rooms ORDER BY sort_order, id");
   return rows.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, isActive: r.is_active }));
 }
 
 export async function listSlots(db: Queryable): Promise<TimeSlot[]> {
   const { rows } = await db.query<{ id: number; starts_at: string; ends_at: string }>(
-    "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM time_slots ORDER BY id",
+    "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY id",
   );
   return rows.map((r) => ({ id: r.id, startsAt: r.starts_at, endsAt: r.ends_at }));
 }
@@ -63,7 +63,7 @@ export async function resolvePrice(db: Queryable, packageId: string, date: strin
   if (!isValidDate(date)) throw new ValidationError({ date: "Некорректная дата" });
   const { rows } = await db.query<{ rule_type: string; amount_kzt: number | null }>(
     `SELECT DISTINCT ON (rule_type, rule_date) rule_type, amount_kzt
-       FROM price_rules
+       FROM bb.price_rules
       WHERE package_id = $1 AND (rule_type <> 'date' OR rule_date = $2::date)
       ORDER BY rule_type, rule_date, id DESC`,
     [packageId, date],
@@ -101,13 +101,13 @@ export async function setPriceRule(pool: Pool, actor: Actor, input: PriceRuleInp
   if (Object.keys(errors).length) throw new ValidationError(errors);
 
   await withTx(pool, async (tx) => {
-    const pkg = await tx.query("SELECT 1 FROM packages WHERE id = $1", [input.packageId]);
+    const pkg = await tx.query("SELECT 1 FROM bb.packages WHERE id = $1", [input.packageId]);
     if (!pkg.rowCount) throw new ValidationError({ packageId: "Пакет не найден" });
     const date = input.ruleType === "date" ? input.date! : undefined;
     // 2099-01-02 is a Friday: for non-date rules it shows the weekday/base value that is being replaced.
     const before = await resolvePrice(tx, input.packageId, date ?? (input.ruleType === "weekday" ? "2099-01-02" : "2099-01-03"));
     await tx.query(
-      "INSERT INTO price_rules (package_id, rule_type, rule_date, amount_kzt, created_by, note) VALUES ($1, $2, $3, $4, $5, $6)",
+      "INSERT INTO bb.price_rules (package_id, rule_type, rule_date, amount_kzt, created_by, note) VALUES ($1, $2, $3, $4, $5, $6)",
       [input.packageId, input.ruleType, date ?? null, input.amountKzt, actor.id, input.note?.trim() || null],
     );
     await writeAudit(tx, {
@@ -136,7 +136,7 @@ export async function priceHistory(pool: Pool, actor: Actor, packageId: string, 
   assertCan(actor, "prices.manage");
   const { rows } = await pool.query(
     `SELECT p.id, p.rule_type, to_char(p.rule_date, 'YYYY-MM-DD') AS rule_date, p.amount_kzt, p.created_at, u.name AS created_by, p.note
-       FROM price_rules p LEFT JOIN users u ON u.id = p.created_by
+       FROM bb.price_rules p LEFT JOIN bb.users u ON u.id = p.created_by
       WHERE p.package_id = $1 ORDER BY p.id DESC LIMIT $2`,
     [packageId, Math.min(Math.max(limit, 1), 500)],
   );
@@ -162,7 +162,7 @@ export async function catalogSummary(db: Queryable): Promise<CatalogSummary> {
   const [packages, rooms, slots] = await Promise.all([listPackages(db), listRooms(db), listSlots(db)]);
   const { rows } = await db.query<{ package_id: string; rule_type: string; amount_kzt: number }>(
     `SELECT DISTINCT ON (package_id, rule_type) package_id, rule_type, amount_kzt
-       FROM price_rules WHERE rule_type IN ('base', 'weekday')
+       FROM bb.price_rules WHERE rule_type IN ('base', 'weekday')
       ORDER BY package_id, rule_type, id DESC`,
   );
   const price = (pkg: string, type: string) => rows.find((r) => r.package_id === pkg && r.rule_type === type)?.amount_kzt ?? null;

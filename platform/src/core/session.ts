@@ -13,6 +13,7 @@ export interface SessionUser {
   email: string;
   name: string;
   role: Role;
+  canExport: boolean;
 }
 
 export interface ValidSession {
@@ -37,7 +38,7 @@ export async function createSession(
 ): Promise<{ token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString("base64url");
   const { rows } = await db.query<{ expires_at: Date }>(
-    `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent)
+    `INSERT INTO bb.sessions (token_hash, user_id, expires_at, ip, user_agent)
      VALUES ($1, $2, now() + make_interval(secs => $3), $4, $5)
      RETURNING expires_at`,
     [hashToken(token), userId, SESSION_ABSOLUTE_SECONDS, meta.ip ?? null, meta.userAgent ? meta.userAgent.slice(0, 400) : null],
@@ -55,11 +56,12 @@ export async function validateSession(db: Queryable, token: string | undefined):
     email: string;
     name: string;
     role: string;
+    can_export: boolean;
     stale: boolean;
   }>(
-    `SELECT s.id AS session_id, s.last_seen_at, u.id, u.email, u.name, u.role::text AS role,
+    `SELECT s.id AS session_id, s.last_seen_at, u.id, u.email, u.name, u.role::text AS role, u.can_export,
             (s.last_seen_at < now() - make_interval(secs => $3)) AS stale
-       FROM sessions s JOIN users u ON u.id = s.user_id
+       FROM bb.sessions s JOIN bb.users u ON u.id = s.user_id
       WHERE s.token_hash = $1
         AND s.revoked_at IS NULL
         AND s.expires_at > now()
@@ -69,18 +71,18 @@ export async function validateSession(db: Queryable, token: string | undefined):
   );
   const row = rows[0];
   if (!row || !isRole(row.role)) return null;
-  if (row.stale) await db.query("UPDATE sessions SET last_seen_at = now() WHERE id = $1", [row.session_id]);
-  return { sessionId: row.session_id, user: { id: row.id, email: row.email, name: row.name, role: row.role } };
+  if (row.stale) await db.query("UPDATE bb.sessions SET last_seen_at = now() WHERE id = $1", [row.session_id]);
+  return { sessionId: row.session_id, user: { id: row.id, email: row.email, name: row.name, role: row.role, canExport: row.can_export } };
 }
 
 export async function revokeSession(db: Queryable, token: string): Promise<void> {
-  await db.query("UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL", [hashToken(token)]);
+  await db.query("UPDATE bb.sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL", [hashToken(token)]);
 }
 
 /** Used after password/role changes and deactivation. `exceptSessionId` keeps the current device logged in. */
 export async function revokeUserSessions(db: Queryable, userId: string, exceptSessionId?: string): Promise<number> {
   const res = await db.query(
-    `UPDATE sessions SET revoked_at = now()
+    `UPDATE bb.sessions SET revoked_at = now()
       WHERE user_id = $1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2::uuid)`,
     [userId, exceptSessionId ?? null],
   );
@@ -90,7 +92,7 @@ export async function revokeUserSessions(db: Queryable, userId: string, exceptSe
 /** Housekeeping: drops sessions that can never be valid again. */
 export async function purgeExpiredSessions(db: Queryable): Promise<number> {
   const res = await db.query(
-    "DELETE FROM sessions WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '30 days'",
+    "DELETE FROM bb.sessions WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '30 days'",
   );
   return res.rowCount ?? 0;
 }

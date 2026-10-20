@@ -3,7 +3,7 @@ import { ROLES } from "@/core/rbac";
 import { listUsers } from "@/core/users";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
-import { changeRoleAction, createUserAction, resetPasswordAction, setActiveAction } from "./actions";
+import { changeRoleAction, createUserAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
 
 export const metadata: Metadata = { title: "Сотрудники" };
 
@@ -12,6 +12,7 @@ const NOTICES: Record<string, string> = {
   created: "Сотрудник создан.",
   role: "Роль изменена. Сотрудника попросят войти заново.",
   active: "Статус изменён.",
+  export: "Право на выгрузку изменено. Сотрудника попросят войти заново.",
   password: "Пароль изменён, все сессии сотрудника завершены.",
 };
 
@@ -83,6 +84,16 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                 <button type="submit" className={btnGhost}>{u.isActive ? "Отключить" : "Включить"}</button>
               </form>
             </div>
+            {u.role === "manager" ? (
+              <form action={setCanExportAction} className="mt-3 flex flex-wrap items-center gap-2">
+                <input type="hidden" name="id" value={u.id} />
+                <input type="hidden" name="allowed" value={u.canExport ? "0" : "1"} />
+                <span className="text-sm text-muted">Выгрузка клиентской базы: {u.canExport ? "разрешена" : "запрещена"}</span>
+                <button type="submit" className={btnGhost}>{u.canExport ? "Запретить" : "Разрешить"}</button>
+              </form>
+            ) : u.role === "owner" ? (
+              <p className="mt-3 text-sm text-muted">Выгрузка клиентской базы: всегда разрешена</p>
+            ) : null}
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-extrabold text-grape-700">Задать новый пароль</summary>
               <form action={resetPasswordAction} className="mt-2 flex flex-wrap items-center gap-2">

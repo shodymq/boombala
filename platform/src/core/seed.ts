@@ -30,17 +30,17 @@ export async function seedCatalog(pool: Pool, data: { packages: SeedPackage[]; r
   return withTx(pool, async (tx) => {
     const result: SeedResult = { packagesAdded: 0, roomsAdded: 0, priceRulesAdded: 0 };
     for (const [i, pkg] of data.packages.entries()) {
-      const added = await tx.query("INSERT INTO packages (id, name, sort_order) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [pkg.id, pkg.name, i]);
+      const added = await tx.query("INSERT INTO bb.packages (id, name, sort_order) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [pkg.id, pkg.name, i]);
       result.packagesAdded += added.rowCount ?? 0;
-      const has = await tx.query("SELECT 1 FROM price_rules WHERE package_id = $1 LIMIT 1", [pkg.id]);
+      const has = await tx.query("SELECT 1 FROM bb.price_rules WHERE package_id = $1 LIMIT 1", [pkg.id]);
       if (!has.rowCount) {
-        await tx.query("INSERT INTO price_rules (package_id, rule_type, amount_kzt, note) VALUES ($1, 'base', $2, 'seed from public site data')", [pkg.id, pkg.price]);
-        await tx.query("INSERT INTO price_rules (package_id, rule_type, amount_kzt, note) VALUES ($1, 'weekday', $2, 'seed from public site data')", [pkg.id, pkg.weekdayPrice]);
+        await tx.query("INSERT INTO bb.price_rules (package_id, rule_type, amount_kzt, note) VALUES ($1, 'base', $2, 'seed from public site data')", [pkg.id, pkg.price]);
+        await tx.query("INSERT INTO bb.price_rules (package_id, rule_type, amount_kzt, note) VALUES ($1, 'weekday', $2, 'seed from public site data')", [pkg.id, pkg.weekdayPrice]);
         result.priceRulesAdded += 2;
       }
     }
     for (const [i, room] of data.rooms.entries()) {
-      const added = await tx.query("INSERT INTO rooms (id, name, sort_order) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [room.id, room.name, i]);
+      const added = await tx.query("INSERT INTO bb.rooms (id, name, sort_order) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [room.id, room.name, i]);
       result.roomsAdded += added.rowCount ?? 0;
     }
     if (result.packagesAdded || result.roomsAdded || result.priceRulesAdded) {

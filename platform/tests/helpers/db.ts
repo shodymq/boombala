@@ -13,6 +13,14 @@ import { birthdayRooms } from "../../../src/data/birthdayRooms.ts";
 
 export const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
 
+/** What a Supabase project has before our migrations: the API roles, and default grants on `public`. */
+const SUPABASE_LIKE_ROLES = `
+  CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;
+  GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;`;
+
 export interface TestDb {
   pool: Pool;
   url: string;
@@ -29,14 +37,16 @@ export async function startTestDb(opts: { migrate?: boolean } = {}): Promise<Tes
   initCluster(data);
   const socketDir = startCluster(data, port, { fast: true });
   const url = `postgres://postgres@127.0.0.1:${port}/postgres`;
-  const pool = createPool(url, 10);
+  // Raw SQL inside tests is unqualified; the application itself always qualifies (`bb.users`).
+  const pool = createPool(url, { max: 10, searchPath: "bb,public" });
   const pools = [pool];
+  await pool.query(SUPABASE_LIKE_ROLES);
   if (opts.migrate !== false) await migrate(pool, MIGRATIONS_DIR);
   return {
     pool,
     url,
     newPool: (max = 5) => {
-      const p = createPool(url, max);
+      const p = createPool(url, { max, searchPath: "bb,public" });
       pools.push(p);
       return p;
     },

@@ -34,6 +34,17 @@ E2E_PASSWORD=... DATABASE_URL=... npm run e2e    # браузерный сцен
 
 `npm test` сам поднимает и удаляет временный кластер, ничего не требуя от окружения.
 
+## CRM, Telegram и выгрузка
+
+Заявки и QR-регистрации сохраняются в PostgreSQL одной транзакцией вместе с задачей уведомления (outbox), Telegram получает
+сообщение сразу и с повторами по расписанию. Приём персональных данных выключен (`PII_INTAKE_ENABLED=0`). Подробности и порядок
+включения: [`../docs/platform/LEAD-PIPELINE-MIGRATION.md`](../docs/platform/LEAD-PIPELINE-MIGRATION.md). Черновики юридических
+текстов: [`../docs/platform/legal/`](../docs/platform/legal/README.md).
+
+Для e2e-сценария CRM нужны `PLATFORM_INTAKE_TOKEN`, `CRON_SECRET` и сервер, запущенный с `PII_INTAKE_ENABLED=1`,
+`TELEGRAM_API_BASE=http://127.0.0.1:3199` (заглушка: `node scripts/mock-telegram.mjs 3199`), с тем же токеном и секретом.
+Реальный Telegram в тестах не используется.
+
 ## Структура
 
 | Путь | Что там |

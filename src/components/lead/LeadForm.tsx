@@ -21,6 +21,16 @@ import { buttonClass } from "@/components/ui/buttonStyles";
 import { birthdayMessage, whatsappUrl } from "@/lib/whatsapp";
 import { useSelectedPackage } from "./SelectedPackage";
 
+/** A random UUID; `crypto.randomUUID` exists only in secure contexts, so fall back to getRandomValues. */
+function newKey(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 type Status = "idle" | "submitting" | "success" | "error";
 
 // scroll-mb-56: a focused control scrolls into view ABOVE the sticky action bar, not under it.
@@ -54,8 +64,12 @@ export function LeadForm({
   // Synchronous guards: state updates are async, a fast double tap would otherwise get through.
   const inFlight = useRef(false);
   const succeeded = useRef(false);
+  // One key per distinct enquiry: a retry after a lost answer reuses it (the server then creates nothing twice);
+  // editing any field starts a new one.
+  const idempotencyKey = useRef<string | null>(null);
 
   const set = <K extends keyof LeadFields>(key: K, value: LeadFields[K]) => {
+    idempotencyKey.current = null;
     setValues((v) => ({ ...v, [key]: value }));
     if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
   };
@@ -91,6 +105,7 @@ export function LeadForm({
         body: JSON.stringify({
           ...payload,
           website: honeypot,
+          idempotencyKey: (idempotencyKey.current ??= newKey()),
           page: window.location.pathname + window.location.search,
           referrer: attr.referrer || document.referrer,
           utm_source: attr.utm_source,

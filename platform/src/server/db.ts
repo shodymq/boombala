@@ -6,6 +6,6 @@ import { requireDatabaseUrl } from "./env.ts";
 const globalForPool = globalThis as unknown as { __bbPool?: Pool };
 
 export function getPool(): Pool {
-  globalForPool.__bbPool ??= createPool(requireDatabaseUrl(), 10);
+  globalForPool.__bbPool ??= createPool(requireDatabaseUrl());
   return globalForPool.__bbPool;
 }
