@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, type FormEvent } from "react";
-import { WhatsappLogo, X } from "@phosphor-icons/react";
+import { CalendarBlank, WhatsappLogo, X } from "@phosphor-icons/react";
 import {
   PACKAGE_OPTIONS,
   formatNationalPhone,
@@ -19,6 +19,7 @@ import type { ErrorType } from "@/lib/funnel-core";
 import { siteConfig } from "@/services/config";
 import { buttonClass } from "@/components/ui/buttonStyles";
 import { birthdayMessage, whatsappUrl } from "@/lib/whatsapp";
+import { ChoiceField, type ChoiceOption } from "./ChoiceField";
 import { useSelectedPackage } from "./SelectedPackage";
 import { AvailabilityPanel, calendarEnabled } from "@/components/booking/AvailabilityPanel";
 
@@ -34,9 +35,20 @@ function newKey(): string {
 
 type Status = "idle" | "submitting" | "success" | "error";
 
-// scroll-mb-56: a focused control scrolls into view ABOVE the sticky action bar, not under it.
 const field =
-  "scroll-mb-56 h-12 w-full rounded-2xl sm:h-14 border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500";
+  "h-12 w-full rounded-2xl sm:h-14 border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500";
+
+const PACKAGE_CHOICES: ChoiceOption[] = PACKAGE_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
+const ROOM_CHOICES: ChoiceOption[] = [
+  { value: "", label: "Не выбрана" },
+  ...birthdayRooms.map((r) => ({ value: r.id, label: r.name, image: { src: r.coverImage.src } })),
+];
+
+/** "2026-10-20" -> "вт, 20 октября 2026 г." (Russian regardless of the phone's system language). The value itself stays YYYY-MM-DD. */
+const dateLabel = (iso: string): string | null =>
+  /^\d{4}-\d{2}-\d{2}$/.test(iso)
+    ? new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${iso}T00:00:00Z`))
+    : null;
 
 export function LeadForm({
   initialPackage,
@@ -162,22 +174,26 @@ export function LeadForm({
 
   if (status === "success") {
     return (
-      <div className="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-8">
-        {header}
-        <p role="status" className="mt-4 text-lg leading-relaxed text-grape-900">
-          Заявка отправлена. Менеджер свяжется с вами.
-        </p>
-        <button type="button" onClick={onClose} className={buttonClass("primary", "mt-8 w-full")}>
-          Закрыть
-        </button>
-        <a
-          href={siteConfig.contacts.instagram}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-3 flex h-12 items-center justify-center font-display text-base font-extrabold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-4"
-        >
-          Instagram {siteConfig.contacts.instagramHandle}
-        </a>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 px-5 pt-5 sm:px-8 sm:pt-8">{header}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4 sm:px-8">
+          <p role="status" className="mt-4 text-lg leading-relaxed text-grape-900">
+            Заявка отправлена. Менеджер свяжется с вами.
+          </p>
+        </div>
+        <div className="shrink-0 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-8 sm:pb-8">
+          <button type="button" onClick={onClose} className={buttonClass("primary", "w-full")}>
+            Закрыть
+          </button>
+          <a
+            href={siteConfig.contacts.instagram}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 flex h-12 items-center justify-center font-display text-base font-extrabold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-4"
+          >
+            Instagram {siteConfig.contacts.instagramHandle}
+          </a>
+        </div>
       </div>
     );
   }
@@ -196,12 +212,31 @@ export function LeadForm({
     "aria-describedby": errors[k] ? `${idOf(k)}-err` : undefined,
   });
 
-  return (
-    <form onSubmit={onSubmit} noValidate className="px-5 pt-5 sm:p-8">
-      {header}
-      <p className="mt-1 text-base text-muted">Менеджер свяжется с вами.</p>
+  const whatsapp = whatsappLink ? (
+    <>
+      <div aria-hidden="true" className="my-2 flex items-center gap-3 text-sm font-semibold text-muted">
+        <span className="h-px flex-1 bg-line" />
+        или
+        <span className="h-px flex-1 bg-line" />
+      </div>
+      <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className={buttonClass("outline", "w-full")}>
+        <WhatsappLogo size={22} weight="bold" aria-hidden="true" />
+        Написать в WhatsApp
+      </a>
+      <p className="mt-1.5 text-center text-[0.8125rem] leading-snug text-muted">Откроется WhatsApp с готовым сообщением</p>
+    </>
+  ) : null;
 
-      <div className="mt-4 grid gap-4 sm:mt-6 sm:gap-5">
+  return (
+    <form onSubmit={onSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 px-5 pt-5 sm:px-8 sm:pt-8">
+        {header}
+        <p className="mt-1 text-base text-muted">Менеджер свяжется с вами.</p>
+      </div>
+
+      {/* The ONLY scrolling zone of the sheet. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4 pt-4 sm:px-8 sm:pb-5 sm:pt-6">
+      <div className="grid gap-4 sm:gap-5">
         <div className="grid gap-2">
           <label htmlFor={idOf("name")} className="font-display text-sm font-extrabold text-grape-800">
             Ваше имя
@@ -259,18 +294,37 @@ export function LeadForm({
             <label htmlFor={idOf("date")} className="font-display text-sm font-extrabold text-grape-800 sm:flex sm:min-h-10 sm:items-end">
               Желаемая дата
             </label>
-            <input
-              id={idOf("date")}
-              name="date"
-              type="date"
-              lang="ru"
-              required
-              min={minBookingDate()}
-              value={values.date}
-              onChange={(e) => set("date", e.target.value)}
-              className={field}
-              {...aria("date")}
-            />
+            {/* One date system: the native input is the single source of truth (YYYY-MM-DD) and does the picking; it sits
+                invisibly over a Russian-language display, so an English-language phone still shows "20 октября 2026 г.". */}
+            <div className="relative rounded-2xl has-[input:focus-visible]:outline has-[input:focus-visible]:outline-[3px] has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-grape-500">
+              <div
+                aria-hidden="true"
+                className={`${field} flex items-center justify-between gap-2 ${errors.date ? "border-lava-500" : ""} ${dateLabel(values.date) ? "font-semibold text-ink" : "text-muted/70"}`}
+              >
+                <span className="min-w-0 truncate">{dateLabel(values.date) ?? "Выберите дату"}</span>
+                <CalendarBlank size={20} weight="bold" className="shrink-0 text-grape-700" />
+              </div>
+              <input
+                id={idOf("date")}
+                name="date"
+                type="date"
+                lang="ru"
+                required
+                min={minBookingDate()}
+                value={values.date}
+                onChange={(e) => set("date", e.target.value)}
+                onClick={(e) => {
+                  try {
+                    e.currentTarget.showPicker?.();
+                  } catch {
+                    /* the browser decides when it may open a picker */
+                  }
+                }}
+                className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-2xl opacity-0 focus:outline-none focus-visible:outline-none"
+                style={{ colorScheme: "light" }}
+                {...aria("date")}
+              />
+            </div>
             {err("date")}
           </div>
           <div className="grid content-start gap-2">
@@ -309,56 +363,44 @@ export function LeadForm({
         ) : null}
 
         <div className="grid gap-2">
-          <label htmlFor={idOf("package")} className="font-display text-sm font-extrabold text-grape-800">
-            Пакет
-          </label>
-          <select
+          <span id={`${idOf("package")}-label`} className="font-display text-sm font-extrabold text-grape-800">
+            Пакет праздника
+          </span>
+          <ChoiceField
             id={idOf("package")}
+            labelledBy={`${idOf("package")}-label`}
             name="package"
             value={values.package}
-            onChange={(e) => {
-              const next = e.target.value as LeadPackage;
+            options={PACKAGE_CHOICES}
+            invalid={!!errors.package}
+            describedBy={errors.package ? `${idOf("package")}-err` : undefined}
+            onChange={(next) => {
               if (next !== values.package) trackBirthday("birthday_package_select", { package_id: next, room_id: values.room, cta_source: "form" });
-              set("package", next);
-              rememberPackage(next);
+              set("package", next as LeadPackage);
+              rememberPackage(next as LeadPackage);
             }}
-            className={field}
-            {...aria("package")}
-          >
-            {PACKAGE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          />
           {err("package")}
         </div>
 
         <div className="grid gap-2">
-          <label htmlFor={idOf("room")} className="font-display text-sm font-extrabold text-grape-800">
+          <span id={`${idOf("room")}-label`} className="font-display text-sm font-extrabold text-grape-800">
             Предпочитаемая комната <span className="font-medium text-muted">(по желанию)</span>
-          </label>
-          <select
+          </span>
+          <ChoiceField
             id={idOf("room")}
+            labelledBy={`${idOf("room")}-label`}
             name="room"
             value={values.room}
-            onChange={(e) => {
-              const next = e.target.value;
+            options={ROOM_CHOICES}
+            invalid={!!errors.room}
+            describedBy={errors.room ? `${idOf("room")}-err ${idOf("room")}-hint` : `${idOf("room")}-hint`}
+            onChange={(next) => {
               if (next && next !== values.room) trackBirthday("birthday_room_select", { package_id: values.package, room_id: next, cta_source: "form" });
               set("room", next);
               rememberRoom(next);
             }}
-            className={field}
-            aria-invalid={errors.room ? true : undefined}
-            aria-describedby={errors.room ? `${idOf("room")}-err ${idOf("room")}-hint` : `${idOf("room")}-hint`}
-          >
-            <option value="">Не выбрана</option>
-            {birthdayRooms.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+          />
           <p id={`${idOf("room")}-hint`} className="text-[0.8125rem] leading-snug text-muted">
             Это пожелание: выбор не гарантирует, что комната свободна на вашу дату.
           </p>
@@ -373,7 +415,7 @@ export function LeadForm({
               type="checkbox"
               checked={values.consent}
               onChange={(e) => set("consent", e.target.checked)}
-              className="h-5 w-5 shrink-0 scroll-mb-56 cursor-pointer accent-grape-700"
+              className="h-5 w-5 shrink-0 cursor-pointer accent-grape-700"
               {...aria("consent")}
             />
             <span>
@@ -401,8 +443,13 @@ export function LeadForm({
         </div>
       </div>
 
+      <div className="mt-4 hidden [@media(max-height:520px)]:block">{whatsapp}</div>
+      </div>
+
+      {/* Actions: always visible, never over the fields. */}
+      <div className="shrink-0 border-t border-line bg-paper px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-8 sm:pb-8 sm:pt-4">
       {status === "error" ? (
-        <p role="alert" className="mt-5 rounded-2xl bg-sun-100 p-4 text-base font-semibold text-grape-900">
+        <p role="alert" className="mb-3 max-h-32 overflow-y-auto rounded-2xl bg-sun-100 p-4 text-base font-semibold text-grape-900">
           {errorKind === "rate"
             ? "Слишком много попыток. Попробуйте чуть позже."
             : whatsappLink
@@ -419,28 +466,13 @@ export function LeadForm({
         </p>
       ) : null}
 
-      <div className="sticky bottom-0 -mx-5 mt-4 bg-paper px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_14px_-12px_rgb(41_13_92/0.25)] sm:-mx-8 sm:-mb-8 sm:mt-6 sm:px-8 sm:pb-8 sm:pt-4 [@media(max-height:600px)]:static [@media(max-height:600px)]:shadow-none">
       <button type="submit" disabled={status === "submitting"} className={buttonClass("primary", "w-full disabled:opacity-60")}>
         {status === "submitting" ? "Отправляем…" : "Отправить заявку"}
       </button>
       {/* Second, equal way to reach us. A plain link built from the CURRENT form fields: it does not validate or
-          submit the form, needs no consent tick, is not a lead and fires no analytics. */}
-      {whatsappLink ? (
-        <>
-          <div aria-hidden="true" className="my-2 flex items-center gap-3 text-sm font-semibold text-muted">
-            <span className="h-px flex-1 bg-line" />
-            или
-            <span className="h-px flex-1 bg-line" />
-          </div>
-          <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className={buttonClass("outline", "w-full")}>
-            <WhatsappLogo size={22} weight="bold" aria-hidden="true" />
-            Написать в WhatsApp
-          </a>
-          <p className="mt-1.5 text-center text-[0.8125rem] leading-snug text-muted">
-            Откроется WhatsApp с готовым сообщением
-          </p>
-        </>
-      ) : null}
+          submit the form, needs no consent tick, is not a lead and fires no analytics. On very short screens
+          (landscape, keyboard open) it moves from here to the end of the scrolling area so the main button keeps its room. */}
+      <div className="[@media(max-height:520px)]:hidden">{whatsapp}</div>
       </div>
     </form>
   );

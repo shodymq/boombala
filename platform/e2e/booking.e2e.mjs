@@ -50,7 +50,9 @@ console.log("## public calendar and enquiry (390x844)");
   await page.getByLabel("Ваше имя").fill("ТЕСТ Календарь");
   await page.getByLabel(/Телефон/).fill("7071230099");
   await page.getByLabel("Желаемая дата").fill(D1);
-  await page.locator('select[name=package]').selectOption("wow-party");
+  // the package is a branded combobox now (PR #5), not a native <select>
+  await page.locator("dialog button[aria-haspopup=listbox]").first().click();
+  await page.locator('dialog [role=option][data-value="wow-party"]').click();
   await page.locator('[data-testid=availability]').waitFor();
   await page.locator('[data-slot="2"]').waitFor({ timeout: 8000 });
   const before = await avail(D1);
