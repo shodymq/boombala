@@ -20,7 +20,16 @@ export interface LeadFields {
   consent: boolean;
   /** Preferred room id, or "" for none. Optional; validated against ROOM_IDS. */
   room: string;
+  /** Preferred time slot id ("1" | "2" | "3") or "". A preference only: an enquiry never reserves a slot. */
+  slot: string;
 }
+
+/** The three fixed, back-to-back slots (same as the platform's time_slots). */
+export const BOOKING_SLOTS = [
+  { id: "1", label: "10:00–14:00" },
+  { id: "2", label: "14:00–18:00" },
+  { id: "3", label: "18:00–22:00" },
+] as const;
 
 export type LeadErrors = Partial<Record<keyof LeadFields, string>>;
 
@@ -78,7 +87,7 @@ function isRealDate(value: string): boolean {
 export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>): {
   ok: boolean;
   errors: LeadErrors;
-  data?: { name: string; phone: string; date: string; children: number | null; package: LeadPackage; room: string | null };
+  data?: { name: string; phone: string; date: string; children: number | null; package: LeadPackage; room: string | null; slot: string | null };
 } {
   const errors: LeadErrors = {};
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -112,10 +121,14 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
   const roomWrongType = input.room !== undefined && input.room !== null && typeof input.room !== "string";
   if (roomWrongType || (roomRaw && !ROOM_IDS.includes(roomRaw))) errors.room = "Выберите комнату из списка";
 
+  const slotRaw = str(input.slot);
+  const slotWrongType = input.slot !== undefined && input.slot !== null && typeof input.slot !== "string";
+  if (slotWrongType || (slotRaw && !BOOKING_SLOTS.some((x) => x.id === slotRaw))) errors.slot = "Выберите время из списка";
+
   const pkgRaw = str(input.package);
   const pkg = PACKAGE_OPTIONS.find((o) => o.value === pkgRaw)?.value;
   if (!pkg) errors.package = "Выберите пакет";
 
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg!, room: roomRaw || null } };
+  return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg!, room: roomRaw || null, slot: slotRaw || null } };
 }

@@ -51,7 +51,7 @@ async function claim(pool: Pool, limit: number, onlyRefId?: string): Promise<Cla
 
 async function loadLead(pool: Pool, leadId: string): Promise<LeadNotification | null> {
   const { rows } = await pool.query(
-    `SELECT l.seq, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS d, l.children, p.name AS package_name, r.name AS room_name,
+    `SELECT l.seq, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS d, l.children, p.name AS package_name, r.name AS room_name, CASE WHEN l.slot_id IS NULL THEN NULL ELSE (SELECT to_char(t.starts_at, 'HH24:MI') || '–' || to_char(t.ends_at, 'HH24:MI') FROM bb.time_slots t WHERE t.id = l.slot_id) END AS slot_label,
             l.page, l.referrer, l.utm_source, l.utm_medium, l.utm_campaign, l.created_at,
             (SELECT d.version FROM bb.consent_events e JOIN bb.legal_documents d ON d.id = e.document_id
               WHERE e.lead_request_id = l.id AND e.event = 'given' ORDER BY e.id LIMIT 1) AS consent_version
@@ -65,7 +65,7 @@ async function loadLead(pool: Pool, leadId: string): Promise<LeadNotification | 
   const r = rows[0];
   if (!r) return null;
   return {
-    seq: Number(r.seq), name: r.name, phone: r.phone_e164, date: r.d, children: r.children, packageName: r.package_name, roomName: r.room_name,
+    seq: Number(r.seq), name: r.name, phone: r.phone_e164, date: r.d, children: r.children, packageName: r.package_name, roomName: r.room_name, slotLabel: r.slot_label,
     consentVersion: r.consent_version, page: r.page, referrer: r.referrer, utmSource: r.utm_source, utmMedium: r.utm_medium, utmCampaign: r.utm_campaign, createdAt: r.created_at,
   };
 }

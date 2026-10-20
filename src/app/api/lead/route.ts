@@ -1,5 +1,5 @@
 import { getRoomName } from "@/data/birthdayRooms";
-import { PACKAGE_OPTIONS, validateLead } from "@/lib/lead";
+import { BOOKING_SLOTS, PACKAGE_OPTIONS, validateLead } from "@/lib/lead";
 import { leadPipeline, PlatformError, sendLeadToPlatform } from "@/lib/platform";
 import { deliverOnce, rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
 import { sendTelegramLead, telegramConfig, telegramDiagnostics, TelegramError } from "@/lib/telegram";
@@ -100,6 +100,7 @@ export async function POST(request: Request) {
           children: lead.children,
           packageId: lead.package,
           roomId: lead.room,
+          slotId: lead.slot ? Number(lead.slot) : null,
           page: pagePath.startsWith("/") ? pagePath : "",
           referrer: clip(body.referrer, 300),
           utmSource: clip(body.utm_source, 100),
@@ -145,6 +146,7 @@ export async function POST(request: Request) {
           children: lead.children,
           packageLabel: PACKAGE_OPTIONS.find((o) => o.value === lead.package)?.label ?? lead.package,
           roomLabel: (lead.room && getRoomName(lead.room)) || "",
+          slotLabel: BOOKING_SLOTS.find((x) => x.id === lead.slot)?.label ?? "",
           page: page.startsWith("/") ? page : "",
           referrer: clip(body.referrer, 300),
           utmSource: clip(body.utm_source, 100),

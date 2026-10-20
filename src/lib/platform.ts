@@ -64,6 +64,7 @@ export interface PlatformLead {
   children: number | null;
   packageId: string;
   roomId: string | null;
+  slotId: number | null;
   page: string;
   referrer: string;
   utmSource: string;
@@ -105,4 +106,12 @@ export async function sendConsentToPlatform(input: {
   const { status, data } = await call("/api/intake/consent", { method: "POST", body: input }, 7000);
   if (status === 200 || status === 201) return { duplicate: data.duplicate === true };
   return fail(status, data);
+}
+
+/** Availability for the public calendar. Throws PlatformError when the platform cannot answer: the UI then says so (never "free"). */
+export async function fetchAvailability(query: { date: string } | { month: string }): Promise<Record<string, unknown>> {
+  const qs = "date" in query ? `date=${encodeURIComponent(query.date)}` : `month=${encodeURIComponent(query.month)}`;
+  const { status, data } = await call(`/api/public/availability?${qs}`, { method: "GET" }, 5000);
+  if (status !== 200 || data.ok !== true) return fail(status, data);
+  return data;
 }

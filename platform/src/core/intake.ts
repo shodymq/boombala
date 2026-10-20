@@ -31,6 +31,7 @@ const leadSchema = z.object({
   children: z.union([z.number().int().min(0).max(200), z.string().regex(/^\d{1,3}$/).transform(Number)]).optional().nullable(),
   packageId: idSchema.optional().nullable(),
   roomId: idSchema.optional().nullable(),
+  slotId: z.union([z.number().int().min(1).max(3), z.string().regex(/^[1-3]$/).transform(Number)]).optional().nullable(),
   consent: z.literal(true, "Необходимо согласие"),
   page: optText(200),
   referrer: optText(300),
@@ -106,10 +107,10 @@ export async function submitLead(pool: Pool, raw: LeadInput, meta: IntakeMeta = 
 
     const contactId = await upsertContact(tx, name, phone, "birthday_form");
     const created = await tx.query<{ id: string; seq: string }>(
-      `INSERT INTO bb.lead_requests (idempotency_key, contact_id, package_id, room_id, requested_date, children, page, referrer, utm_source, utm_medium, utm_campaign)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO bb.lead_requests (idempotency_key, contact_id, package_id, room_id, requested_date, children, page, referrer, utm_source, utm_medium, utm_campaign, slot_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (idempotency_key) DO NOTHING RETURNING id, seq`,
-      [input.idempotencyKey, contactId, packageId, roomId, input.date, input.children ?? null, input.page, input.referrer, input.utmSource, input.utmMedium, input.utmCampaign],
+      [input.idempotencyKey, contactId, packageId, roomId, input.date, input.children ?? null, input.page, input.referrer, input.utmSource, input.utmMedium, input.utmCampaign, input.slotId ?? null],
     );
     if (!created.rows[0]) {
       // A parallel request with the same key committed first: return its result, create nothing.
