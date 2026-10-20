@@ -50,3 +50,21 @@ export async function tryDeliver(refId?: string): Promise<void> {
     /* the task is still in the outbox */
   }
 }
+
+/** Tells the public site to refresh its cached news pages (best effort: pages also refresh on their own every minute). */
+export async function notifySite(slugs: string[]): Promise<void> {
+  const base = (process.env.SITE_REVALIDATE_URL ?? "").trim().replace(/\/+$/, "");
+  const token = process.env.PLATFORM_INTAKE_TOKEN;
+  if (!/^https?:\/\/[^/]+$/.test(base) || !token) return;
+  try {
+    await fetch(`${base}/api/revalidate-news`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ slugs: slugs.slice(0, 10) }),
+      signal: AbortSignal.timeout(3000),
+      cache: "no-store",
+    });
+  } catch {
+    /* the site refreshes by itself within a minute */
+  }
+}

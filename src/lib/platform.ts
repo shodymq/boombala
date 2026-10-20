@@ -115,3 +115,78 @@ export async function fetchAvailability(query: { date: string } | { month: strin
   if (status !== 200 || data.ok !== true) return fail(status, data);
   return data;
 }
+
+// ── News (published content only; the platform decides what is public) ────────────────────────────────────────
+
+export type NewsKind = "news" | "promo";
+export interface NewsSummary {
+  slug: string;
+  kind: NewsKind;
+  title: string;
+  excerpt: string;
+  publishedAt: string;
+  validUntil: string | null;
+  cover: { id: string; alt: string; width: number; height: number } | null;
+}
+export type NewsInline = { t: "text"; v: string } | { t: "strong"; v: string } | { t: "link"; href: string; v: string } | { t: "br" };
+export type NewsBlock =
+  | { type: "h2"; text: string }
+  | { type: "h3"; text: string }
+  | { type: "p"; inlines: NewsInline[] }
+  | { type: "ul"; items: NewsInline[][] }
+  | { type: "img"; imageId: string; alt: string; width: number; height: number };
+export interface NewsPost extends NewsSummary {
+  blocks: NewsBlock[];
+  updatedAt: string;
+  seoTitle: string | null;
+  seoDescription: string;
+  expired: boolean;
+}
+
+export const newsEnabled = (): boolean => process.env.NEXT_PUBLIC_NEWS === "1";
+
+/** Cached for a minute and tagged "news" so the platform can refresh it on demand (publish, edit, unpublish). */
+async function cachedGet(path: string): Promise<{ status: number; data: Record<string, unknown> }> {
+  const { url, token } = endpoint(path);
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000), next: { revalidate: 60, tags: ["news"] }, redirect: "manual" });
+  } catch {
+    throw new PlatformError("unavailable");
+  }
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return { status: res.status, data };
+}
+
+export async function fetchNewsList(kind?: NewsKind, limit = 30): Promise<NewsSummary[]> {
+  const { status, data } = await cachedGet(`/api/public/news?limit=${limit}${kind ? `&kind=${kind}` : ""}`);
+  if (status !== 200 || !Array.isArray(data.posts)) throw new PlatformError("unavailable");
+  return data.posts as NewsSummary[];
+}
+
+/** `null` = the platform answered and there is no such PUBLISHED post. A platform failure throws (never shown as "not found"). */
+export async function fetchNewsPost(slug: string): Promise<NewsPost | null> {
+  const { status, data } = await cachedGet(`/api/public/news/${encodeURIComponent(slug)}`);
+  if (status === 404) return null;
+  if (status !== 200 || !data.post) throw new PlatformError("unavailable");
+  return data.post as NewsPost;
+}
+
+export async function fetchNewsSlugs(): Promise<Array<{ slug: string; updatedAt: string }>> {
+  const { status, data } = await cachedGet("/api/public/news?slugs=1");
+  if (status !== 200 || !Array.isArray(data.posts)) throw new PlatformError("unavailable");
+  return data.posts as Array<{ slug: string; updatedAt: string }>;
+}
+
+/** Image bytes for the public proxy route. */
+export async function fetchNewsImage(id: string): Promise<{ status: number; contentType: string; body: ArrayBuffer | null }> {
+  const { url, token } = endpoint(`/api/public/news/image/${encodeURIComponent(id)}`);
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(6000), cache: "no-store", redirect: "manual" });
+  } catch {
+    throw new PlatformError("unavailable");
+  }
+  if (!res.ok) return { status: res.status === 404 ? 404 : 502, contentType: "", body: null };
+  return { status: 200, contentType: res.headers.get("content-type") ?? "application/octet-stream", body: await res.arrayBuffer() };
+}
