@@ -415,7 +415,7 @@ export function LeadForm({
         </div>
       </div>
 
-      <div className="mt-4 hidden [@media(max-height:520px)]:block">{whatsapp}</div>
+      <div className="sheet-show-compact mt-4">{whatsapp}</div>
       </div>
 
       {/* Actions: always visible, never over the fields. */}
@@ -444,7 +444,7 @@ export function LeadForm({
       {/* Second, equal way to reach us. A plain link built from the CURRENT form fields: it does not validate or
           submit the form, needs no consent tick, is not a lead and fires no analytics. On very short screens
           (landscape, keyboard open) it moves from here to the end of the scrolling area so the main button keeps its room. */}
-      <div className="[@media(max-height:520px)]:hidden">{whatsapp}</div>
+      <div className="sheet-hide-compact">{whatsapp}</div>
       </div>
     </form>
   );

@@ -150,6 +150,14 @@ dialog.sheet::backdrop {
     max-width: 56rem;
   }
 }
+/* Secondary actions fold away on very short screens (landscape) and while the on-screen keyboard is up (data-kb, set by Sheet). */
+.sheet-show-compact { display: none; }
+@media (max-height: 520px) {
+  .sheet-hide-compact { display: none; }
+  .sheet-show-compact { display: block; }
+}
+dialog.sheet[data-kb] .sheet-hide-compact { display: none; }
+dialog.sheet[data-kb] .sheet-show-compact { display: block; }
 /* While a sheet is open the page behind must not move, and its scrollbar must not vanish and shift the layout. */
 html:has(dialog.sheet[open]) {
   overflow: hidden;
