@@ -34,6 +34,13 @@ describe("Supabase safety: closed schema, row security, pooler compatibility", (
     assert.deepEqual(rows.filter((r) => !r.rls).map((r) => r.name), [], "RLS must be on for every table");
   });
 
+  it("every function in `bb` has a fixed search_path (Supabase advisor function_search_path_mutable)", async () => {
+    const { rows } = await db.pool.query(
+      "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.prokind = 'f' AND p.proconfig IS NULL",
+    );
+    assert.deepEqual(rows, []);
+  });
+
   it("the API roles (anon / authenticated / service_role) cannot touch any table, even though Supabase grants them rights on public", async () => {
     const { rows: tables } = await db.pool.query<{ relname: string }>(
       "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'bb' AND c.relkind = 'r'",
