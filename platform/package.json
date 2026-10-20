@@ -18,7 +18,8 @@
     "user:create": "node --no-warnings scripts/create-user.ts",
     "e2e": "node --no-warnings e2e/platform.e2e.mjs",
     "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
-    "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs"
+    "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
+    "verify:remote": "node --no-warnings scripts/verify-remote.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
