@@ -248,7 +248,8 @@ for (const prof of PROFILES) {
   const sent = leadRequests.at(-1);
   ok(sent && sent.package === "boom-party" && sent.room === "rapunzel-room" && sent.date === iso && sent.phone.startsWith("+7") && sent.consent === true && sent.children === "6", "the request carries package, room, ISO date, +7 phone and consent");
   await page.waitForTimeout(200);
-  ok(received.some((t) => t.includes("BOOM PARTY") && t.includes("Rapunzel Room")), "Telegram (mock) received the lead with package and room");
+  // With LEAD_PIPELINE=dual the platform (not this script's mock) delivers to Telegram: set SKIP_TELEGRAM_CHECK=1 there.
+  if (process.env.SKIP_TELEGRAM_CHECK !== "1") ok(received.some((t) => t.includes("BOOM PARTY") && t.includes("Rapunzel Room")), "Telegram (mock) received the lead with package and room");
 
   // close / focus / scroll restoration / reopen
   await page.getByRole("button", { name: "Закрыть" }).first().click();

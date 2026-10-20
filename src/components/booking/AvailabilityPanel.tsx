@@ -81,7 +81,7 @@ export function AvailabilityPanel({
 
   return (
     <div className="grid gap-3 rounded-2xl border-2 border-grape-200 bg-grape-50 p-4" data-testid="availability">
-      <button type="button" onClick={() => { if (!open && /^\d{4}-\d{2}-\d{2}$/.test(date)) setMonth(date.slice(0, 7)); setOpen((v) => !v); }} aria-expanded={open} className="text-left font-display text-sm font-extrabold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-4">
+      <button type="button" onClick={() => { if (!open && /^\d{4}-\d{2}-\d{2}$/.test(date)) setMonth(date.slice(0, 7)); setOpen((v) => !v); }} aria-expanded={open} className="flex min-h-11 items-center text-left font-display text-sm font-extrabold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-4">
         {open ? "Скрыть календарь" : "Посмотреть свободные даты"}
       </button>
       {open ? (
