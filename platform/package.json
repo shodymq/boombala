@@ -19,7 +19,8 @@
     "e2e": "node --no-warnings e2e/platform.e2e.mjs",
     "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
-    "verify:remote": "node --no-warnings scripts/verify-remote.ts"
+    "verify:remote": "node --no-warnings scripts/verify-remote.ts",
+    "e2e:news": "node --no-warnings e2e/news.e2e.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
@@ -28,6 +29,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
+    "sharp": "^0.35.5",
     "write-excel-file": "^4.1.1",
     "zod": "^4.6.7"
   },

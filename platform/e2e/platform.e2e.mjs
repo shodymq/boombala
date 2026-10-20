@@ -87,7 +87,7 @@ for (const [email, role] of [["manager@qa.test", "manager"], ["editor@qa.test", 
   await login(page, email, PW);
   ok(new URL(page.url()).pathname === "/", `${role} signs in`);
   const nav = (await page.locator("nav[aria-label=Разделы]").innerText()).split("\n").map((s) => s.trim()).filter(Boolean);
-  const expectedNav = role === "manager" ? ["Обзор", "Календарь", "Заявки", "Клиенты", "Мой пароль"] : ["Обзор", "Мой пароль"];
+  const expectedNav = role === "manager" ? ["Обзор", "Календарь", "Заявки", "Клиенты", "Мой пароль"] : ["Обзор", "Новости", "Мой пароль"];
   ok(JSON.stringify(nav) === JSON.stringify(expectedNav), `${role} sees only: ${nav.join(", ")}`);
   for (const path of ["/users", "/audit"]) {
     await page.goto(B + path, { waitUntil: "networkidle" });
