@@ -50,7 +50,12 @@ console.log("## public calendar and enquiry (390x844)");
   await page.getByLabel("Ваше имя").fill("ТЕСТ Календарь");
   await page.getByLabel(/Телефон/).fill("7071230099");
   await page.getByLabel("Желаемая дата").fill(D1);
-  await page.locator('select[name=package]').selectOption("wow-party");
+  // The package is a native <select> on this branch and a branded combobox once the mobile-form hotfix (PR #5) is merged: handle both.
+  if (await page.locator("dialog select[name=package]").count()) await page.locator("dialog select[name=package]").selectOption("wow-party");
+  else {
+    await page.locator("dialog button[aria-haspopup=listbox]").first().click();
+    await page.locator('dialog [role=option][data-value="wow-party"]').click();
+  }
   await page.locator('[data-testid=availability]').waitFor();
   await page.locator('[data-slot="2"]').waitFor({ timeout: 8000 });
   const before = await avail(D1);
