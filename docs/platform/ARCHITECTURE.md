@@ -1,5 +1,7 @@
 # Boom Bala Platform: архитектура админки, бронирования, CRM и новостей
 
+> **Обновление.** Решение о собственном VPS заменено: PostgreSQL на Supabase (разработка и MVP), приложения на Vercel. Актуальное размещение, юридическая оговорка и план: [`SUPABASE-ADAPTATION.md`](SUPABASE-ADAPTATION.md), [`LEAD-PIPELINE-MIGRATION.md`](LEAD-PIPELINE-MIGRATION.md), [`OPERATIONS.md`](OPERATIONS.md). Разделы ниже о VPS сохранены как история решения.
+
 Статус: **решение принято для Этапа 1**, остальные этапы реализуются по плану ниже.
 Область: только сайт boombala.kz. Мобильное приложение, его backend, платежи и авторизация не затрагиваются.
 
