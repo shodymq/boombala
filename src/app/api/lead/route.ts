@@ -84,6 +84,7 @@ export async function POST(request: Request) {
     // Success is reported only after the platform has committed the enquiry; the platform then notifies Telegram itself
     // (with retries). In `dual` any platform failure falls through to the direct Telegram path below, so nothing is lost.
     const pipeline = leadPipeline();
+    let crmNote = "";
     if (pipeline !== "telegram-only") {
       const check = rateLimitCheck(limitKey, RATE_LIMIT);
       if (!check.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(check.retryAfter) });
@@ -113,7 +114,8 @@ export async function POST(request: Request) {
         const kind = error instanceof PlatformError ? error.kind : "unavailable";
         console.warn(`[lead] platform path failed (${kind}); pipeline=${pipeline}`);
         if (pipeline === "strict") return json({ ok: false, error: "delivery_failed" }, 502);
-        // dual: continue with the direct Telegram path
+        // dual: continue with the direct Telegram path, and say so in the message (the lead is NOT in the CRM)
+        crmNote = "⚠️ ТОЛЬКО В TELEGRAM: в CRM не сохранена (платформа была недоступна). Проверьте CRM по номеру, при отсутствии внесите вручную.";
       }
     }
 
@@ -148,6 +150,7 @@ export async function POST(request: Request) {
           utmSource: clip(body.utm_source, 100),
           utmMedium: clip(body.utm_medium, 100),
           utmCampaign: clip(body.utm_campaign, 100),
+          crmNote: crmNote || undefined,
         });
         rateLimitRecord(limitKey);
       });
