@@ -1,20 +1,27 @@
-import { can, type Permission } from "@/core/rbac";
+import { can, canExport, type Permission } from "@/core/rbac";
 import { requireUser } from "@/server/dal";
 import { logout } from "../login/actions";
 import { NavLinks, type NavItem } from "./nav-links";
 
 const NAV: Array<NavItem & { permission: Permission }> = [
   { href: "/", label: "Обзор", permission: "dashboard.view" },
+  { href: "/contacts", label: "Клиенты", permission: "contacts.view" },
+  { href: "/legal", label: "Документы", permission: "legal.manage" },
   { href: "/users", label: "Сотрудники", permission: "users.manage" },
   { href: "/audit", label: "Журнал", permission: "audit.view" },
   { href: "/account", label: "Мой пароль", permission: "dashboard.view" },
 ];
 
+const ORDER = ["/", "/contacts", "/export", "/legal", "/users", "/audit", "/account"];
+
 const ROLE_LABEL = { owner: "Владелец", manager: "Менеджер", editor: "Редактор" } as const;
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user } = await requireUser();
-  const items = NAV.filter((n) => can(user.role, n.permission));
+  const items = [
+    ...NAV.filter((n) => can(user.role, n.permission)),
+    ...(canExport(user) ? [{ href: "/export", label: "Выгрузка", permission: "contacts.view" as Permission }] : []),
+  ].sort((a, b) => ORDER.indexOf(a.href) - ORDER.indexOf(b.href));
   return (
     <div className="mx-auto min-h-dvh w-full max-w-6xl px-4 pb-16 md:grid md:grid-cols-[13rem_1fr] md:gap-8 md:pt-6">
       <aside className="sticky top-0 z-10 -mx-4 border-b border-line bg-paper px-4 py-3 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0">
