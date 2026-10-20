@@ -8,13 +8,16 @@ import type { BirthdayRoom } from "@/types";
 import { useLeadForm } from "@/components/lead/LeadFormProvider";
 import { useSelectedPackage } from "@/components/lead/SelectedPackage";
 import { buttonClass } from "@/components/ui/buttonStyles";
+import { Sheet } from "@/components/ui/Sheet";
 import { trackBirthday } from "@/lib/funnel";
+import { rememberScroll } from "@/lib/scroll-restore";
 
 /** Cover grid + a native <dialog> viewer. Nothing is loaded for a room until its dialog is opened. */
 export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const pendingLead = useRef<string | null>(null);
+  const restoreScroll = useRef<(() => void) | null>(null);
   const { open: openLead } = useLeadForm();
   const { selected: selectedPackage, setRoom: rememberRoom } = useSelectedPackage();
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -28,6 +31,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
 
   const openRoom = (id: string) => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    restoreScroll.current = rememberScroll();
     setRoomId(id);
     setIndex(0);
     setVideoOn(false);
@@ -84,7 +88,9 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
     setRoomId(null);
     setVideoOn(false);
     setVideoError(false);
-    returnFocus.current?.focus?.();
+    returnFocus.current?.focus?.({ preventScroll: true });
+    restoreScroll.current?.();
+    restoreScroll.current = null;
     // The booking form opens only after this dialog is gone (no stacked modals).
     const room = pendingLead.current;
     pendingLead.current = null;
@@ -167,143 +173,140 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
         ))}
       </ul>
 
-      <dialog
-        ref={dialogRef}
-        aria-labelledby="room-dialog-title"
-        onKeyDown={onKeyDown}
-        onClick={(e) => {
-          if (e.target === dialogRef.current) close();
-        }}
-        className="m-0 mt-auto max-h-[94dvh] w-full max-w-none overflow-y-auto overscroll-contain rounded-t-[2rem] bg-paper p-0 text-ink backdrop:bg-grape-900/75 sm:m-auto sm:max-h-[92dvh] sm:max-w-[56rem] sm:rounded-[2rem]"
-      >
+      <Sheet ref={dialogRef} labelledBy="room-dialog-title" onKeyDown={onKeyDown} onBackdrop={close} wide>
         {room && photo ? (
-          <div className="p-4 pb-0 sm:p-6 sm:pb-0">
-            <div className="flex items-start justify-between gap-4">
-              <h3 id="room-dialog-title" className="font-display text-[1.625rem] font-black leading-tight tracking-tight text-grape-800 sm:text-4xl">
-                {room.name}
-              </h3>
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Закрыть"
-                className="group -mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center"
+          <>
+            <div className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-6">
+              <div className="flex items-start justify-between gap-4">
+                <h3 id="room-dialog-title" className="font-display text-[1.625rem] font-black leading-tight tracking-tight text-grape-800 sm:text-4xl">
+                  {room.name}
+                </h3>
+                <button
+                  type="button"
+                  onClick={close}
+                  aria-label="Закрыть"
+                  className="group -mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center"
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-grape-100 text-grape-800 transition-colors group-hover:bg-grape-200">
+                    <X size={16} weight="bold" aria-hidden="true" />
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* The ONLY scrolling zone of the sheet. Sizes use svh (the small, constant viewport), never dvh, so browser toolbars do not resize it. */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-3 sm:px-6">
+              <div
+                className="relative mx-auto w-full overflow-hidden rounded-2xl bg-grape-900"
+                style={{
+                  aspectRatio: `${photo.width} / ${photo.height}`,
+                  // Keep the whole photo (no cropping) and never taller than the viewport allows.
+                  maxWidth: `calc(55svh * ${photo.width / photo.height})`,
+                }}
               >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-grape-100 text-grape-800 transition-colors group-hover:bg-grape-200">
-                  <X size={16} weight="bold" aria-hidden="true" />
-                </span>
-              </button>
-            </div>
-
-            <div
-              className="relative mx-auto mt-3 w-full overflow-hidden rounded-2xl bg-grape-900"
-              style={{
-                aspectRatio: `${photo.width} / ${photo.height}`,
-                // Keep the whole photo (no cropping) and never taller than the viewport allows.
-                maxWidth: `calc(60dvh * ${photo.width / photo.height})`,
-              }}
-            >
-              <Image
-                key={photo.src}
-                src={photo.src}
-                alt={photo.alt}
-                fill
-                priority
-                sizes="(min-width: 640px) 52rem, 100vw"
-                className="object-cover"
-              />
-              {room.images.length > 1 ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => step(-1)}
-                    aria-label="Предыдущее фото"
-                    className="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-grape-800 shadow-soft transition-transform active:scale-95"
-                  >
-                    <CaretLeft size={20} weight="bold" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => step(1)}
-                    aria-label="Следующее фото"
-                    className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-grape-800 shadow-soft transition-transform active:scale-95"
-                  >
-                    <CaretRight size={20} weight="bold" aria-hidden="true" />
-                  </button>
-                  <p className="absolute bottom-2 right-2 rounded-full bg-grape-900/80 px-3 py-1 text-xs font-bold text-white" aria-live="polite">
-                    {index + 1} / {room.images.length}
-                  </p>
-                </>
-              ) : null}
-            </div>
-
-            {room.images.length > 1 ? (
-              <ul className="mt-2 flex gap-2" aria-label="Фотографии комнаты">
-                {room.images.map((p, i) => (
-                  <li key={p.src}>
+                <Image
+                  key={photo.src}
+                  src={photo.src}
+                  alt={photo.alt}
+                  fill
+                  priority
+                  sizes="(min-width: 640px) 52rem, 100vw"
+                  className="object-cover"
+                />
+                {room.images.length > 1 ? (
+                  <>
                     <button
                       type="button"
-                      onClick={() => setIndex(i)}
-                      aria-label={`Фото ${i + 1} из ${room.images.length}`}
-                      aria-current={i === index ? "true" : undefined}
-                      className={`relative block h-14 w-[5.5rem] overflow-hidden rounded-xl border-2 transition-colors ${
-                        i === index ? "border-grape-700" : "border-transparent opacity-80 hover:opacity-100"
-                      }`}
+                      onClick={() => step(-1)}
+                      aria-label="Предыдущее фото"
+                      className="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-grape-800 shadow-soft transition-transform active:scale-95"
                     >
-                      <Image src={p.src} alt="" fill sizes="88px" className="object-cover" />
+                      <CaretLeft size={20} weight="bold" aria-hidden="true" />
                     </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+                    <button
+                      type="button"
+                      onClick={() => step(1)}
+                      aria-label="Следующее фото"
+                      className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-grape-800 shadow-soft transition-transform active:scale-95"
+                    >
+                      <CaretRight size={20} weight="bold" aria-hidden="true" />
+                    </button>
+                    <p className="absolute bottom-2 right-2 rounded-full bg-grape-900/80 px-3 py-1 text-xs font-bold text-white" aria-live="polite">
+                      {index + 1} / {room.images.length}
+                    </p>
+                  </>
+                ) : null}
+              </div>
 
-            {/* Video: one real clip per room, fetched only after the visitor asks for it. Starts only from that click, never on open. */}
-            {room.video ? (
-              <div
-                ref={videoBox}
-                className="mx-auto mt-3 w-full"
-                style={{ maxWidth: `calc(60dvh * ${photo.width / photo.height})` }}
-              >
-                {!videoOn ? (
-                  <button
-                    type="button"
-                    onClick={startVideo}
-                    className="flex min-h-[3.25rem] w-full items-center justify-center gap-2.5 rounded-2xl border-2 border-grape-700 bg-grape-50 px-5 py-3 font-display text-base font-extrabold text-grape-800 transition-colors hover:bg-grape-100 active:scale-[0.99]"
-                  >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sun-400 text-grape-900">
-                      <Play size={16} weight="fill" aria-hidden="true" />
-                    </span>
-                    Смотреть видео комнаты
-                  </button>
-                ) : videoError ? (
-                  <p role="alert" className="rounded-2xl bg-grape-50 px-4 py-4 text-sm leading-snug text-grape-800">
-                    Не удалось загрузить видео. Проверьте соединение и попробуйте ещё раз. Оставить заявку можно и без видео.
+              {room.images.length > 1 ? (
+                <ul className="mt-2 flex gap-2" aria-label="Фотографии комнаты">
+                  {room.images.map((p, i) => (
+                    <li key={p.src}>
+                      <button
+                        type="button"
+                        onClick={() => setIndex(i)}
+                        aria-label={`Фото ${i + 1} из ${room.images.length}`}
+                        aria-current={i === index ? "true" : undefined}
+                        className={`relative block h-14 w-[5.5rem] overflow-hidden rounded-xl border-2 transition-colors ${
+                          i === index ? "border-grape-700" : "border-transparent opacity-80 hover:opacity-100"
+                        }`}
+                      >
+                        <Image src={p.src} alt="" fill sizes="88px" className="object-cover" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {/* Video: one real clip per room, fetched only after the visitor asks for it. Starts only from that click, never on open. */}
+              {room.video ? (
+                <div
+                  ref={videoBox}
+                  className="mx-auto mt-3 w-full"
+                  style={{ maxWidth: `calc(55svh * ${photo.width / photo.height})` }}
+                >
+                  {!videoOn ? (
                     <button
                       type="button"
                       onClick={startVideo}
-                      className="mt-2 block font-display font-extrabold underline decoration-sun-400 decoration-2 underline-offset-4"
+                      className="flex min-h-[3.25rem] w-full items-center justify-center gap-2.5 rounded-2xl border-2 border-grape-700 bg-grape-50 px-5 py-3 font-display text-base font-extrabold text-grape-800 transition-colors hover:bg-grape-100 active:scale-[0.99]"
                     >
-                      Попробовать снова
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sun-400 text-grape-900">
+                        <Play size={16} weight="fill" aria-hidden="true" />
+                      </span>
+                      Смотреть видео комнаты
                     </button>
-                  </p>
-                ) : (
-                  <video
-                    key={room.id}
-                    ref={videoRef}
-                    src={room.video}
-                    poster={photo.src}
-                    controls
-                    playsInline
-                    muted
-                    preload="none"
-                    aria-label={`Видео комнаты: ${room.name}`}
-                    onError={() => setVideoError(true)}
-                    className="block aspect-video w-full rounded-2xl bg-grape-900 object-contain"
-                  />
-                )}
-              </div>
-            ) : null}
+                  ) : videoError ? (
+                    <p role="alert" className="rounded-2xl bg-grape-50 px-4 py-4 text-sm leading-snug text-grape-800">
+                      Не удалось загрузить видео. Проверьте соединение и попробуйте ещё раз. Оставить заявку можно и без видео.
+                      <button
+                        type="button"
+                        onClick={startVideo}
+                        className="mt-2 block font-display font-extrabold underline decoration-sun-400 decoration-2 underline-offset-4"
+                      >
+                        Попробовать снова
+                      </button>
+                    </p>
+                  ) : (
+                    <video
+                      key={room.id}
+                      ref={videoRef}
+                      src={room.video}
+                      poster={photo.src}
+                      controls
+                      playsInline
+                      muted
+                      preload="none"
+                      aria-label={`Видео комнаты: ${room.name}`}
+                      onError={() => setVideoError(true)}
+                      className="block aspect-video w-full rounded-2xl bg-grape-900 object-contain"
+                    />
+                  )}
+                </div>
+              ) : null}
+            </div>
 
-            <div className="sticky bottom-0 -mx-4 mt-4 bg-paper px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_14px_-12px_rgb(41_13_92/0.25)] sm:-mx-6 sm:px-6">
+            <div className="shrink-0 border-t border-line bg-paper px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-6">
               <button type="button" onClick={askToBook} className={buttonClass("primary", "w-full sm:w-auto")}>
                 Узнать о бронировании
               </button>
@@ -311,9 +314,9 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
                 Выбор комнаты не гарантирует, что она свободна на вашу дату.
               </p>
             </div>
-          </div>
+          </>
         ) : null}
-      </dialog>
+      </Sheet>
     </>
   );
 }

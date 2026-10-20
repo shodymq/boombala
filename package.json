@@ -9,7 +9,8 @@
     "lint": "eslint",
     "verify:menu": "node --no-warnings scripts/verify-menu.mjs",
     "test:funnel": "node --no-warnings --test scripts/test-funnel.mjs",
-    "test:lead-api": "node --no-warnings scripts/test-lead-api.mjs"
+    "test:lead-api": "node --no-warnings scripts/test-lead-api.mjs",
+    "test:lead-form": "node --no-warnings scripts/test-lead-form-mobile.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
@@ -25,6 +26,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
+    "playwright-core": "^1.64.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
