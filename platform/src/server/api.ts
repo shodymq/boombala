@@ -57,9 +57,14 @@ export async function notifySite(slugs: string[]): Promise<void> {
   const token = process.env.PLATFORM_INTAKE_TOKEN;
   if (!/^https?:\/\/[^/]+$/.test(base) || !token) return;
   try {
+    const oidcToken = process.env.VERCEL_OIDC_TOKEN?.trim();
     await fetch(`${base}/api/revalidate-news`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(oidcToken ? { "x-vercel-trusted-oidc-idp-token": oidcToken } : {}),
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ slugs: slugs.slice(0, 10) }),
       signal: AbortSignal.timeout(3000),
       cache: "no-store",
