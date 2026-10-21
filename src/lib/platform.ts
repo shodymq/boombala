@@ -1,4 +1,5 @@
 import "server-only";
+import { getVercelOidcToken } from "@vercel/oidc";
 
 /**
  * Server-to-server client for the Boom Bala platform (CRM). Used only from route handlers, never from the browser:
@@ -24,17 +25,17 @@ export class PlatformError extends Error {
   }
 }
 
-function endpoint(path: string, env: Record<string, string | undefined> = process.env): { url: string; token: string; oidcToken: string } {
+async function endpoint(path: string, env: Record<string, string | undefined> = process.env): Promise<{ url: string; token: string; oidcToken: string }> {
   const base = (env.PLATFORM_URL ?? "").trim().replace(/\/+$/, "");
   const token = (env.PLATFORM_INTAKE_TOKEN ?? "").trim();
-  const oidcToken = (env.VERCEL_OIDC_TOKEN ?? "").trim();
   const safeBase = /^https:\/\/[^/]+$/.test(base) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base);
   if (!safeBase || token.length < 24) throw new PlatformError("not_configured");
+  const oidcToken = await getVercelOidcToken().catch(() => "");
   return { url: `${base}${path}`, token, oidcToken };
 }
 
 async function call(path: string, init: { method: "GET" | "POST"; body?: unknown }, timeoutMs: number): Promise<{ status: number; data: Record<string, unknown> }> {
-  const { url, token, oidcToken } = endpoint(path);
+  const { url, token, oidcToken } = await endpoint(path);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -154,7 +155,7 @@ export const newsEnabled = (): boolean => process.env.NEXT_PUBLIC_NEWS === "1";
 
 /** Cached for a minute and tagged "news" so the platform can refresh it on demand (publish, edit, unpublish). */
 async function cachedGet(path: string): Promise<{ status: number; data: Record<string, unknown> }> {
-  const { url, token, oidcToken } = endpoint(path);
+  const { url, token, oidcToken } = await endpoint(path);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -192,7 +193,7 @@ export async function fetchNewsSlugs(): Promise<Array<{ slug: string; updatedAt:
 
 /** Image bytes for the public proxy route. */
 export async function fetchNewsImage(id: string): Promise<{ status: number; contentType: string; body: ArrayBuffer | null }> {
-  const { url, token, oidcToken } = endpoint(`/api/public/news/image/${encodeURIComponent(id)}`);
+  const { url, token, oidcToken } = await endpoint(`/api/public/news/image/${encodeURIComponent(id)}`);
   let res: Response;
   try {
     res = await fetch(url, {

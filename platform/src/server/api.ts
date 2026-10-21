@@ -1,4 +1,5 @@
 import "server-only";
+import { getVercelOidcToken } from "@vercel/oidc";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ConsentUnavailableError, ValidationError } from "../core/errors.ts";
@@ -57,7 +58,7 @@ export async function notifySite(slugs: string[]): Promise<void> {
   const token = process.env.PLATFORM_INTAKE_TOKEN;
   if (!/^https?:\/\/[^/]+$/.test(base) || !token) return;
   try {
-    const oidcToken = process.env.VERCEL_OIDC_TOKEN?.trim();
+    const oidcToken = await getVercelOidcToken().catch(() => "");
     await fetch(`${base}/api/revalidate-news`, {
       method: "POST",
       headers: {
