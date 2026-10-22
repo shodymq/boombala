@@ -1,0 +1,28 @@
+[Unit]
+Description=Boom Bala public API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=bbapi
+Group=bbapi
+WorkingDirectory=/opt/boombala/platform
+EnvironmentFile=/etc/boombala/api.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p @API_PORT@ -H 127.0.0.1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+ReadWritePaths=/opt/boombala/platform/.next/cache
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

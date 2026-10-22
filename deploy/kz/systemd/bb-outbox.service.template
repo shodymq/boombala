@@ -1,0 +1,10 @@
+[Unit]
+Description=Boom Bala notification retry worker (calls the admin on loopback)
+After=bb-admin.service
+
+[Service]
+Type=oneshot
+User=bbadmin
+EnvironmentFile=/etc/boombala/admin.env
+# Loopback only, never through nginx. The two headers are what the admin's own checks expect from the reverse proxy.
+ExecStart=/usr/bin/curl --fail --silent --show-error --max-time 30 -H "Host: @ADMIN_HOST@" -H "X-Real-IP: 127.0.0.1" -H "Authorization: Bearer ${CRON_SECRET}" http://127.0.0.1:@ADMIN_PORT@/api/cron/outbox

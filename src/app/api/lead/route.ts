@@ -1,6 +1,8 @@
 import { getRoomName } from "@/data/birthdayRooms";
-import { PACKAGE_OPTIONS, validateLead } from "@/lib/lead";
+import { BOOKING_SLOTS, PACKAGE_OPTIONS, validateLead } from "@/lib/lead";
+import { leadPipeline, PlatformError, sendLeadToPlatform } from "@/lib/platform";
 import { deliverOnce, rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
+import { siteMustRefuse } from "@/lib/site-profile";
 import { sendTelegramLead, telegramConfig, telegramDiagnostics, TelegramError } from "@/lib/telegram";
 
 export const runtime = "nodejs";
@@ -32,6 +34,8 @@ const clip = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slic
 
 export async function POST(request: Request) {
   dev("request received");
+  // Kazakhstan production: an unsafe configuration accepts nothing (and reads nothing from the visitor).
+  if (siteMustRefuse("lead")) return json({ ok: false, error: "unavailable" }, 503);
   try {
     // 403: same-origin only (blocks other sites posting through a visitor's browser).
     const origin = request.headers.get("origin");
@@ -79,6 +83,46 @@ export async function POST(request: Request) {
     const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
     const limitKey = `lead:${ip}`;
 
+    // CRM path (LEAD_PIPELINE=dual|strict). The default `telegram-only` skips this block entirely: today's behaviour.
+    // Success is reported only after the platform has committed the enquiry; the platform then notifies Telegram itself
+    // (with retries). In `dual` any platform failure falls through to the direct Telegram path below, so nothing is lost.
+    const pipeline = leadPipeline();
+    let crmNote = "";
+    if (pipeline !== "telegram-only") {
+      const check = rateLimitCheck(limitKey, RATE_LIMIT);
+      if (!check.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(check.retryAfter) });
+      const given = clip(body.idempotencyKey, 40);
+      const idempotencyKey = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(given) ? given : crypto.randomUUID();
+      const pagePath = clip(body.page, 200).split(/[?#]/)[0];
+      try {
+        const { duplicate } = await sendLeadToPlatform({
+          idempotencyKey,
+          name: lead.name,
+          phone: lead.phone,
+          date: lead.date,
+          children: lead.children,
+          packageId: lead.package,
+          roomId: lead.room,
+          slotId: lead.slot ? Number(lead.slot) : null,
+          page: pagePath.startsWith("/") ? pagePath : "",
+          referrer: clip(body.referrer, 300),
+          utmSource: clip(body.utm_source, 100),
+          utmMedium: clip(body.utm_medium, 100),
+          utmCampaign: clip(body.utm_campaign, 100),
+          clientIp: ip,
+          userAgent: request.headers.get("user-agent") ?? "",
+        });
+        if (!duplicate) rateLimitRecord(limitKey);
+        return json(duplicate ? { ok: true, duplicate: true } : { ok: true });
+      } catch (error) {
+        const kind = error instanceof PlatformError ? error.kind : "unavailable";
+        console.warn(`[lead] platform path failed (${kind}); pipeline=${pipeline}`);
+        if (pipeline === "strict") return json({ ok: false, error: "delivery_failed" }, 502);
+        // dual: continue with the direct Telegram path, and say so in the message (the lead is NOT in the CRM)
+        crmNote = "⚠️ ТОЛЬКО В TELEGRAM: в CRM не сохранена (платформа была недоступна). Проверьте CRM по номеру, при отсутствии внесите вручную.";
+      }
+    }
+
     // 503: credentials missing
     const diagnostics = telegramDiagnostics();
     if (!telegramConfig()) {
@@ -105,11 +149,13 @@ export async function POST(request: Request) {
           children: lead.children,
           packageLabel: PACKAGE_OPTIONS.find((o) => o.value === lead.package)?.label ?? lead.package,
           roomLabel: (lead.room && getRoomName(lead.room)) || "",
+          slotLabel: BOOKING_SLOTS.find((x) => x.id === lead.slot)?.label ?? "",
           page: page.startsWith("/") ? page : "",
           referrer: clip(body.referrer, 300),
           utmSource: clip(body.utm_source, 100),
           utmMedium: clip(body.utm_medium, 100),
           utmCampaign: clip(body.utm_campaign, 100),
+          crmNote: crmNote || undefined,
         });
         rateLimitRecord(limitKey);
       });

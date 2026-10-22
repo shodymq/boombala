@@ -1,0 +1,13 @@
+# TYPE   DATABASE   USER        ADDRESS          METHOD
+# Administration on the server itself (operating-system account postgres).
+local    all        postgres                     peer
+# The two applications and the migration owner, from this host only, with SCRAM.
+host     @DB_NAME@  bb_api      127.0.0.1/32     scram-sha-256
+host     @DB_NAME@  bb_admin    127.0.0.1/32     scram-sha-256
+host     @DB_NAME@  bb_owner    127.0.0.1/32     scram-sha-256
+# Backups (pgBackRest / WAL-G) connect locally as the backup role.
+local    @DB_NAME@  bb_backup                    peer
+# Everything else is refused, explicitly.
+local    all        all                          reject
+host     all        all         0.0.0.0/0        reject
+host     all        all         ::/0             reject

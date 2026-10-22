@@ -74,11 +74,15 @@ export interface LeadMessage {
   packageLabel: string;
   /** Preferred room name, or "" when none was chosen. A preference, not a booking. */
   roomLabel: string;
+  /** Preferred slot label, e.g. "10:00–14:00", or "" when none. */
+  slotLabel?: string;
   page: string;
   referrer: string;
   utmSource: string;
   utmMedium: string;
   utmCampaign: string;
+  /** Set only when the lead could NOT be saved in the CRM (dual-mode fallback): staff must know it exists only here. */
+  crmNote?: string;
 }
 
 const dash = (v: string | number | null | undefined) => {
@@ -115,6 +119,7 @@ function almatyTimestamp(now = new Date()): string {
 export function buildLeadText(lead: LeadMessage): string {
   return [
     "🎂 НОВАЯ ЗАЯВКА — BOOM BALA",
+    ...(lead.crmNote ? ["", lead.crmNote] : []),
     "",
     `Имя: ${dash(lead.name)}`,
     `Телефон: ${dash(prettyPhone(lead.phone))}`,
@@ -122,6 +127,7 @@ export function buildLeadText(lead: LeadMessage): string {
     `Детей: ${dash(lead.children)}`,
     `Пакет: ${dash(lead.packageLabel)}`,
     `Предпочитаемая комната: ${dash(lead.roomLabel)}`,
+    ...(lead.slotLabel ? [`Предпочитаемый слот: ${lead.slotLabel}`] : []),
     "",
     "Согласие на обработку данных: да",
     "Источник: website",

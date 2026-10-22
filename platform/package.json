@@ -1,0 +1,56 @@
+{
+  "name": "boombala-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boom Bala admin panel + API (bookings, CRM, news). Separate app from the public site.",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build --webpack",
+    "start": "next start -p 3100",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "db:local": "node --no-warnings scripts/local-db.mjs",
+    "db:migrate": "node --no-warnings scripts/migrate.ts",
+    "db:seed": "node --no-warnings scripts/seed.ts",
+    "user:create": "node --no-warnings scripts/create-user.ts",
+    "user:mfa-reset": "node --no-warnings scripts/mfa-reset.ts",
+    "user:set-password": "node --no-warnings scripts/set-password.ts",
+    "sessions:revoke": "node --no-warnings scripts/revoke-sessions.ts",
+    "db:roles": "node --no-warnings scripts/db-roles.ts",
+    "e2e": "node --no-warnings e2e/platform.e2e.mjs",
+    "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
+    "verify:remote": "node --no-warnings scripts/verify-remote.ts",
+    "e2e:news": "node --no-warnings e2e/news.e2e.mjs",
+    "e2e:release": "node --no-warnings e2e/release.e2e.mjs",
+    "e2e:isolation": "node --no-warnings e2e/isolation.e2e.mjs",
+    "backup:check": "node --no-warnings scripts/backup-restore-check.mjs"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
+    "@vercel/oidc": "4.0.2",
+    "next": "16.3.8",
+    "pg": "^8.23.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.5",
+    "write-excel-file": "^4.1.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.8",
+    "playwright-core": "^1.64.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}

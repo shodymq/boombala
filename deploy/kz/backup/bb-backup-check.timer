@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily check of both backup repositories
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+Unit=bb-backup-check.service
+
+[Install]
+WantedBy=timers.target

@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The admin platform is a separate app with its own tooling.
+    "platform/**",
   ]),
 ]);
 
