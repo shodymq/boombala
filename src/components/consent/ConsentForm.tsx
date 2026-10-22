@@ -23,7 +23,7 @@ function newKey(): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-/** Name, phone, acknowledgement of the rules and a SEPARATE consent to personal data processing. Nothing else. */
+/** Name, optional phone, acknowledgement of the rules and a SEPARATE consent to personal data processing. Nothing else. */
 export function ConsentForm({ documents }: { documents: Doc[] }) {
   const uid = useId();
   const [name, setName] = useState("");
@@ -44,7 +44,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
     const next: Record<string, string> = {};
     const national = phoneDigits(phone);
     if (name.trim().length < 2) next.name = "Укажите имя";
-    if (national.length !== 10) next.phone = "Введите 10 цифр после +7";
+    if (national.length > 0 && national.length !== 10) next.phone = "Введите 10 цифр после +7 или оставьте поле пустым";
     if (!rules) next.acceptRules = "Подтвердите, что ознакомились с правилами";
     if (!data) next.acceptPersonalData = "Необходимо согласие на обработку данных";
     setErrors(next);
@@ -56,7 +56,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
       const res = await fetch("/api/consent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, phone: `+7${national}`, acceptRules: rules, acceptPersonalData: data, website: honeypot, idempotencyKey: (key.current ??= newKey()) }),
+        body: JSON.stringify({ name, ...(national ? { phone: `+7${national}` } : {}), acceptRules: rules, acceptPersonalData: data, website: honeypot, idempotencyKey: (key.current ??= newKey()) }),
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok && body.ok === true) return setStatus("success");
@@ -98,10 +98,10 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
         {err("name")}
       </div>
       <div className="grid gap-2">
-        <label htmlFor={`${uid}-phone`} className="font-display text-sm font-extrabold text-grape-800">Телефон</label>
+        <label htmlFor={`${uid}-phone`} className="font-display text-sm font-extrabold text-grape-800">Телефон для экстренной связи <span className="font-normal text-muted">(необязательно)</span></label>
         <div className="relative">
           <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-grape-800">+7</span>
-          <input id={`${uid}-phone`} name="phone" type="tel" inputMode="tel" autoComplete="tel-national" required placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} aria-invalid={errors.phone ? true : undefined} />
+          <input id={`${uid}-phone`} name="phone" type="tel" inputMode="tel" autoComplete="tel-national" placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} aria-invalid={errors.phone ? true : undefined} />
         </div>
         {err("phone")}
       </div>

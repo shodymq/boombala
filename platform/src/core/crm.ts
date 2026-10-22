@@ -15,7 +15,8 @@ export interface ContactFilters {
 export interface ContactRow {
   id: string;
   name: string;
-  phone: string;
+  /** null for a QR registration made without a phone. */
+  phone: string | null;
   source: string;
   firstRegisteredAt: Date;
   lastActivityAt: Date;
@@ -59,7 +60,7 @@ const SELECT_CONTACT = `
   SELECT c.id, c.name, c.phone_e164, c.source, c.first_registered_at, c.last_activity_at, c.phone_verification,
          (SELECT count(*) FROM bb.lead_requests l WHERE l.contact_id = c.id)::int AS leads_count,
          (SELECT count(*) FROM bb.consent_registrations r WHERE r.contact_id = c.id)::int AS registrations_count,
-         (SELECT count(*) FROM bb.contacts o WHERE o.phone_e164 = c.phone_e164 AND o.id <> c.id)::int AS same_phone_others
+         (SELECT count(*) FROM bb.contacts o WHERE c.phone_e164 IS NOT NULL AND o.phone_e164 = c.phone_e164 AND o.id <> c.id)::int AS same_phone_others
     FROM bb.contacts c`;
 
 function mapContact(r: Record<string, never>): ContactRow {
@@ -116,7 +117,7 @@ export async function getContact(pool: Pool, actor: Actor, id: string): Promise<
         WHERE e.contact_id = $1 ORDER BY e.occurred_at DESC, e.id DESC`,
       [id],
     ),
-    pool.query("SELECT id, name FROM bb.contacts WHERE phone_e164 = $1 AND id <> $2 ORDER BY name", [contact.phone, id]),
+    contact.phone ? pool.query("SELECT id, name FROM bb.contacts WHERE phone_e164 = $1 AND id <> $2 ORDER BY name", [contact.phone, id]) : Promise.resolve({ rows: [] as Array<{ id: string; name: string }> }),
   ]);
   return {
     contact,

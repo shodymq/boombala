@@ -243,6 +243,57 @@ console.log("## 6. QR form stores a synthetic consent tied to the document versi
   ok((await scalar("SELECT phone_verification v FROM bb.contacts WHERE name = $1", [QR])) === "unverified", "the phone is marked unverified, the contact is not merged with anyone");
 }
 
+// ══ 6b. QR registration: the phone is optional ═══════════════════════════════════════════════════════════════
+console.log("## 6b. QR form without a phone, with a wrong phone, and repeated");
+{
+  const { ctx, page } = await newCtx(390, 844, true);
+  const NOPHONE = `ТЕСТ QR без номера ${run}`;
+  const regs = async (name) => Number(await scalar("SELECT count(*) v FROM bb.consent_registrations r JOIN bb.contacts c ON c.id = r.contact_id WHERE c.name = $1", [name]));
+  await page.goto(SITE + "/consent", { waitUntil: "networkidle" });
+  const tel = page.locator('input[type="tel"]');
+  ok(!(await tel.evaluate((e) => e.required)), "the phone field is not required");
+  ok(/необязательно/i.test(await page.locator("form").innerText()), "the form says the phone is optional");
+  const fillBasics = async (name) => {
+    await page.locator('input[name="name"], form input[autocomplete=name]').first().fill(name);
+    const boxes = page.locator('form input[type="checkbox"]');
+    for (let i = 0; i < (await boxes.count()); i++) await boxes.nth(i).check();
+  };
+  // a wrong number is refused in the browser and nothing is saved
+  await fillBasics(NOPHONE);
+  await tel.fill("123");
+  await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+  await page.waitForTimeout(600);
+  ok((await page.locator("form").innerText()).includes("10 цифр"), "a wrong phone shows an error");
+  ok((await regs(NOPHONE)) === 0, "a wrong phone saves nothing");
+  // an empty phone is accepted
+  await tel.fill("");
+  await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+  await page.getByText("Регистрация сохранена").waitFor({ timeout: 10000 });
+  ok(true, "a registration without a phone is accepted");
+  await ctx.close();
+  ok((await regs(NOPHONE)) === 1, "exactly one registration was stored");
+  ok((await scalar("SELECT coalesce(c.phone_e164,'<none>') v FROM bb.contacts c WHERE c.name = $1", [NOPHONE])) === "<none>", "no phone and no placeholder number was stored");
+  const ev = (await q(`SELECT d.kind::text k, d.version v FROM bb.consent_events e JOIN bb.legal_documents d ON d.id = e.document_id JOIN bb.consent_registrations r ON r.id = e.registration_id JOIN bb.contacts c ON c.id = r.contact_id WHERE c.name = $1`, [NOPHONE])).rows;
+  ok(ev.length >= 2 && ev.every((e) => docs.some((d) => d.k === e.k && d.v === e.v)), "consent history names the exact document versions without a phone");
+
+  // repeated and parallel sends of the same key through the real site API create one registration; a second visitor with the same name stays separate
+  const key = crypto.randomUUID();
+  const REP = `ТЕСТ QR повтор ${run}`;
+  const send = (k, name = REP) => fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, acceptRules: true, acceptPersonalData: true, idempotencyKey: k }) });
+  const results = await Promise.all([send(key), send(key), send(key)]);
+  ok(results.every((r) => r.status === 200), "repeated sends of the same key are all answered OK");
+  ok((await regs(REP)) === 1, "three parallel sends of one key create one registration");
+  ok((await send(crypto.randomUUID())).status === 200 && (await regs(REP)) === 2, "another visitor with the same name and no phone is a separate registration");
+  ok(Number(await scalar("SELECT count(DISTINCT c.id) v FROM bb.contacts c WHERE c.name = $1", [REP])) === 2, "they are not merged into one contact");
+  const bad = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: REP, phone: "12345", acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+  ok(bad.status === 400 && (await bad.json()).fieldErrors?.phone, "the API refuses a wrong phone with a field error");
+  const noConsent = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: REP, acceptRules: true, acceptPersonalData: false, idempotencyKey: crypto.randomUUID() }) });
+  ok(noConsent.status === 400, "the personal-data consent is still required without a phone");
+  // the enquiry form keeps its phone requirement
+  const leadNoPhone = await fetch(SITE + "/api/lead", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "ТЕСТ", date: "2099-01-01", consent: true }) });
+  ok(leadNoPhone.status === 400, "the birthday enquiry still refuses a missing phone");
+}
+
 // ══ 7. Export permissions ═════════════════════════════════════════════════════════════════════════════════════
 console.log("## 7. export is available only to permitted roles");
 {

@@ -45,7 +45,8 @@ export type LeadInput = z.input<typeof leadSchema>;
 const consentSchema = z.object({
   idempotencyKey: z.string().uuid("Некорректный ключ"),
   name: z.string().trim().min(1, "Укажите имя").max(120, "Слишком длинное имя"),
-  phone: z.string().trim().min(5, "Укажите телефон").max(40),
+  /** Optional in the QR form (emergency contact). Empty / missing means "no phone"; a filled value must be a valid number. */
+  phone: z.string().trim().max(40, "Проверьте номер телефона").optional().nullable(),
   acceptRules: z.literal(true, "Необходимо подтвердить ознакомление с правилами"),
   acceptPersonalData: z.literal(true, "Необходимо согласие на обработку данных"),
 });
@@ -58,7 +59,12 @@ function fieldErrors(error: z.ZodError): Record<string, string> {
   return out;
 }
 
-async function upsertContact(tx: Client, name: string, phone: string, source: "qr" | "birthday_form"): Promise<string> {
+async function upsertContact(tx: Client, name: string, phone: string | null, source: "qr" | "birthday_form"): Promise<string> {
+  if (phone === null) {
+    // No phone, no identity: never merged by name, never given a placeholder number. Each registration is its own contact.
+    const created = await tx.query<{ id: string }>("INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ($1, $2, NULL, $3) RETURNING id", [name, nameKey(name), source]);
+    return created.rows[0].id;
+  }
   const { rows } = await tx.query<{ id: string }>(
     `INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ($1, $2, $3, $4)
      ON CONFLICT (phone_e164, name_key) DO UPDATE SET last_activity_at = now()
@@ -144,12 +150,16 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
   const parsed = consentSchema.safeParse(raw);
   const errors: Record<string, string> = parsed.success ? {} : fieldErrors(parsed.error);
   const input = parsed.success ? parsed.data : null;
-  const phone = input ? normalizePhone(input.phone) : null;
-  if (input && !phone) errors.phone = "Проверьте номер телефона";
-  if (Object.keys(errors).length || !input || !phone) throw new ValidationError(errors);
+  const rawPhone = input?.phone?.trim() ?? "";
+  const phone = rawPhone ? normalizePhone(rawPhone) : null;
+  if (input && rawPhone && !phone) errors.phone = "Проверьте номер телефона";
+  if (Object.keys(errors).length || !input) throw new ValidationError(errors);
   const name = cleanName(input.name);
 
   return withTx(pool, async (tx) => {
+    // Parallel sends of one key are served one after another: without this the losers would each create a phoneless
+    // contact (nothing merges them) before finding out they lost. Transaction-level lock: safe through a pooler.
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`consent:${input.idempotencyKey}`]);
     const existing = await tx.query<{ id: string; seq: string; contact_id: string }>("SELECT id, seq, contact_id FROM bb.consent_registrations WHERE idempotency_key = $1", [input.idempotencyKey]);
     const docsFor = async (registrationId: string) =>
       (await tx.query<{ kind: string; version: number }>(

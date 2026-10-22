@@ -26,7 +26,7 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
       <Link href="/contacts" className="text-sm font-extrabold text-grape-700">← Все клиенты</Link>
       <h1 className="text-3xl font-black tracking-tight text-grape-800">{c.name}</h1>
       <section className="rounded-3xl border border-line bg-white p-5 text-sm">
-        <p><b>Телефон:</b> {c.phone} ({c.phoneVerification === "verified" ? "подтверждён" : "не подтверждён"})</p>
+        <p><b>Телефон:</b> {c.phone ? `${c.phone} (${c.phoneVerification === "verified" ? "подтверждён" : "не подтверждён"})` : "не указан"}</p>
         <p><b>Источник:</b> {c.source}</p>
         <p><b>Первая регистрация:</b> {fmt.format(c.firstRegisteredAt)}</p>
         <p><b>Последняя активность:</b> {fmt.format(c.lastActivityAt)}</p>

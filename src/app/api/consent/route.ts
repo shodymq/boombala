@@ -38,14 +38,16 @@ export async function POST(request: Request) {
     if (clip(body.website, 200)) return json({ ok: false, error: "forbidden" }, 403); // honeypot
 
     const name = clip(body.name, 200).replace(/\s+/g, " ");
-    const phone = normalizePhone(clip(body.phone, 40));
+    // The phone is optional in the QR form: empty means "no phone", a filled value must be a valid number.
+    const rawPhone = clip(body.phone, 40);
+    const phone = rawPhone ? normalizePhone(rawPhone) : null;
     const fieldErrors: Record<string, string> = {};
     if (name.length < 2) fieldErrors.name = "Укажите имя";
     else if (name.length > NAME_MAX) fieldErrors.name = "Слишком длинное имя";
-    if (!phone) fieldErrors.phone = "Проверьте номер телефона";
+    if (rawPhone && !phone) fieldErrors.phone = "Проверьте номер телефона";
     if (body.acceptRules !== true) fieldErrors.acceptRules = "Подтвердите, что ознакомились с правилами";
     if (body.acceptPersonalData !== true) fieldErrors.acceptPersonalData = "Необходимо согласие на обработку данных";
-    if (Object.keys(fieldErrors).length || !phone) return json({ ok: false, error: "validation", fieldErrors }, 400);
+    if (Object.keys(fieldErrors).length) return json({ ok: false, error: "validation", fieldErrors }, 400);
 
     const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
     const limitKey = `consent:${ip}`;

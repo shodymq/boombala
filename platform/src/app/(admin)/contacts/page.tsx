@@ -67,10 +67,10 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
             <Link href={`/contacts/${c.id}`} className="block rounded-3xl border border-line bg-white p-5 hover:border-grape-400">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="text-base font-black text-grape-800">{c.name}</span>
-                <span className="text-sm font-bold">{c.phone}</span>
+                <span className="text-sm font-bold">{c.phone ?? "без телефона"}</span>
               </div>
               <p className="mt-1 text-xs text-muted">
-                {SOURCE[c.source as keyof typeof SOURCE]} · с {fmt.format(c.firstRegisteredAt)} · активность {fmt.format(c.lastActivityAt)} · телефон {VERIFY[c.phoneVerification as keyof typeof VERIFY]}
+                {SOURCE[c.source as keyof typeof SOURCE]} · с {fmt.format(c.firstRegisteredAt)} · активность {fmt.format(c.lastActivityAt)} {c.phone ? <>· телефон {VERIFY[c.phoneVerification as keyof typeof VERIFY]}</> : null}
               </p>
               <p className="mt-1 text-xs text-muted">Заявок: {c.leadsCount} · QR-регистраций: {c.registrationsCount}{c.samePhoneOthers ? ` · тот же номер у ещё ${c.samePhoneOthers}` : ""}</p>
             </Link>

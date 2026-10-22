@@ -105,7 +105,8 @@ export async function fetchPublishedDocuments(): Promise<PlatformDocument[]> {
 export async function sendConsentToPlatform(input: {
   idempotencyKey: string;
   name: string;
-  phone: string;
+  /** Optional: the QR registration may be made without a phone. */
+  phone?: string | null;
   acceptRules: true;
   acceptPersonalData: true;
   clientIp: string;
