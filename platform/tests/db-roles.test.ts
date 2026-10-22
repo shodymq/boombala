@@ -182,6 +182,96 @@ describe("Database roles: one per application, least privilege", () => {
       assert.equal((await api.query("SELECT * FROM bb.intake_registration_documents($1)", [randomUUID()])).rows.length, 0);
     });
 
+    describe("a consent can only be written into the submission it belongs to", () => {
+      const refusedWith = (sql: string, params: unknown[], re: RegExp) => assert.rejects(() => api.query(sql, params), re, sql);
+      const ADD = "SELECT bb.intake_add_consent($1, $2, NULL, NULL, $3, $4)";
+      let pd: string;
+      let rules: string;
+      const contact = async (name: string) => String((await api.query("SELECT bb.intake_upsert_contact($1, $2, NULL, 'qr') AS id", [name, name.toLowerCase()])).rows[0].id);
+      const lead = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_lead($1, $2, NULL, NULL, $3::date, NULL, NULL, NULL, NULL, NULL, NULL, NULL)", [randomUUID(), contactId, FUTURE])).rows[0].id);
+      const registration = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_registration($1, $2)", [randomUUID(), contactId])).rows[0].id);
+      const consents = async (where: string, id: string) => (await db.pool.query(`SELECT count(*)::int n FROM bb.consent_events WHERE ${where} = $1`, [id])).rows[0].n;
+
+      before(async () => {
+        pd = String((await db.pool.query("SELECT id FROM bb.legal_documents WHERE kind = 'personal_data_consent' AND status = 'published'")).rows[0].id);
+        rules = String((await db.pool.query("SELECT id FROM bb.legal_documents WHERE kind = 'visit_rules' AND status = 'published'")).rows[0].id);
+      });
+
+      it("the happy paths work once: an enquiry with the personal-data consent, a registration with its documents", async () => {
+        const c = await contact("Согласие Норма");
+        const l = await lead(c);
+        await api.query(ADD, [c, pd, l, null]);
+        assert.equal(await consents("lead_request_id", l), 1);
+        const r = await registration(c);
+        await api.query(ADD, [c, rules, null, r]);
+        await api.query(ADD, [c, pd, null, r]);
+        assert.equal(await consents("registration_id", r), 2);
+      });
+
+      it("an enquiry of ANOTHER contact cannot receive a consent", async () => {
+        const a = await contact("Согласие Хозяин");
+        const b = await contact("Согласие Чужой");
+        const leadOfA = await lead(a);
+        await refusedWith(ADD, [b, pd, leadOfA, null], /does not belong to this contact/);
+        assert.equal(await consents("lead_request_id", leadOfA), 0, "nothing was written");
+        assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.consent_events WHERE contact_id = $1", [b])).rows[0].n, 0);
+      });
+
+      it("a registration of ANOTHER contact cannot receive a consent", async () => {
+        const a = await contact("Регистрация Хозяин");
+        const b = await contact("Регистрация Чужой");
+        const regOfA = await registration(a);
+        await refusedWith(ADD, [b, rules, null, regOfA], /does not belong to this contact/);
+        assert.equal(await consents("registration_id", regOfA), 0);
+      });
+
+      it("unknown handles are refused, and so is a contact that does not exist", async () => {
+        const c = await contact("Согласие Пустота");
+        await refusedWith(ADD, [c, pd, randomUUID(), null], /does not belong to this contact/);
+        await refusedWith(ADD, [c, pd, null, randomUUID()], /does not belong to this contact/);
+        await refusedWith(ADD, [randomUUID(), pd, await lead(c), null], /does not belong to this contact/);
+      });
+
+      it("an old submission is closed: a leaked id from yesterday cannot be written into", async () => {
+        const c = await contact("Согласие Старое");
+        const l = await lead(c);
+        const r = await registration(c);
+        await db.pool.query("UPDATE bb.lead_requests SET created_at = now() - interval '1 hour' WHERE id = $1", [l]);
+        await db.pool.query("UPDATE bb.consent_registrations SET created_at = now() - interval '1 hour' WHERE id = $1", [r]);
+        await refusedWith(ADD, [c, pd, l, null], /not a current submission/);
+        await refusedWith(ADD, [c, rules, null, r], /not a current submission/);
+        await refusedWith("SELECT bb.intake_queue_notification($1)", [l], /unknown enquiry/);
+      });
+
+      it("an enquiry carries the personal-data consent only; the same consent is not recorded twice", async () => {
+        const c = await contact("Согласие Вид");
+        const l = await lead(c);
+        await refusedWith(ADD, [c, rules, l, null], /only the personal-data consent/);
+        await api.query(ADD, [c, pd, l, null]);
+        await refusedWith(ADD, [c, pd, l, null], /already recorded/);
+        const r = await registration(c);
+        await api.query(ADD, [c, rules, null, r]);
+        await refusedWith(ADD, [c, rules, null, r], /already recorded/);
+        assert.equal(await consents("lead_request_id", l), 1);
+        assert.equal(await consents("registration_id", r), 1);
+      });
+    });
+
+    it("has no right on any sequence of the schema: it cannot draw, read or set a counter", async () => {
+      const seqs = (await db.pool.query("SELECT c.oid, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'bb' AND c.relkind = 'S' ORDER BY 2")).rows;
+      assert.ok(seqs.length >= 3, "the schema has sequences");
+      for (const q of seqs) {
+        for (const priv of ["USAGE", "SELECT", "UPDATE"]) assert.equal((await db.pool.query("SELECT has_sequence_privilege('bb_api', $1::oid, $2) AS ok", [q.oid, priv])).rows[0].ok, false, `${q.relname} ${priv}`);
+        await denied(api, `SELECT nextval('bb.${q.relname}')`);
+        await denied(api, `SELECT currval('bb.${q.relname}')`);
+        await denied(api, `SELECT setval('bb.${q.relname}', 1)`);
+        await denied(api, `SELECT last_value FROM bb.${q.relname}`);
+      }
+      // and the intake still works, because the functions run as their owner
+      assert.ok((await submitConsent(api, { idempotencyKey: randomUUID(), name: "Последовательность Ок", acceptRules: true, acceptPersonalData: true })).registrationId);
+      assert.ok((await submitLead(api, { idempotencyKey: randomUUID(), name: "Последовательность Ок", phone: "+77010000333", date: FUTURE, consent: true })).leadId);
+    });
+
     it("KNOWN LIMIT, kept visible: whether an exact (name, phone) pair exists can be learned (an id comes back), never the data itself", async () => {
       const a = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000555', 'birthday_form') AS id")).rows[0].id;
       const b = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000555', 'birthday_form') AS id")).rows[0].id;
@@ -269,6 +359,11 @@ describe("Database roles: one per application, least privilege", () => {
       await deletePost(admin, owner2(), post.id);
 
       assert.ok((await admin.query("SELECT name FROM bb.schema_migrations")).rows.length >= 10, "the dashboard reads the schema version");
+    });
+
+    it("may use the sequences it needs (serial columns), and nothing else about them is a way in", async () => {
+      const seqs = (await db.pool.query("SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'bb' AND c.relkind = 'S'")).rows;
+      for (const q of seqs) assert.equal((await db.pool.query("SELECT has_sequence_privilege('bb_admin', $1::oid, 'USAGE') AS ok", [q.oid])).rows[0].ok, true);
     });
 
     it("cannot change the structure, empty a table, rewrite the append-only history or become more powerful", async () => {

@@ -76,9 +76,11 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
     await pool.query(`REVOKE ALL ON ALL FUNCTIONS IN SCHEMA bb FROM ${ident(role)}`);
     await pool.query(`REVOKE ALL ON SCHEMA public FROM ${ident(role)}`);
     await pool.query(`GRANT USAGE ON SCHEMA bb TO ${ident(role)}`);
-    await pool.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA bb TO ${ident(role)}`);
     for (const t of tables) await pool.query(`DROP POLICY IF EXISTS ${ident(`${role}_access`)} ON bb.${ident(t)}`);
   }
+  // Sequences: the staff application writes through ordinary INSERTs (serial columns need USAGE). The public API role gets
+  // NONE: every write it makes happens inside the intake functions, which run as their owner. It cannot draw, read or set a counter.
+  await pool.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA bb TO ${ident(admin)}`);
   for (const [t, { privileges, using }] of Object.entries(API_GRANTS)) {
     await pool.query(`GRANT ${privileges} ON bb.${ident(t)} TO ${ident(api)}`);
     await pool.query(`CREATE POLICY ${ident(`${api}_access`)} ON bb.${ident(t)} FOR SELECT TO ${ident(api)} USING (${using ?? "true"})`);

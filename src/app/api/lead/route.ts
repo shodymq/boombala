@@ -2,6 +2,7 @@ import { getRoomName } from "@/data/birthdayRooms";
 import { BOOKING_SLOTS, PACKAGE_OPTIONS, validateLead } from "@/lib/lead";
 import { leadPipeline, PlatformError, sendLeadToPlatform } from "@/lib/platform";
 import { deliverOnce, rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
+import { siteMustRefuse } from "@/lib/site-profile";
 import { sendTelegramLead, telegramConfig, telegramDiagnostics, TelegramError } from "@/lib/telegram";
 
 export const runtime = "nodejs";
@@ -33,6 +34,8 @@ const clip = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slic
 
 export async function POST(request: Request) {
   dev("request received");
+  // Kazakhstan production: an unsafe configuration accepts nothing (and reads nothing from the visitor).
+  if (siteMustRefuse("lead")) return json({ ok: false, error: "unavailable" }, 503);
   try {
     // 403: same-origin only (blocks other sites posting through a visitor's browser).
     const origin = request.headers.get("origin");

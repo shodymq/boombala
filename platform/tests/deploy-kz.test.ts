@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { siteProfileProblems } from "../../src/lib/site-profile.ts";
 import { profileProblems } from "../src/server/exposure.ts";
 
 const REPO = new URL("../..", import.meta.url).pathname;
@@ -47,7 +48,7 @@ describe("Kazakhstan deployment files", () => {
   describe("rendering", () => {
     it("fills every non-secret placeholder and refuses an incomplete deploy.env", () => {
       for (const f of walk(out)) {
-        const left = (read(f).match(/@[A-Z0-9_]+@/g) ?? []).filter((p) => !/(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|TELEGRAM_CHAT_ID)@$/.test(p));
+        const left = (read(f).match(/@[A-Z0-9_]+@/g) ?? []).filter((p) => !/(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|CHAT_ID)@$/.test(p));
         assert.deepEqual(left, [], relative(out, f));
       }
       writeFileSync(join(tmp, "bad.env"), DEPLOY_ENV.replace("ADMIN_HOST=panel.example.test\n", ""));
@@ -220,9 +221,12 @@ describe("Kazakhstan deployment files", () => {
     });
     it("the site environment carries no database, second-factor or admin settings, reaches the API on loopback, and keeps today's behaviour", () => {
       const env = fill(r("env/site.env.example"));
-      for (const k of Object.keys(env)) assert.ok(!/^(DATABASE|MFA|CRON|ADMIN|ALLOWED|PLATFORM_ROLE|PLATFORM_PROFILE|PLATFORM_IP_PEPPER|SITE_REVALIDATE)/.test(k), k);
+      for (const k of Object.keys(env)) assert.ok(!/^(DATABASE|MFA|CRON|ADMIN|ALLOWED|PLATFORM_ROLE|PLATFORM_PROFILE|PLATFORM_IP_PEPPER|SITE_REVALIDATE|TELEGRAM)/.test(k), k);
       assert.equal(env.PLATFORM_URL, "http://127.0.0.1:3101");
-      assert.equal(env.LEAD_PIPELINE, "telegram-only");
+      assert.equal(env.LEAD_PIPELINE, "strict", "production accepts an enquiry only into the platform");
+      assert.equal(env.SITE_PROFILE, "kz-production");
+      assert.ok(!("TELEGRAM_BOT_TOKEN" in env) && !("TELEGRAM_CHAT_ID" in env), "the site holds no Telegram credentials");
+      assert.deepEqual(siteProfileProblems(env), [], "the example satisfies the site's own production profile");
       assert.equal(env.CONSENT_FORM_ENABLED, "0");
       assert.equal(env.NEXT_PUBLIC_SITE_URL, "https://site.example.test");
     });
@@ -260,29 +264,156 @@ describe("Kazakhstan deployment files", () => {
   });
 
 
-  describe("external backups", () => {
-    it("two encrypted copies outside the server, retention, continuous archiving, and a restore drill that refuses a non-empty target", () => {
+  describe("external backups: each repository gets its own backups, and each is checked and restorable on its own", () => {
+    const stubDir = () => mkdtempSync(join(tmp, "pgb-"));
+    const calls = (dir: string) => (existsSync(join(dir, "calls.log")) ? read(join(dir, "calls.log")).trim().split("\n").filter(Boolean) : []);
+    const NOW = 1_800_000_000;
+    /** A stand-in for pgbackrest: `info` answers from JSON files per repository, other commands are recorded. */
+    const pgb = (dir: string, infoByRepo: Record<string, unknown>, opts: { verifyFails?: string[]; restoreFails?: string[] } = {}) => {
+      for (const [repo, data] of Object.entries(infoByRepo)) writeFileSync(join(dir, `info-${repo}.json`), JSON.stringify(data));
+      writeFileSync(join(dir, "pgbackrest"), `#!/usr/bin/env bash
+echo "$*" >> "${dir}/calls.log"
+repo=""; target=""; cmd=""
+for a in "$@"; do
+  case "$a" in --repo=*) repo="\${a#--repo=}";; --pg1-path=*) target="\${a#--pg1-path=}";; info|verify|restore|backup) cmd="$a";; esac
+done
+case "$cmd" in
+  info) cat "${dir}/info-$repo.json" 2>/dev/null || exit 1;;
+  verify) case " ${(opts.verifyFails ?? []).join(" ")} " in *" $repo "*) exit 1;; esac;;
+  restore) case " ${(opts.restoreFails ?? []).join(" ")} " in *" $repo "*) exit 1;; esac; echo 16 > "$target/PG_VERSION";;
+esac
+exit 0
+`);
+      chmodSync(join(dir, "pgbackrest"), 0o755);
+      return join(dir, "pgbackrest");
+    };
+    const healthy = (ageHours = 5, fullAgeDays = 2) => [{
+      name: "boombala", status: { code: 0, message: "ok" },
+      backup: [
+        { type: "full", label: "F", timestamp: { start: NOW - fullAgeDays * 86400 - 60, stop: NOW - fullAgeDays * 86400 } },
+        { type: "diff", label: "D", timestamp: { start: NOW - ageHours * 3600 - 60, stop: NOW - ageHours * 3600 } },
+      ],
+      archive: [{ id: "16-1", min: "000000010000000000000001", max: "000000010000000000000009" }],
+    }];
+    const check = (bin: string, env: Record<string, string> = {}) => spawnSync("bash", [join(out, "backup/check-backups.sh")], { encoding: "utf8", env: { ...process.env, PGBACKREST_BIN: bin, NOW_EPOCH: String(NOW), ...env } });
+
+    it("both repositories hold encrypted copies, nothing counts that lives on this disk, and the configuration says why the jobs are separate", () => {
       const c = r("backup/pgbackrest.conf");
       assert.match(c, /^repo1-type=s3$/m);
       assert.match(c, /^repo2-type=sftp$/m);
       assert.equal((c.match(/^repo\d-cipher-type=aes-256-cbc$/gm) ?? []).length, 2, "both copies are encrypted");
       assert.equal((c.match(/^repo\d-retention-full=4$/gm) ?? []).length, 2);
-      assert.match(c, /^repo1-s3-endpoint=s3\.backup\.example\.test$/m);
       assert.ok(!/repo\d-type=posix/.test(c), "no copy on the same disk counts as a backup");
       for (const m of c.matchAll(/^repo\d-(cipher-pass|s3-key|s3-key-secret)=(.*)$/gm)) assert.match(m[2], /^@[A-Z0-9_]+@$/, "secrets stay as markers");
+      assert.match(c, /writes to ONE repository only/);
       const pg = read(join(KZ, "postgres/postgresql.conf.snippet"));
       assert.match(pg, /^archive_mode = on$/m);
       assert.match(pg, /pgbackrest --stanza=boombala archive-push %p/);
-      assert.match(r("backup/bb-backup-full.timer"), /OnCalendar=Sun/);
-      assert.match(r("backup/bb-backup-diff.timer"), /OnCalendar=Mon\.\.Sat/);
-      const drill = r("backup/restore-drill.sh");
-      assert.match(drill, /refusing: .* is not empty/);
-      assert.match(drill, /erasures|anonymised again/i, "the drill reminds to re-apply erasures after a restore");
-      const dir = mkdtempSync(join(tmp, "drill-"));
-      writeFileSync(join(dir, "x"), "x");
-      const res = spawnSync("bash", [join(out, "backup/restore-drill.sh")], { encoding: "utf8", env: { ...process.env, RESTORE_TARGET_DIR: dir, PATH: `${join(tmp)}:${process.env.PATH}` } });
-      assert.notEqual(res.status, 0);
-      assert.match(res.stderr, /refusing/);
+    });
+
+    it("four separate timers: full and differential, each for ONE repository, at different times, each with an alert on failure", () => {
+      const want: Record<string, [string, string]> = { "full-1": ["Sun", "03:00"], "full-2": ["Sun", "04:30"], "diff-1": ["Mon..Sat", "03:00"], "diff-2": ["Mon..Sat", "04:30"] };
+      for (const [inst, [days, time]] of Object.entries(want)) {
+        const t = r(`backup/bb-backup-${inst}.timer`);
+        assert.match(t, new RegExp(`^OnCalendar=${days.replace(/\./g, "\\.")} \\*-\\*-\\* ${time}:00$`, "m"), inst);
+        assert.match(t, new RegExp(`^Unit=bb-backup@${inst}\\.service$`, "m"));
+        assert.match(t, /^Persistent=true$/m);
+      }
+      const svc = r("backup/bb-backup@.service");
+      assert.match(svc, /^ExecStart=\/opt\/boombala\/deploy\/kz\/backup\/bb-backup\.sh %i$/m);
+      assert.match(svc, /^OnFailure=bb-alert@%n\.service$/m);
+      assert.match(svc, /^User=postgres$/m);
+      // no unit anywhere makes a backup without naming its repository
+      for (const f of walk(out)) assert.ok(!/pgbackrest[^\n]*\bbackup\b/.test(read(f).replace(/^#.*$/gm, "").replace(/pgbackrest --stanza=boombala archive-push/g, "")) || /--repo=/.test(read(f)), relative(out, f));
+      const check = r("backup/bb-backup-check.service");
+      assert.match(check, /^OnFailure=bb-alert@%n\.service$/m);
+      assert.match(r("backup/bb-backup-check.timer"), /^OnCalendar=\*-\*-\* 07:00:00$/m);
+      const alert = r("backup/bb-alert@.service");
+      assert.match(alert, /EnvironmentFile=\/etc\/boombala\/alert\.env/);
+      assert.ok(!/telegram_bot_token|ALERT_BOT_TOKEN=[A-Za-z0-9:_-]{20,}/i.test(alert), "no token in the unit");
+    });
+
+    it("the backup job writes ONLY into the repository named in its instance, with the right type, and refuses anything else", () => {
+      const dir = stubDir();
+      const bin = pgb(dir, {});
+      const run = (inst: string) => spawnSync("bash", [join(out, "backup/bb-backup.sh"), inst], { encoding: "utf8", env: { ...process.env, PGBACKREST_BIN: bin } });
+      for (const [inst, repo, type] of [["full-1", "1", "full"], ["diff-1", "1", "diff"], ["full-2", "2", "full"], ["diff-2", "2", "diff"]] as const) {
+        assert.equal(run(inst).status, 0, inst);
+        const last = calls(dir).at(-1)!;
+        assert.ok(last.includes(`--repo=${repo}`) && last.includes(`--type=${type}`) && /\bbackup$/.test(last), `${inst}: ${last}`);
+        assert.ok(!last.includes(`--repo=${repo === "1" ? "2" : "1"}`), `${inst} touches only repo${repo}`);
+      }
+      for (const bad of ["", "full", "full-3", "incr-1", "full-1;rm", "../full-1", "full-12"]) assert.notEqual(run(bad).status, 0, JSON.stringify(bad));
+      assert.equal(calls(dir).length, 4, "the refused ones ran nothing");
+    });
+
+    it("the daily check passes only when BOTH repositories are healthy, and looks at each one separately (info and verify per repository)", () => {
+      const dir = stubDir();
+      const bin = pgb(dir, { "1": healthy(), "2": healthy() });
+      const res = check(bin);
+      assert.equal(res.status, 0, res.stdout);
+      assert.match(res.stdout, /PASS\s+repo1/);
+      assert.match(res.stdout, /PASS\s+repo2/);
+      const log = calls(dir);
+      for (const repo of ["1", "2"]) {
+        assert.ok(log.some((l) => l.includes(`--repo=${repo}`) && l.includes("info")), `info for repo${repo}`);
+        assert.ok(log.some((l) => l.includes(`--repo=${repo}`) && l.endsWith("verify")), `verify for repo${repo}`);
+      }
+    });
+
+    it("a problem in ONE repository fails the check and names it: no backups at all, a stale backup, no recent full, empty WAL archive, a bad stanza, failed integrity check, unreadable answer", () => {
+      const cases: Array<[string, string, Record<string, unknown>, { verifyFails?: string[] }, RegExp]> = [
+        ["repo2 holds no backup at all (only WAL would flow there)", "2", { "1": healthy(), "2": [{ name: "boombala", status: { code: 0, message: "ok" }, backup: [], archive: healthy()[0].archive }] }, {}, /FAIL\s+repo2: no backup at all/],
+        ["repo2 newest backup is two days old", "2", { "1": healthy(), "2": healthy(60, 3) }, {}, /FAIL\s+repo2: newest backup is 60 h old/],
+        ["repo1 has no full backup in 8 days", "1", { "1": healthy(5, 12), "2": healthy() }, {}, /FAIL\s+repo1: newest full backup is 12 days old/],
+        ["repo2 WAL archive empty", "2", { "1": healthy(), "2": [{ ...healthy()[0], archive: [] }] }, {}, /FAIL\s+repo2: WAL archive is empty/],
+        ["repo1 stanza not ok", "1", { "1": [{ ...healthy()[0], status: { code: 2, message: "missing stanza path" } }], "2": healthy() }, {}, /FAIL\s+repo1: stanza status is not ok/],
+        ["repo2 verify fails", "2", { "1": healthy(), "2": healthy() }, { verifyFails: ["2"] }, /FAIL\s+repo2: pgbackrest verify failed/],
+        ["repo2 not answering", "2", { "1": healthy() }, {}, /FAIL\s+repo2: pgbackrest info failed/],
+        ["repo1 holds only a differential, never a full", "1", { "1": [{ ...healthy()[0], backup: [healthy()[0].backup[1]] }], "2": healthy() }, {}, /FAIL\s+repo1: no full backup/],
+      ];
+      for (const [name, bad, info, o, re] of cases) {
+        const dir = stubDir();
+        const res = check(pgb(dir, info, o));
+        assert.notEqual(res.status, 0, name);
+        assert.match(res.stdout, re, name);
+        const good = bad === "1" ? "2" : "1";
+        assert.match(res.stdout, new RegExp(`PASS\\s+repo${good}`), `${name}: the healthy repository is still reported as healthy`);
+      }
+    });
+
+    it("the restore drill restores from EACH repository into its own empty directory, fails if one cannot be restored, and refuses a non-empty target", () => {
+      const run = (bin: string, target: string, env: Record<string, string> = {}) => spawnSync("bash", [join(out, "backup/restore-drill.sh")], { encoding: "utf8", env: { ...process.env, PGBACKREST_BIN: bin, RESTORE_TARGET_DIR: target, ...env } });
+      const dir = stubDir();
+      const target = mkdtempSync(join(tmp, "drill-"));
+      const ok = run(pgb(dir, {}), target);
+      assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+      assert.match(ok.stdout, /PASS\s+repo1 restored/);
+      assert.match(ok.stdout, /PASS\s+repo2 restored/);
+      const log = calls(dir);
+      assert.ok(log.some((l) => l.includes("--repo=1") && l.includes(`--pg1-path=${join(target, "repo1")}`) && l.endsWith("restore")));
+      assert.ok(log.some((l) => l.includes("--repo=2") && l.includes(`--pg1-path=${join(target, "repo2")}`) && l.endsWith("restore")));
+      assert.match(ok.stdout, /anonymised again/);
+
+      const dir2 = stubDir();
+      const target2 = mkdtempSync(join(tmp, "drill-"));
+      const failed = run(pgb(dir2, {}, { restoreFails: ["2"] }), target2);
+      assert.notEqual(failed.status, 0);
+      assert.match(failed.stdout, /PASS\s+repo1 restored/);
+      assert.match(failed.stdout, /FAIL\s+repo2 could not be restored/);
+
+      const dir3 = stubDir();
+      const target3 = mkdtempSync(join(tmp, "drill-"));
+      mkdirSync(join(target3, "repo2"));
+      writeFileSync(join(target3, "repo2", "x"), "x");
+      const refused = run(pgb(dir3, {}), target3);
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /refusing: .*repo2 is not empty/);
+
+      const single = run(pgb(stubDir(), {}), mkdtempSync(join(tmp, "drill-")), { REPOS: "2" });
+      assert.equal(single.status, 0);
+      assert.ok(!/repo1/.test(single.stdout), "a single repository can be drilled alone");
+      assert.notEqual(run(pgb(stubDir(), {}), mkdtempSync(join(tmp, "drill-")), { REPOS: "3" }).status, 0);
     });
   });
 
@@ -330,6 +461,7 @@ describe("Kazakhstan deployment files", () => {
       for (const bad of ["pg", "postgres", "@node-rs/argon2", "argon2", "bcrypt", "bcryptjs", "otplib", "speakeasy", "iron-session"]) assert.ok(!deps.includes(bad), bad);
       for (const f of walk(join(REPO, "src")).filter((x) => /\.(ts|tsx)$/.test(x))) {
         const t = read(f);
+        if (f.endsWith("src/lib/site-profile.ts")) continue; // the one file that NAMES these variables, in order to forbid them
         assert.ok(!/from "pg"|DATABASE_URL|MFA_ENC_KEY|bb_session|ADMIN_ALLOWED|PLATFORM_ROLE/.test(t), relative(REPO, f));
       }
     });

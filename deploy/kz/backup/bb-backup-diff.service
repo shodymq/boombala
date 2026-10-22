@@ -1,8 +1,0 @@
-[Unit]
-Description=Differential encrypted Boom Bala backup
-After=postgresql.service
-
-[Service]
-Type=oneshot
-User=postgres
-ExecStart=/usr/bin/pgbackrest --stanza=boombala --type=diff backup

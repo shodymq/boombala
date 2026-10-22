@@ -1,0 +1,7 @@
+[Unit]
+Description=Alert: %i failed (message carries the unit name and the host only, never personal data)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/boombala/alert.env
+ExecStart=/usr/bin/curl --fail --silent --max-time 15 --data-urlencode "chat_id=${ALERT_CHAT_ID}" --data-urlencode "text=Boom Bala: %i failed on %H" "https://api.telegram.org/bot${ALERT_BOT_TOKEN}/sendMessage"

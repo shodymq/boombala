@@ -33,6 +33,10 @@ const ADMIN = { port: 3202, host: "127.0.0.1:3202" };
 const PROD = { port: 3203, host: "panel.example.test" };
 const BAD = { port: 3204, host: "127.0.0.1:3204" };
 const SITE = { port: 3205, host: "127.0.0.1:3205" };
+const SITE_BAD = { port: 3206, host: "127.0.0.1:3206" };
+const SITE_STRICT = { port: 3207, host: "127.0.0.1:3207" };
+const SITE_LEGACY = { port: 3208, host: "127.0.0.1:3208" };
+const TG_PORT = 3209;
 const VPN_IP = "10.77.0.5";
 const OUTSIDE_IP = "203.0.113.9";
 const MFA_KEY = randomBytes(32).toString("base64");
@@ -111,9 +115,9 @@ for (const role of ["manager", "editor"]) {
 // ── processes ─────────────────────────────────────────────────────────────────────────────────────────────────
 const adminEnv = {
   PLATFORM_ROLE: "admin", ALLOWED_HOSTS: ADMIN.host, DATABASE_URL: asRole("bb_admin", ROLE_ADMIN_PW), MFA_MODE: "required", MFA_ENC_KEY: MFA_KEY,
-  ADMIN_ALLOWED_CIDRS: "10.77.0.0/24,127.0.0.1/32", CRON_SECRET: rnd(32), REVALIDATE_TOKEN: rnd(32),
+  ADMIN_ALLOWED_CIDRS: "10.77.0.0/24,127.0.0.1/32", CRON_SECRET: rnd(32), REVALIDATE_TOKEN: rnd(32), TELEGRAM_NOTIFY_LEVEL: "minimal",
 };
-const baseClean = { PLATFORM_INTAKE_TOKEN: "", PLATFORM_IP_PEPPER: "", MFA_ENC_KEY: "", MFA_MODE: "", CRON_SECRET: "", TELEGRAM_BOT_TOKEN: "", TELEGRAM_CHAT_ID: "", SITE_REVALIDATE_URL: "", REVALIDATE_TOKEN: "", PII_INTAKE_ENABLED: "", PLATFORM_HTTPS: "", PLATFORM_PROFILE: "", ADMIN_ALLOWED_CIDRS: "", ALLOWED_HOSTS: "", PLATFORM_ROLE: "" };
+const baseClean = { DATABASE_URL: "", TELEGRAM_NOTIFY_LEVEL: "", TELEGRAM_API_BASE: "", LEAD_PIPELINE: "", SITE_PROFILE: "", PLATFORM_URL: "", PLATFORM_INTAKE_TOKEN: "", PLATFORM_IP_PEPPER: "", MFA_ENC_KEY: "", MFA_MODE: "", CRON_SECRET: "", TELEGRAM_BOT_TOKEN: "", TELEGRAM_CHAT_ID: "", SITE_REVALIDATE_URL: "", REVALIDATE_TOKEN: "", PII_INTAKE_ENABLED: "", PLATFORM_HTTPS: "", PLATFORM_PROFILE: "", ADMIN_ALLOWED_CIDRS: "", ALLOWED_HOSTS: "", PLATFORM_ROLE: "" };
 
 start("api", root, API.port, { ...baseClean, PLATFORM_ROLE: "api", ALLOWED_HOSTS: API.host, DATABASE_URL: asRole("bb_api", ROLE_API_PW), PLATFORM_INTAKE_TOKEN: INTAKE, PLATFORM_IP_PEPPER: rnd(24) });
 start("admin", root, ADMIN.port, { ...baseClean, ...adminEnv });
@@ -122,7 +126,24 @@ start("prod", root, PROD.port, {
 });
 start("bad", root, BAD.port, { ...baseClean, PLATFORM_PROFILE: "kz-production", PLATFORM_ROLE: "admin", ALLOWED_HOSTS: BAD.host, DATABASE_URL: asRole("bb_admin", ROLE_ADMIN_PW), PLATFORM_HTTPS: "1", MFA_MODE: "off" });
 start("site", repo, SITE.port, { ...baseClean });
-await Promise.all([API, ADMIN, PROD, BAD, SITE].map((p) => waitFor(p.port)));
+
+// A stand-in for Telegram that counts what reaches it. Nothing here ever talks to the real service.
+let telegramHits = 0;
+const telegram = http.createServer((req, res) => {
+  telegramHits++;
+  req.resume();
+  res.setHeader("content-type", "application/json");
+  res.end('{"ok":true,"result":{}}');
+});
+await new Promise((r) => telegram.listen(TG_PORT, "127.0.0.1", r));
+const siteSafe = { ...baseClean, SITE_PROFILE: "kz-production", LEAD_PIPELINE: "strict", PLATFORM_URL: `http://${API.host}`, PLATFORM_INTAKE_TOKEN: INTAKE };
+// unsafe: the lead pipeline can send a name and a phone straight to Telegram from the site
+start("site-bad", repo, SITE_BAD.port, { ...siteSafe, LEAD_PIPELINE: "dual", TELEGRAM_BOT_TOKEN: "1:abcdef", TELEGRAM_CHAT_ID: "1", TELEGRAM_API_BASE: `http://127.0.0.1:${TG_PORT}` });
+// safe configuration, but the platform does not accept personal data (the flag is off): nothing is taken
+start("site-strict", repo, SITE_STRICT.port, siteSafe);
+// today's behaviour outside the profile (development, Preview, current production): unchanged
+start("site-legacy", repo, SITE_LEGACY.port, { ...baseClean, LEAD_PIPELINE: "telegram-only", TELEGRAM_BOT_TOKEN: "1:abcdef", TELEGRAM_CHAT_ID: "1", TELEGRAM_API_BASE: `http://127.0.0.1:${TG_PORT}` });
+await Promise.all([API, ADMIN, PROD, BAD, SITE, SITE_BAD, SITE_STRICT, SITE_LEGACY].map((p) => waitFor(p.port)));
 
 const chrome = process.env.E2E_CHROME ?? `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 const browser = await chromium.launch({ executablePath: chrome, headless: true });
@@ -243,6 +264,35 @@ try {
     const home = await raw(SITE.port, "/", { host: SITE.host });
     ok(home.status === 200, "the site home page is served");
     ok(!/bb_session|__Host-bb_session/.test(JSON.stringify(home.headers)), "the site sets no staff session cookie");
+  }
+
+  // ══ 4b. Production profile of the site: an unsafe configuration accepts no real enquiry ═══════════════════════
+  console.log("## 4b. site production profile: fail closed");
+  {
+    const LEAD_NAME = `ТЕСТ Профиль ${run}`;
+    const body = (phone) => JSON.stringify({ name: LEAD_NAME, phone, date: "2099-06-01", package: "wow-party", consent: true, idempotencyKey: crypto.randomUUID() });
+    const post = (site, path, payload) => raw(site.port, path, { method: "POST", host: site.host, headers: { "content-type": "application/json", origin: `http://${site.host}` }, body: payload });
+    const leads = async () => Number((await owner.query("SELECT count(*)::int n FROM bb.contacts WHERE name = $1", [LEAD_NAME])).rows[0].n);
+    const beforeHits = telegramHits;
+
+    for (const path of ["/api/lead", "/api/consent"]) {
+      const r = await post(SITE_BAD, path, body("+77010000601"));
+      ok(r.status === 503 && r.body.includes("unavailable") && !r.headers["set-cookie"], `unsafe configuration: ${path} answers 503 and takes nothing`);
+    }
+    ok(telegramHits === beforeHits, "unsafe configuration: nothing reached Telegram (the pipeline 'dual' would have sent the name and phone)");
+    ok((await leads()) === 0, "unsafe configuration: nothing reached the platform");
+    const reasons = (logs.get("site-bad") ?? []).join("");
+    ok(/site\.profile_invalid/.test(reasons) && /lead_pipeline_must_be_strict/.test(reasons) && /site_must_not_hold_telegram_credentials/.test(reasons), "the reasons are logged as codes");
+    ok(!reasons.includes("abcdef") && !reasons.includes(INTAKE), "no secret appears in them");
+
+    const strict = await post(SITE_STRICT, "/api/lead", body("+77010000602"));
+    ok(strict.status === 502 && strict.body.includes("delivery_failed"), `a safe configuration with intake switched OFF still takes nothing (refused, not sent anywhere else) [${strict.status} ${strict.body.slice(0, 80)}]`);
+    ok((await leads()) === 0 && telegramHits === beforeHits, "...and nothing is stored or sent");
+    ok((await post(SITE_STRICT, "/api/consent", JSON.stringify({ name: LEAD_NAME, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }))).status === 503, "the registration route refuses too while its own flag is off");
+
+    // control: outside the profile today's path is untouched (the Telegram stand-in receives the enquiry)
+    const legacy = await post(SITE_LEGACY, "/api/lead", body("+77010000603"));
+    ok(legacy.status === 200 && telegramHits === beforeHits + 1, "outside the profile the current behaviour is unchanged (control)");
   }
 
   // ══ 5. Staff browser: second factor, cookies, roles, inside the VPN ═════════════════════════════════════════
@@ -424,13 +474,14 @@ try {
   }
 } finally {
   await browser.close();
+  telegram.close();
   stopAll();
   await owner.end();
 }
 
 if (fails) {
   console.log(`\nFAILS: ${fails}`);
-  for (const [k, v] of logs) if (k === "admin" || k === "api") console.log(`--- ${k} log tail ---\n${v.join("").slice(-1500)}`);
+  for (const [k, v] of logs) if (k === "admin" || k === "api" || k === "site-strict") console.log(`--- ${k} log tail ---\n${v.join("").slice(-1500)}`);
 }
 console.log(fails ? "" : "\nALL OK");
 process.exit(fails ? 1 : 0);

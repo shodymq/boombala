@@ -6,6 +6,7 @@ import { ConsentUnavailableError, ValidationError } from "../core/errors.ts";
 import { telegramConfigFromEnv, sendTelegram } from "../core/telegram.ts";
 import { drainOutbox } from "../core/outbox.ts";
 import { getPool } from "./db.ts";
+import { notifyLevel } from "./notify-level.ts";
 
 /** Constant-time check of `Authorization: Bearer <secret>` against an environment secret. A missing secret denies everything. */
 export function bearerOk(request: Request, secret: string | undefined): boolean {
@@ -39,7 +40,7 @@ export function errorResponse(error: unknown): NextResponse {
   return json({ ok: false, error: "server" }, 500);
 }
 
-export const notifyLevel = (): "full" | "minimal" => (process.env.TELEGRAM_NOTIFY_LEVEL === "minimal" ? "minimal" : "full");
+export { notifyLevel };
 
 /** Immediate best-effort delivery for one enquiry (bounded); anything that fails stays in the outbox for the retry worker. */
 export async function tryDeliver(refId?: string): Promise<void> {

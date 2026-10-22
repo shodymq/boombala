@@ -111,7 +111,7 @@ describe("Exposure: what each deployment shows", () => {
     const key = Buffer.alloc(32, 3).toString("base64");
     const goodAdmin = {
       PLATFORM_PROFILE: "kz-production", PLATFORM_ROLE: "admin", PLATFORM_HTTPS: "1", ALLOWED_HOSTS: "panel.example.test", DATABASE_URL: "postgres://bb_admin@127.0.0.1/db",
-      MFA_MODE: "required", MFA_ENC_KEY: key, ADMIN_ALLOWED_CIDRS: "10.77.0.0/24,127.0.0.1/32", CRON_SECRET: "c".repeat(32), REVALIDATE_TOKEN: "r".repeat(32), TELEGRAM_BOT_TOKEN: "x:y", TELEGRAM_CHAT_ID: "1", SITE_REVALIDATE_URL: "https://site.example.test",
+      MFA_MODE: "required", MFA_ENC_KEY: key, ADMIN_ALLOWED_CIDRS: "10.77.0.0/24,127.0.0.1/32", CRON_SECRET: "c".repeat(32), REVALIDATE_TOKEN: "r".repeat(32), TELEGRAM_BOT_TOKEN: "x:y", TELEGRAM_CHAT_ID: "1", TELEGRAM_NOTIFY_LEVEL: "minimal", SITE_REVALIDATE_URL: "https://site.example.test",
     };
     const goodApi = { PLATFORM_PROFILE: "kz-production", PLATFORM_ROLE: "api", PLATFORM_HTTPS: "1", ALLOWED_HOSTS: "api.example.test", DATABASE_URL: "postgres://bb_api@127.0.0.1/db", PLATFORM_INTAKE_TOKEN: "t".repeat(32), PLATFORM_IP_PEPPER: "p".repeat(24) };
 
@@ -130,6 +130,10 @@ describe("Exposure: what each deployment shows", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, DATABASE_URL: "" }), ["database_url_required"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, CRON_SECRET: "" }), ["cron_secret_required"]);
     });
+    it("notifications in production must be 'minimal': 'full', a typo or nothing at all stops the admin from starting", () => {
+      for (const bad of ["full", "FULL", "Minimal", "min", "", undefined]) assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: bad }), ["notify_level_must_be_minimal"], JSON.stringify(bad));
+      assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "minimal" }), []);
+    });
     it("an allowlist that is really 'everyone' is refused", () => {
       for (const wide of ["0.0.0.0/0", "::/0", "10.0.0.0/7", "10.77.0.0/24,0.0.0.0/0"]) assert.ok(profileProblems({ ...goodAdmin, ADMIN_ALLOWED_CIDRS: wide }).includes("admin_cidrs_too_wide"), wide);
       assert.ok(profileProblems({ ...goodAdmin, ADMIN_ALLOWED_CIDRS: "10.77.0.0/99" }).includes("admin_cidrs_invalid"));
@@ -137,7 +141,7 @@ describe("Exposure: what each deployment shows", () => {
     it("secrets are separated: the admin has no intake token or IP pepper; the API has no MFA key, cron secret, Telegram or revalidate secret", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, PLATFORM_INTAKE_TOKEN: "t".repeat(32) }), ["admin_must_not_have_platform_intake_token"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, PLATFORM_IP_PEPPER: "p" }), ["admin_must_not_have_platform_ip_pepper"]);
-      for (const [k, name] of [["MFA_ENC_KEY", "mfa_enc_key"], ["CRON_SECRET", "cron_secret"], ["TELEGRAM_BOT_TOKEN", "telegram_bot_token"], ["TELEGRAM_CHAT_ID", "telegram_chat_id"], ["REVALIDATE_TOKEN", "revalidate_token"], ["SITE_REVALIDATE_URL", "site_revalidate_url"]] as const) {
+      for (const [k, name] of [["MFA_ENC_KEY", "mfa_enc_key"], ["CRON_SECRET", "cron_secret"], ["TELEGRAM_BOT_TOKEN", "telegram_bot_token"], ["TELEGRAM_CHAT_ID", "telegram_chat_id"], ["TELEGRAM_NOTIFY_LEVEL", "telegram_notify_level"], ["REVALIDATE_TOKEN", "revalidate_token"], ["SITE_REVALIDATE_URL", "site_revalidate_url"]] as const) {
         assert.deepEqual(profileProblems({ ...goodApi, [k]: "x".repeat(40) }), [`api_must_not_have_${name}`], k);
       }
       assert.deepEqual(profileProblems({ ...goodApi, ADMIN_ALLOWED_CIDRS: "10.77.0.0/24" }), ["api_must_not_have_admin_cidrs"]);

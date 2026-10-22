@@ -1,5 +1,6 @@
 import { normalizePhone, NAME_MAX } from "@/lib/lead";
 import { PlatformError, sendConsentToPlatform } from "@/lib/platform";
+import { siteMustRefuse } from "@/lib/site-profile";
 import { rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -11,6 +12,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** QR registration. No Telegram, no OTP: the contact and the consent history go to the CRM only. Off unless CONSENT_FORM_ENABLED=1. */
 export async function POST(request: Request) {
+  if (siteMustRefuse("consent")) return json({ ok: false, error: "unavailable" }, 503);
   try {
     if (process.env.CONSENT_FORM_ENABLED !== "1") return json({ ok: false, error: "unavailable" }, 503);
 

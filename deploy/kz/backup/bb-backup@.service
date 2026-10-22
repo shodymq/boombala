@@ -1,0 +1,9 @@
+[Unit]
+Description=Encrypted Boom Bala backup (%i): one type into ONE repository
+After=postgresql.service
+OnFailure=bb-alert@%n.service
+
+[Service]
+Type=oneshot
+User=postgres
+ExecStart=/opt/boombala/deploy/kz/backup/bb-backup.sh %i

@@ -27,7 +27,7 @@ render() {
   mkdir -p "$(dirname "$dst")"
   sed -f "$SED_SCRIPT" "$src" > "$dst"
   # What may stay as a marker: secrets, which are filled on the server by hand.
-  if grep -o '@[A-Z0-9_]*@' "$dst" | grep -vE '(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|TELEGRAM_CHAT_ID)@$' >/dev/null; then
+  if grep -o '@[A-Z0-9_]*@' "$dst" | grep -vE '(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|CHAT_ID)@$' >/dev/null; then
     echo "unfilled placeholder in $dst:" >&2; grep -n '@[A-Z0-9_]*@' "$dst" >&2; exit 1
   fi
 }
@@ -39,6 +39,6 @@ for dir in wireguard nftables postgres systemd nginx dns backup; do
 done
 for f in "$HERE/nginx/bb-proxy.conf" "$HERE/nginx/bb-tls.conf"; do cp "$f" "$OUT/nginx/$(basename "$f")"; done
 cp "$HERE/systemd/bb-outbox.timer" "$OUT/systemd/bb-outbox.timer"
-for f in "$HERE"/backup/*.service "$HERE"/backup/*.timer "$HERE"/backup/restore-drill.sh; do mkdir -p "$OUT/backup"; cp "$f" "$OUT/backup/$(basename "$f")"; done
+for f in "$HERE"/backup/*.service "$HERE"/backup/*.timer "$HERE"/backup/*.sh; do mkdir -p "$OUT/backup"; cp "$f" "$OUT/backup/$(basename "$f")"; done
 for f in "$HERE"/env/*.example; do render "$f" "$OUT/env/$(basename "$f")"; done
 echo "rendered to $OUT"

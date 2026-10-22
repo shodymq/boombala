@@ -1,4 +1,7 @@
 # pgBackRest: encrypted backups that live OUTSIDE this server. Two independent copies in two places, both in Kazakhstan.
+# IMPORTANT: `pgbackrest backup` writes to ONE repository only (repo1 unless --repo is given). WAL is pushed to every repository
+# automatically, but full and differential backups are made by SEPARATE jobs per repository (bb-backup-{full,diff}-{1,2}.timer,
+# which run `--repo=N`), and bb-backup-check.timer verifies each repository on its own every day.
 # Rendered by render.sh; the passphrase and the access keys stay as markers and are filled on the server by hand (file mode 0640, group postgres).
 [global]
 # Copy 1: S3-compatible object storage of ANOTHER provider/data centre in Kazakhstan.

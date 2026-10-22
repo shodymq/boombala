@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily differential backup into repo2
+
+[Timer]
+OnCalendar=Mon..Sat *-*-* 04:30:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=bb-backup@diff-2.service
+
+[Install]
+WantedBy=timers.target

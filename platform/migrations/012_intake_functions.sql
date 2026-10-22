@@ -56,6 +56,11 @@ CREATE FUNCTION intake_insert_registration(p_key uuid, p_contact uuid) RETURNS T
 $$;
 
 -- One "given" consent tied to exactly ONE of an enquiry or a registration, for a document that is published right now.
+-- It must be consistent end to end, so a handle that leaks cannot be used to write into someone else's history:
+--   * the enquiry / registration must belong to THIS contact;
+--   * it must have been created moments ago (the same submission), not be an old record;
+--   * an enquiry carries only the personal-data consent; a registration may carry the registration documents;
+--   * the same document is recorded once per enquiry / registration.
 -- The API cannot record a withdrawal, a staff action, or a consent for a draft.
 CREATE FUNCTION intake_add_consent(p_contact uuid, p_document uuid, p_ip_hash text, p_user_agent text, p_lead uuid, p_registration uuid) RETURNS void
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, bb AS $$
@@ -65,6 +70,24 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM bb.legal_documents d WHERE d.id = p_document AND d.status = 'published') THEN
     RAISE EXCEPTION 'the document is not published' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_lead IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM bb.lead_requests l WHERE l.id = p_lead AND l.contact_id = p_contact AND l.created_at > now() - interval '10 minutes') THEN
+      RAISE EXCEPTION 'the enquiry does not belong to this contact or is not a current submission' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM bb.legal_documents d WHERE d.id = p_document AND d.kind = 'personal_data_consent') THEN
+      RAISE EXCEPTION 'an enquiry carries only the personal-data consent' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF EXISTS (SELECT 1 FROM bb.consent_events e WHERE e.lead_request_id = p_lead AND e.document_id = p_document) THEN
+      RAISE EXCEPTION 'this consent is already recorded' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+  ELSE
+    IF NOT EXISTS (SELECT 1 FROM bb.consent_registrations r WHERE r.id = p_registration AND r.contact_id = p_contact AND r.created_at > now() - interval '10 minutes') THEN
+      RAISE EXCEPTION 'the registration does not belong to this contact or is not a current submission' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF EXISTS (SELECT 1 FROM bb.consent_events e WHERE e.registration_id = p_registration AND e.document_id = p_document) THEN
+      RAISE EXCEPTION 'this consent is already recorded' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
   END IF;
   INSERT INTO bb.consent_events (contact_id, document_id, event, method, ip_hash, user_agent, lead_request_id, registration_id)
   VALUES (p_contact, p_document, 'given', 'web_checkbox', p_ip_hash, p_user_agent, p_lead, p_registration);
@@ -79,7 +102,7 @@ $$;
 CREATE FUNCTION intake_queue_notification(p_lead uuid) RETURNS void
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, bb AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM bb.lead_requests l WHERE l.id = p_lead) THEN
+  IF NOT EXISTS (SELECT 1 FROM bb.lead_requests l WHERE l.id = p_lead AND l.created_at > now() - interval '10 minutes') THEN
     RAISE EXCEPTION 'unknown enquiry' USING ERRCODE = 'invalid_parameter_value';
   END IF;
   INSERT INTO bb.outbox (topic, ref_id) VALUES ('telegram.lead', p_lead) ON CONFLICT (topic, ref_id) DO NOTHING;
