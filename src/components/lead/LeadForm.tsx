@@ -22,6 +22,7 @@ import { birthdayMessage, whatsappUrl } from "@/lib/whatsapp";
 import { ChoiceField, type ChoiceOption } from "./ChoiceField";
 import { useSelectedPackage } from "./SelectedPackage";
 import { AvailabilityPanel, calendarEnabled } from "@/components/booking/AvailabilityPanel";
+import { PreferredTime } from "@/components/booking/PreferredTime";
 
 /** A random UUID; `crypto.randomUUID` exists only in secure contexts, so fall back to getRandomValues. */
 function newKey(): string {
@@ -360,7 +361,9 @@ export function LeadForm({
             onPickDate={(d) => set("date", d)}
             minDate={minBookingDate()}
           />
-        ) : null}
+        ) : (
+          <PreferredTime slot={values.slot} onSlot={(id) => set("slot", id)} />
+        )}
 
         <div className="grid gap-2">
           <span id={`${idOf("package")}-label`} className="font-display text-sm font-extrabold text-grape-800">
