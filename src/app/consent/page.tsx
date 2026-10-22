@@ -40,7 +40,7 @@ export default async function ConsentPage() {
               </h1>
               <p className="mt-4 max-w-[47ch] text-sm leading-relaxed text-grape-100 sm:text-base">
                 Перед посещением центра ознакомьтесь с документами и подтвердите согласие от своего имени.
-                Это не бронирование и не отметка о посещении.
+                Это не бронирование: регистрация не означает посещение.
               </p>
             </div>
           </div>
