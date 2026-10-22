@@ -48,6 +48,33 @@ describe("Kazakhstan production: an unsafe site configuration accepts no enquiry
     assert.ok(!JSON.stringify(problems).includes("SECRET"));
   });
 
+  describe("the rollback deployment never carries a name or a phone anywhere", () => {
+    const rollback = { SITE_PROFILE: "rollback-safe", NEXT_PUBLIC_SITE_URL: "https://site.example.test", CONSENT_FORM_ENABLED: "0" };
+
+    it("its forms always refuse: the profile has a standing problem, so /api/lead and /api/consent answer 503", () => {
+      assert.deepEqual(siteProfileProblems(rollback), ["rollback_forms_disabled"]);
+      // whatever else is set cannot reopen them
+      for (const extra of [{ LEAD_PIPELINE: "strict" }, { LEAD_PIPELINE: "telegram-only" }, { LEAD_PIPELINE: "dual" }, { PLATFORM_URL: "http://127.0.0.1:3101", PLATFORM_INTAKE_TOKEN: "t".repeat(32), LEAD_PIPELINE: "strict" }]) {
+        assert.ok(siteProfileProblems({ ...rollback, ...extra }).includes("rollback_forms_disabled"), JSON.stringify(extra));
+      }
+    });
+
+    it("the legacy variables that would send an enquiry to Telegram are reported when they are still there", () => {
+      const legacy = { ...rollback, LEAD_PIPELINE: "telegram-only", TELEGRAM_BOT_TOKEN: "SECRETBOT", TELEGRAM_CHAT_ID: "1", TELEGRAM_API_BASE: "http://x" };
+      const problems = siteProfileProblems(legacy);
+      assert.deepEqual(problems.sort(), ["rollback_forms_disabled", "site_must_not_hold_telegram_credentials"]);
+      assert.ok(!JSON.stringify(problems).includes("SECRET"));
+      assert.ok(siteProfileProblems({ ...rollback, PLATFORM_URL: "http://127.0.0.1:3101" }).includes("site_must_not_have_platform_url"));
+      assert.ok(siteProfileProblems({ ...rollback, DATABASE_URL: "postgres://x" }).includes("site_must_not_have_database_url"));
+    });
+
+    it("the legacy production configuration, as it runs today, is NOT a safe rollback target: only the new profile makes it one", () => {
+      const legacyToday = { LEAD_PIPELINE: "telegram-only", TELEGRAM_BOT_TOKEN: "x", TELEGRAM_CHAT_ID: "1" };
+      assert.deepEqual(siteProfileProblems(legacyToday), [], "no profile: the forms would still send a name and a phone to Telegram");
+      assert.notDeepEqual(siteProfileProblems({ ...legacyToday, SITE_PROFILE: "rollback-safe" }), []);
+    });
+  });
+
   it("the notification level of the admin is 'minimal' in the production profile whatever the environment says; elsewhere it behaves as before", () => {
     const keep = { p: process.env.PLATFORM_PROFILE, l: process.env.TELEGRAM_NOTIFY_LEVEL };
     try {

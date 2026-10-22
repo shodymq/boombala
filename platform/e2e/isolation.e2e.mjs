@@ -36,6 +36,7 @@ const SITE = { port: 3205, host: "127.0.0.1:3205" };
 const SITE_BAD = { port: 3206, host: "127.0.0.1:3206" };
 const SITE_STRICT = { port: 3207, host: "127.0.0.1:3207" };
 const SITE_LEGACY = { port: 3208, host: "127.0.0.1:3208" };
+const SITE_ROLLBACK = { port: 3210, host: "127.0.0.1:3210" };
 const TG_PORT = 3209;
 const VPN_IP = "10.77.0.5";
 const OUTSIDE_IP = "203.0.113.9";
@@ -143,7 +144,9 @@ start("site-bad", repo, SITE_BAD.port, { ...siteSafe, LEAD_PIPELINE: "dual", TEL
 start("site-strict", repo, SITE_STRICT.port, siteSafe);
 // today's behaviour outside the profile (development, Preview, current production): unchanged
 start("site-legacy", repo, SITE_LEGACY.port, { ...baseClean, LEAD_PIPELINE: "telegram-only", TELEGRAM_BOT_TOKEN: "1:abcdef", TELEGRAM_CHAT_ID: "1", TELEGRAM_API_BASE: `http://127.0.0.1:${TG_PORT}` });
-await Promise.all([API, ADMIN, PROD, BAD, SITE, SITE_BAD, SITE_STRICT, SITE_LEGACY].map((p) => waitFor(p.port)));
+// the rollback deployment, in its WORST case: someone copied the legacy variables into it (Telegram credentials and the old pipeline)
+start("site-rollback", repo, SITE_ROLLBACK.port, { ...baseClean, SITE_PROFILE: "rollback-safe", LEAD_PIPELINE: "telegram-only", TELEGRAM_BOT_TOKEN: "1:abcdef", TELEGRAM_CHAT_ID: "1", TELEGRAM_API_BASE: `http://127.0.0.1:${TG_PORT}` });
+await Promise.all([API, ADMIN, PROD, BAD, SITE, SITE_BAD, SITE_STRICT, SITE_LEGACY, SITE_ROLLBACK].map((p) => waitFor(p.port)));
 
 const chrome = process.env.E2E_CHROME ?? `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 const browser = await chromium.launch({ executablePath: chrome, headless: true });
@@ -289,6 +292,18 @@ try {
     ok(strict.status === 502 && strict.body.includes("delivery_failed"), `a safe configuration with intake switched OFF still takes nothing (refused, not sent anywhere else) [${strict.status} ${strict.body.slice(0, 80)}]`);
     ok((await leads()) === 0 && telegramHits === beforeHits, "...and nothing is stored or sent");
     ok((await post(SITE_STRICT, "/api/consent", JSON.stringify({ name: LEAD_NAME, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }))).status === 503, "the registration route refuses too while its own flag is off");
+
+    // the rollback deployment: pages yes, forms never, even with the legacy Telegram variables copied into it
+    const hitsBeforeRollback = telegramHits;
+    ok((await raw(SITE_ROLLBACK.port, "/", { host: SITE_ROLLBACK.host })).status === 200, "rollback deployment: the pages are served");
+    for (const path of ["/api/lead", "/api/consent"]) {
+      const r = await post(SITE_ROLLBACK, path, body("+77010000604"));
+      ok(r.status === 503 && r.body.includes("unavailable"), `rollback deployment: ${path} always answers 503`);
+    }
+    ok(telegramHits === hitsBeforeRollback, "rollback deployment: nothing reached Telegram although its credentials were present");
+    ok((await leads()) === 0, "rollback deployment: nothing was stored");
+    const rb = (logs.get("site-rollback") ?? []).join("");
+    ok(/rollback_forms_disabled/.test(rb) && /site_must_not_hold_telegram_credentials/.test(rb) && !rb.includes("abcdef"), "rollback deployment: the reasons are logged as codes, the legacy variables are called out, no secret appears");
 
     // control: outside the profile today's path is untouched (the Telegram stand-in receives the enquiry)
     const legacy = await post(SITE_LEGACY, "/api/lead", body("+77010000603"));

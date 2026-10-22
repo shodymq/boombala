@@ -230,6 +230,12 @@ describe("Kazakhstan deployment files", () => {
       assert.equal(env.CONSENT_FORM_ENABLED, "0");
       assert.equal(env.NEXT_PUBLIC_SITE_URL, "https://site.example.test");
     });
+    it("the rollback environment example opens no way for a name or a phone to leave: no Telegram, no platform, forms disabled", () => {
+      const env = fill(r("env/rollback.env.example"));
+      assert.equal(env.SITE_PROFILE, "rollback-safe");
+      assert.deepEqual(siteProfileProblems(env), ["rollback_forms_disabled"], "exactly the standing 'forms disabled' marker and nothing else");
+      for (const k of Object.keys(env)) assert.ok(!/^(TELEGRAM|PLATFORM|DATABASE|LEAD_PIPELINE)/.test(k), k);
+    });
     it("the admin refreshes the site's cache on loopback; the API is addressed on loopback; no production file points at Vercel", () => {
       assert.match(r("env/admin.env.example"), /^SITE_REVALIDATE_URL=http:\/\/127\.0\.0\.1:3000$/m);
       assert.match(r("env/api.env.example"), /^ALLOWED_HOSTS=127\.0\.0\.1:3101$/m);
@@ -424,6 +430,18 @@ exit 0
         assert.ok(calls.length >= 1, f);
         for (const l of calls) assert.match(l, /process\.env\.VERCEL === "1" \?/, `${relative(REPO, f)}: ${l.trim()}`);
       }
+    });
+    it("the DNS rollback plan returns to the safe rollback deployment, never to the legacy production that would send names and phones to Telegram again", () => {
+      const admin = read(join(REPO, "docs/platform/ADMIN-ISOLATION-KZ.md"));
+      const plan = read(join(REPO, "docs/platform/PRODUCTION-PLAN-KZ.md"));
+      for (const [name, t] of [["ADMIN-ISOLATION-KZ", admin], ["PRODUCTION-PLAN-KZ", plan]] as const) {
+        assert.ok(!/вернуть DNS на Vercel|возврат DNS на Vercel/i.test(t), `${name}: no plain "return DNS to Vercel"`);
+        assert.match(t, /rollback-safe/, name);
+        assert.match(t, /не возвращается|не на старый Production/i, name);
+      }
+      assert.match(admin, /ротировать \(отозвать\) токен Telegram/);
+      assert.match(admin, /Запрещено:\*? возвращать DNS на старый Production-проект/);
+      assert.match(admin, /форма → Telegram[^\n]*юридическое решение/);
     });
     it("the documents say that production is entirely in Kazakhstan and Vercel is for Preview and tests only", () => {
       for (const doc of ["docs/platform/ADMIN-ISOLATION-KZ.md", "docs/platform/PRODUCTION-PLAN-KZ.md"]) {

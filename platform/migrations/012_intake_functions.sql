@@ -9,6 +9,16 @@
 -- What a compromised API process can still learn: whether an exact (name, phone) pair already exists (the id returned by
 -- intake_upsert_contact). It cannot read a name or a phone, and cannot enumerate contacts.
 
+-- Exactly one "given" consent per document for an enquiry, and per document for a registration, enforced by PostgreSQL itself:
+-- two submissions racing with the same handle cannot both win, whatever the application does. Partial, so history is untouched:
+-- withdrawals ("revoked", written by staff, tied to no enquiry or registration) are not covered, and the append-only guard on
+-- UPDATE/DELETE is unaffected. (A consent given earlier stays in the history; a new "given" for the same enquiry/registration
+-- and document is never needed, a new submission is a new enquiry or registration.)
+CREATE UNIQUE INDEX consent_events_lead_document_given_uq ON consent_events (lead_request_id, document_id)
+  WHERE event = 'given' AND lead_request_id IS NOT NULL;
+CREATE UNIQUE INDEX consent_events_registration_document_given_uq ON consent_events (registration_id, document_id)
+  WHERE event = 'given' AND registration_id IS NOT NULL;
+
 CREATE FUNCTION intake_upsert_contact(p_name text, p_name_key text, p_phone text, p_source text) RETURNS uuid
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, bb AS $$
 DECLARE cid uuid;
@@ -89,8 +99,13 @@ BEGIN
       RAISE EXCEPTION 'this consent is already recorded' USING ERRCODE = 'invalid_parameter_value';
     END IF;
   END IF;
-  INSERT INTO bb.consent_events (contact_id, document_id, event, method, ip_hash, user_agent, lead_request_id, registration_id)
-  VALUES (p_contact, p_document, 'given', 'web_checkbox', p_ip_hash, p_user_agent, p_lead, p_registration);
+  BEGIN
+    INSERT INTO bb.consent_events (contact_id, document_id, event, method, ip_hash, user_agent, lead_request_id, registration_id)
+    VALUES (p_contact, p_document, 'given', 'web_checkbox', p_ip_hash, p_user_agent, p_lead, p_registration);
+  EXCEPTION WHEN unique_violation THEN
+    -- the other of two concurrent submissions lost the race: the unique index decided, the answer is the same as for a repeat
+    RAISE EXCEPTION 'this consent is already recorded' USING ERRCODE = 'invalid_parameter_value';
+  END;
 END $$;
 
 CREATE FUNCTION intake_registration_documents(p_registration uuid) RETURNS TABLE (kind text, version integer)

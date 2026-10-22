@@ -255,6 +255,110 @@ describe("Database roles: one per application, least privilege", () => {
         assert.equal(await consents("lead_request_id", l), 1);
         assert.equal(await consents("registration_id", r), 1);
       });
+
+      describe("two submissions racing for the same consent: PostgreSQL keeps exactly one", () => {
+        const given = async (where: string, id: string) => (await db.pool.query(`SELECT count(*)::int n FROM bb.consent_events WHERE ${where} = $1 AND event = 'given'`, [id])).rows[0].n;
+        const waiting = async () => (await db.pool.query("SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND state = 'active'")).rows[0].n;
+        const settle = () => new Promise((r) => setTimeout(r, 400));
+
+        it("the indexes exist, are partial and unique, and leave withdrawals alone", async () => {
+          const defs = (await db.pool.query("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'bb' AND tablename = 'consent_events' AND indexname LIKE '%given_uq'")).rows;
+          assert.deepEqual(defs.map((d) => d.indexname).sort(), ["consent_events_lead_document_given_uq", "consent_events_registration_document_given_uq"]);
+          for (const d of defs) assert.match(d.indexdef, /CREATE UNIQUE INDEX .* WHERE .*event = 'given'/s);
+        });
+
+        it("two transactions at once on an enquiry: the second waits for the first, then loses; exactly one 'given' remains", async () => {
+          const c = await contact("Гонка Заявка");
+          const l = await lead(c);
+          const A = await api.connect();
+          const B = await api.connect();
+          try {
+            await A.query("BEGIN");
+            await B.query("BEGIN");
+            await A.query(ADD, [c, pd, l, null]); // first writer, not committed yet
+            const second = B.query(ADD, [c, pd, l, null]).then(() => "recorded", (e: Error) => e.message);
+            await settle();
+            assert.equal(await waiting(), 1, "the second transaction really is blocked on the first one's index entry");
+            await A.query("COMMIT");
+            assert.match(await second, /already recorded/, "and loses once the first commits");
+            await B.query("ROLLBACK");
+          } finally {
+            A.release();
+            B.release();
+          }
+          assert.equal(await given("lead_request_id", l), 1);
+        });
+
+        it("if the first transaction rolls back, the waiting second one takes its place: still exactly one", async () => {
+          const c = await contact("Гонка Откат");
+          const l = await lead(c);
+          const A = await api.connect();
+          const B = await api.connect();
+          try {
+            await A.query("BEGIN");
+            await B.query("BEGIN");
+            await A.query(ADD, [c, pd, l, null]);
+            const second = B.query(ADD, [c, pd, l, null]).then(() => "recorded", (e: Error) => e.message);
+            await settle();
+            assert.equal(await waiting(), 1);
+            await A.query("ROLLBACK");
+            assert.equal(await second, "recorded");
+            await B.query("COMMIT");
+          } finally {
+            A.release();
+            B.release();
+          }
+          assert.equal(await given("lead_request_id", l), 1);
+        });
+
+        it("the same on a registration and its document", async () => {
+          const c = await contact("Гонка Регистрация");
+          const r = await registration(c);
+          const A = await api.connect();
+          const B = await api.connect();
+          try {
+            await A.query("BEGIN");
+            await B.query("BEGIN");
+            await A.query(ADD, [c, rules, null, r]);
+            const second = B.query(ADD, [c, rules, null, r]).then(() => "recorded", (e: Error) => e.message);
+            await settle();
+            await A.query("COMMIT");
+            assert.match(await second, /already recorded/);
+            await B.query("ROLLBACK");
+            await A.query(ADD, [c, pd, null, r]); // another document of the same registration is a different consent
+          } finally {
+            A.release();
+            B.release();
+          }
+          assert.equal(await given("registration_id", r), 2);
+        });
+
+        it("many at once: ten parallel callers, one winner, nine told 'already recorded', one row", async () => {
+          const c = await contact("Гонка Десять");
+          const l = await lead(c);
+          const results = await Promise.all(Array.from({ length: 10 }, () => api.query(ADD, [c, pd, l, null]).then(() => "ok", (e: Error) => e.message)));
+          assert.equal(results.filter((x) => x === "ok").length, 1);
+          assert.equal(results.filter((x) => /already recorded/.test(x)).length, 9);
+          assert.equal(await given("lead_request_id", l), 1);
+        });
+
+        it("the index itself refuses a duplicate even without the function, but never blocks withdrawals or the history rules", async () => {
+          const c = await contact("Гонка Индекс");
+          const l = await lead(c);
+          await api.query(ADD, [c, pd, l, null]);
+          const dup = "INSERT INTO bb.consent_events (contact_id, document_id, event, method, lead_request_id) VALUES ($1, $2, 'given', 'web_checkbox', $3)";
+          await assert.rejects(() => db.pool.query(dup, [c, pd, l]), (e: { code?: string }) => e.code === "23505");
+          // a withdrawal by staff (tied to no enquiry) is a different kind of row: allowed, and repeatable
+          const revoke = "INSERT INTO bb.consent_events (contact_id, document_id, event, method, note) VALUES ($1, $2, 'revoked', 'staff', 'subject_request')";
+          await db.pool.query(revoke, [c, pd]);
+          await db.pool.query(revoke, [c, pd]);
+          // after a withdrawal the SAME enquiry still cannot be given a second 'given': a new consent means a new submission
+          await assert.rejects(() => db.pool.query(dup, [c, pd, l]), (e: { code?: string }) => e.code === "23505");
+          assert.equal(await given("lead_request_id", l), 1);
+          // the history is still append-only
+          await assert.rejects(() => db.pool.query("DELETE FROM bb.consent_events WHERE lead_request_id = $1", [l]), /append-only/);
+        });
+      });
     });
 
     it("has no right on any sequence of the schema: it cannot draw, read or set a counter", async () => {
