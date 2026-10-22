@@ -80,6 +80,39 @@ console.log("## public calendar and enquiry (390x844)");
   await ctx.close();
 }
 
+console.log("## calendar outage: preferred-time fallback, nothing invented, recovery keeps date and interval (390x844)");
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  let down = true;
+  let calls = 0;
+  await page.route("**/api/availability**", (route) => {
+    calls += 1;
+    return down ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, error: "unavailable" }) }) : route.continue();
+  });
+  await page.goto(SITE + "/birthdays", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Узнать о свободной дате" }).first().click();
+  await page.getByLabel("Желаемая дата").fill(D1);
+  const outage = page.locator("[data-testid=availability-outage]");
+  await outage.waitFor({ timeout: 8000 });
+  const text = await outage.innerText();
+  ok(text.includes("Предпочитаемое время") && text.includes("Желаемое время. Менеджер подтвердит доступность."), "API down: the preferred-time block is shown with the note");
+  ok(!/свободно комнат|занято|₸|\d[\s\u00a0]?\d{3}/i.test(text) && (await page.locator("[data-testid=price]").count()) === 0, "API down: no invented free rooms, busy cells or prices");
+  ok((await outage.locator("[role=radio]").allInnerTexts()).map((t) => t.trim()).join("|") === "10:00–14:00|14:00–18:00|18:00–22:00", "API down: three intervals are offered");
+  await outage.locator('[data-preferred-slot="2"]').click();
+  ok((await outage.locator('[data-preferred-slot="2"]').getAttribute("aria-checked")) === "true", "API down: an interval can be chosen");
+  ok((await page.locator('[data-slot]').count()) === 0, "API down: the calendar's own slot buttons are not shown");
+  down = false;
+  await outage.getByRole("button", { name: "Проверить ещё раз" }).click();
+  await page.locator('[data-testid=availability] [data-slot="2"]').waitFor({ timeout: 8000 });
+  ok((await page.locator("[data-testid=availability-outage]").count()) === 0, "API back: the full calendar replaces the fallback");
+  ok((await page.locator('[data-slot="2"]').getAttribute("aria-checked")) === "true", "API back: the interval chosen during the outage is still selected");
+  ok((await page.getByLabel("Желаемая дата").inputValue()) === D1, "API back: the chosen date is kept");
+  ok(/свободно комнат: 4/.test(await page.locator('[data-slot="2"]').innerText()), "API back: real availability (4 free rooms) is shown");
+  ok(calls >= 2, `the calendar asked the API again after the retry (${calls} calls)`);
+  await ctx.close();
+}
+
 console.log("## admin: requests, confirmation, grid");
 let leadId;
 {

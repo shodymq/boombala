@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { BOOKING_SLOTS } from "@/lib/lead";
 import { birthdayRooms } from "@/data/birthdayRooms";
+import { PreferredTime } from "@/components/booking/PreferredTime";
 
 interface Day {
   slots: Array<{ id: number; startsAt: string; endsAt: string; freeRoomIds: string[] }>;
@@ -18,9 +19,14 @@ const SOURCE_LABEL = { date: "особая цена на эту дату", weekd
 const roomName = (id: string) => birthdayRooms.find((r) => r.id === id)?.name ?? id;
 
 
-/** GET JSON from our own API. `loading`/`error` are derived from which URL the stored answer belongs to (no setState in the effect body). */
-function useFetched<T>(url: string | null): { data: T | null; error: boolean; loading: boolean } {
-  const [res, setRes] = useState<{ url: string; data: T | null; error: boolean } | null>(null);
+/**
+ * GET JSON from our own API. `loading`/`error` are derived from which request the stored answer belongs to (no setState in the
+ * effect body). `retry()` repeats the same request after an error; a new URL or a retry never shows an older answer.
+ */
+function useFetched<T>(url: string | null): { data: T | null; error: boolean; loading: boolean; retry: () => void } {
+  const [attempt, setAttempt] = useState(0);
+  const [res, setRes] = useState<{ id: string; data: T | null; error: boolean } | null>(null);
+  const id = url ? `${attempt}:${url}` : "";
   useEffect(() => {
     if (!url) return;
     const ctrl = new AbortController();
@@ -28,15 +34,15 @@ function useFetched<T>(url: string | null): { data: T | null; error: boolean; lo
       .then(async (r) => {
         const data = await r.json().catch(() => null);
         if (!r.ok || !data?.ok) throw new Error("unavailable");
-        setRes({ url, data, error: false });
+        setRes({ id, data, error: false });
       })
       .catch((e) => {
-        if (e?.name !== "AbortError") setRes({ url, data: null, error: true });
+        if (e?.name !== "AbortError") setRes({ id, data: null, error: true });
       });
     return () => ctrl.abort();
-  }, [url]);
-  const settled = !!url && res?.url === url;
-  return { data: settled ? res!.data : null, error: settled && res!.error, loading: !!url && !settled };
+  }, [url, id]);
+  const settled = !!url && res?.id === id;
+  return { data: settled ? res!.data : null, error: settled && res!.error, loading: !!url && !settled, retry: () => setAttempt((n) => n + 1) };
 }
 
 export const calendarEnabled = process.env.NEXT_PUBLIC_BOOKING_CALENDAR === "1";
@@ -92,7 +98,10 @@ export function AvailabilityPanel({
             <button type="button" onClick={() => shiftMonth(1)} aria-label="Следующий месяц" className="h-11 w-11 rounded-full text-lg font-black text-grape-800">›</button>
           </div>
           {monthState === "error" ? (
-            <p role="alert" className="mt-2 text-sm font-semibold text-[#b3261e]">Не удалось загрузить календарь. Попробуйте позже или отправьте заявку, менеджер подтвердит дату.</p>
+            <div className="mt-2 grid gap-2">
+              <p role="alert" className="text-sm font-semibold text-[#b3261e]">Не удалось загрузить календарь. Попробуйте позже или отправьте заявку, менеджер подтвердит дату.</p>
+              <button type="button" onClick={monthRes.retry} className="min-h-11 justify-self-start rounded-full border-2 border-grape-200 bg-white px-4 font-display text-sm font-extrabold text-grape-800">Проверить ещё раз</button>
+            </div>
           ) : (
             <div className="mt-2 grid grid-cols-7 gap-1 text-center text-sm" aria-busy={monthState === "loading"}>
               {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((w) => <span key={w} className="text-xs font-bold text-muted">{w}</span>)}
@@ -129,7 +138,13 @@ export function AvailabilityPanel({
 
       {date ? (
         dayState === "error" ? (
-          <p role="alert" className="text-sm font-semibold text-[#b3261e]">Не удалось получить свободные слоты и цену на эту дату. Вы можете отправить заявку: менеджер подтвердит время и стоимость.</p>
+          // Outage fallback: the API cannot answer, so NOTHING is claimed (no free rooms, no prices). The visitor can still
+          // state a preferred interval; date and interval stay in the form and the calendar can be asked again.
+          <div className="grid gap-3" data-testid="availability-outage">
+            <p role="alert" className="text-sm font-semibold text-[#b3261e]">Сейчас не удаётся получить свободное время и цену на эту дату. Вы можете отправить заявку: менеджер подтвердит время и стоимость.</p>
+            <button type="button" onClick={dayRes.retry} className="min-h-11 justify-self-start rounded-full border-2 border-grape-200 bg-white px-4 font-display text-sm font-extrabold text-grape-800">Проверить ещё раз</button>
+            <PreferredTime slot={slot} onSlot={onSlot} />
+          </div>
         ) : day ? (
           <div aria-busy={dayState === "loading"}>
             <p className="font-display text-sm font-extrabold text-grape-800">Время (по желанию)</p>
@@ -154,6 +169,9 @@ export function AvailabilityPanel({
                 );
               })}
             </div>
+            {slot && (day.slots.find((x) => String(x.id) === slot)?.freeRoomIds.length ?? 0) === 0 ? (
+              <p role="alert" className="mt-2 text-sm font-semibold text-[#b3261e]">Выбранное время занято на эту дату. Выберите другое или отправьте заявку, менеджер предложит варианты.</p>
+            ) : null}
             {slot ? (
               <p className="mt-2 text-xs text-muted">
                 Свободны: {day.slots.find((x) => String(x.id) === slot)?.freeRoomIds.map(roomName).join(", ") || "нет"}.
