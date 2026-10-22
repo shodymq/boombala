@@ -71,7 +71,7 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
         <h2 className="text-lg font-black text-grape-800">История согласий</h2>
         <ul className="mt-2 grid gap-1 text-sm">
           {card.consents.map((e) => (
-            <li key={e.id}>{fmt.format(e.occurredAt)} · {e.event === "given" ? "дано" : "отозвано"} · {KIND[e.kind] ?? e.kind}, редакция {e.version} · {e.method === "web_checkbox" ? "отметка на сайте" : "сотрудник"}</li>
+            <li key={e.id}>{fmt.format(e.occurredAt)} · {e.event === "given" ? "дано" : "отозвано"} · {KIND[e.kind] ?? e.kind}, редакция {e.version} · {e.origin === "qr" ? "QR-регистрация" : e.origin === "enquiry" ? `заявка №${e.enquirySeq}` : "сотрудник"}</li>
           ))}
         </ul>
         <p className="mt-2 text-xs text-muted">Отметка на сайте не является электронной цифровой подписью.</p>
@@ -84,6 +84,11 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
           ) : (
             <>
               <p className="mt-2">Согласие на обработку данных: <b>{privacy.consentActive ? "действует" : "отозвано или не давалось"}</b></p>
+              {card.leads.length ? (
+                <p className="mt-1 rounded-2xl bg-grape-50 p-3 text-grape-900">
+                  У контакта есть заявки. Отзыв действует на <b>всё</b> согласие на обработку данных этого контакта: и данное при QR-регистрации, и данное при заявке. Данные по заявкам и броням при этом сохраняются, пока они нужны (см. причины ниже), а в истории появится запись об отзыве.
+                </p>
+              ) : null}
               {privacy.blockers.length ? (
                 <div className="mt-2 rounded-2xl bg-sun-100 p-3 text-grape-900">
                   <p className="font-bold">Контакт нельзя обезличить сейчас:</p>
@@ -94,7 +99,7 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
                 {privacy.consentActive ? (
                   <form action={revokeConsentAction}>
                     <input type="hidden" name="id" value={id} />
-                    <button type="submit" className="h-11 rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50">Отозвать согласие</button>
+                    <button type="submit" className="h-11 rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50">{card.leads.length ? "Отозвать согласие (QR и заявки)" : "Отозвать согласие"}</button>
                   </form>
                 ) : null}
                 {!privacy.consentActive && privacy.blockers.length === 0 ? (

@@ -94,7 +94,8 @@ export interface ContactCard {
   contact: ContactRow;
   leads: Array<{ id: string; seq: number; createdAt: Date; requestedDate: string; status: string; packageId: string | null; roomId: string | null; children: number | null }>;
   registrations: Array<{ id: string; seq: number; createdAt: Date }>;
-  consents: Array<{ id: number; occurredAt: Date; event: string; method: string; kind: string; version: number; title: string }>;
+  /** `origin`: where the consent event came from (QR registration, an enquiry, or staff action); `enquirySeq` names the enquiry. */
+  consents: Array<{ id: number; occurredAt: Date; event: string; method: string; kind: string; version: number; title: string; origin: "qr" | "enquiry" | "staff"; enquirySeq: number | null }>;
   samePhone: Array<{ id: string; name: string }>;
 }
 
@@ -112,8 +113,10 @@ export async function getContact(pool: Pool, actor: Actor, id: string): Promise<
     ),
     pool.query("SELECT id, seq, created_at FROM bb.consent_registrations WHERE contact_id = $1 ORDER BY created_at DESC", [id]),
     pool.query(
-      `SELECT e.id, e.occurred_at, e.event, e.method, d.kind::text AS kind, d.version, d.title
+      `SELECT e.id, e.occurred_at, e.event, e.method, d.kind::text AS kind, d.version, d.title,
+              CASE WHEN e.method = 'staff' THEN 'staff' WHEN e.lead_request_id IS NOT NULL THEN 'enquiry' ELSE 'qr' END AS origin, l.seq AS enquiry_seq
          FROM bb.consent_events e JOIN bb.legal_documents d ON d.id = e.document_id
+         LEFT JOIN bb.lead_requests l ON l.id = e.lead_request_id
         WHERE e.contact_id = $1 ORDER BY e.occurred_at DESC, e.id DESC`,
       [id],
     ),
@@ -123,7 +126,7 @@ export async function getContact(pool: Pool, actor: Actor, id: string): Promise<
     contact,
     leads: leads.rows.map((r) => ({ id: r.id, seq: Number(r.seq), createdAt: r.created_at, requestedDate: r.requested_date, status: r.status, packageId: r.package_id, roomId: r.room_id, children: r.children })),
     registrations: regs.rows.map((r) => ({ id: r.id, seq: Number(r.seq), createdAt: r.created_at })),
-    consents: consents.rows.map((r) => ({ id: Number(r.id), occurredAt: r.occurred_at, event: r.event, method: r.method, kind: r.kind, version: r.version, title: r.title })),
+    consents: consents.rows.map((r) => ({ id: Number(r.id), occurredAt: r.occurred_at, event: r.event, method: r.method, kind: r.kind, version: r.version, title: r.title, origin: r.origin, enquirySeq: r.enquiry_seq === null ? null : Number(r.enquiry_seq) })),
     samePhone: same.rows,
   };
 }

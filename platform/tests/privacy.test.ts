@@ -6,7 +6,7 @@ import { getContact, listContacts } from "../src/core/crm.ts";
 import { almatyToday } from "../src/core/dates.ts";
 import { ConflictError, ForbiddenError, NotFoundError, RetentionDisabledError, ValidationError } from "../src/core/errors.ts";
 import { exportContacts } from "../src/core/export.ts";
-import { submitConsent, submitLead } from "../src/core/intake.ts";
+import { hashIp, submitConsent, submitLead } from "../src/core/intake.ts";
 import { approveDocument, createDraft, publishDocument } from "../src/core/legal.ts";
 import {
   ANONYMIZED_NAME,
@@ -328,6 +328,59 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       const off = await updateRetentionSettings(db.pool, owner, { legalConfirmed: false });
       assert.deepEqual({ auto: off.autoEnabled, confirmed: off.legalConfirmedAt }, { auto: false, confirmed: null });
       await assert.rejects(() => runRetention(db.pool, owner, { dryRun: false, now }), RetentionDisabledError);
+    });
+  });
+
+  describe("what a withdrawal covers, and what is left afterwards", () => {
+    it("one button withdraws EVERY personal-data consent of the contact: the QR one and the one given with the enquiry, also under another document version", async () => {
+      const name = "Раиса Обаесогласия";
+      const phone = "+77013141516";
+      const c = await contactOf((await register(name, phone)).registrationId); // QR under the current version
+      const oldDoc = String(await scalar("SELECT id v FROM bb.legal_documents WHERE kind = 'personal_data_consent' AND status = 'published'"));
+      const next = await createDraft(db.pool, owner, { kind: "personal_data_consent", title: "новая редакция", body: "Текст personal_data_consent 2" });
+      await approveDocument(db.pool, owner, next.id);
+      await publishDocument(db.pool, owner, next.id);
+      const l = await submitLead(db.pool, lead(name, phone)); // the enquiry is accepted under the NEW version
+      assert.equal(String(await scalar("SELECT contact_id v FROM bb.lead_requests WHERE id = $1", [l.leadId])), c);
+
+      const given = (await events(c)).filter((e) => e.event === "given" && e.document_id);
+      const docs = new Set(given.map((e) => String(e.document_id)));
+      assert.ok(docs.has(oldDoc) && docs.has(String(next.id)), "the contact holds consents under two document versions");
+
+      const rev = await revokeConsent(db.pool, owner, c, meta);
+      assert.equal(rev.revokedDocuments, 2, "both versions are withdrawn");
+      assert.equal(rev.assessment.consentActive, false);
+
+      const card = (await getContact(db.pool, owner, c))!;
+      const consents = card.consents;
+      assert.deepEqual(consents.filter((e) => e.event === "revoked").map((e) => e.origin), ["staff", "staff"]);
+      assert.ok(consents.some((e) => e.event === "given" && e.origin === "qr"), "the history says which consent came from the QR registration");
+      assert.ok(consents.some((e) => e.event === "given" && e.origin === "enquiry" && e.enquirySeq !== null), "and which one came with an enquiry (with its number)");
+      // the withdrawal changed nothing else: the enquiry and the contact stay
+      assert.equal(await scalar("SELECT phone_e164 v FROM bb.contacts WHERE id = $1", [c]), phone);
+      assert.equal(await scalar("SELECT status v FROM bb.lead_requests WHERE id = $1", [l.leadId]), "new");
+      assert.deepEqual((await assessContact(db.pool, owner, c))!.blockers, ["open_enquiry", "enquiry_record"]);
+    });
+
+    it("after anonymisation no table of the schema still holds the name, the phone, the address or the browser of the visitor", async () => {
+      const name = "Реидент Проверкин";
+      // values that exist nowhere else in this database, so the search below can only find this visitor's traces
+      const reg = await submitConsent(db.pool, { idempotencyKey: randomUUID(), name, phone: "+7 701 909 08 07", acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.77", ipPepper: "pepper-reident", userAgent: "UniqueBrowser/9.99-reident" });
+      const c = await contactOf(reg.registrationId);
+      const ipHash = hashIp("203.0.113.77", "pepper-reident")!;
+      assert.ok(JSON.stringify((await q("SELECT ip_hash, user_agent FROM bb.consent_events WHERE contact_id = $1", [c])).rows).includes(ipHash), "before: the hash and the browser string are stored");
+      await revokeConsent(db.pool, owner, c, meta);
+      await anonymizeContact(db.pool, owner, c, meta);
+      const tables = (await q("SELECT table_name t FROM information_schema.tables WHERE table_schema = 'bb' AND table_type = 'BASE TABLE'")).rows.map((r) => String(r.t));
+      assert.ok(tables.includes("consent_events") && tables.includes("audit_log") && tables.includes("export_log"));
+      let dump = "";
+      for (const t of tables) dump += JSON.stringify((await q(`SELECT x::text AS row FROM bb."${t}" x`)).rows);
+      for (const needle of ["Реидент", "Проверкин", "7019090807", "701 909", "203.0.113.77", ipHash, "UniqueBrowser"]) {
+        assert.ok(!dump.includes(needle), `no table may contain ${needle}`);
+      }
+      // what remains about the contact: an id, the times of its registrations and the document versions, nothing that names a person
+      const row = (await q("SELECT name, name_key, phone_e164, source, marketing_opt_in, phone_verification FROM bb.contacts WHERE id = $1", [c])).rows[0];
+      assert.deepEqual(row, { name: ANONYMIZED_NAME, name_key: `anon:${c}`, phone_e164: null, source: "qr", marketing_opt_in: false, phone_verification: "unverified" });
     });
   });
 
