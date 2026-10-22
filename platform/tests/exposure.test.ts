@@ -149,3 +149,33 @@ describe("Exposure: what each deployment shows", () => {
     });
   });
 });
+
+describe("Exposure: the proxy cannot be skipped by a header the client chooses", () => {
+  it("the matcher is unconditional: no `missing`, no `has`, no header names, no path exclusions", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/proxy.ts", import.meta.url), "utf8");
+    const cfg = /export const config = (\{[^}]*\});/.exec(src)?.[1] ?? "";
+    assert.equal(cfg.replace(/\s+/g, " "), '{ matcher: "/:path*" }');
+    assert.ok(!/missing\s*:|has\s*:/.test(cfg));
+    // the only place a header may influence the flow is the exposure decision (Host / forwarded host / real address): it can only DENY
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    assert.ok(!/next-router-prefetch|x-middleware-prefetch|x-middleware-subrequest|x-nextjs-data|purpose/i.test(code), "no branch on a client-controlled framework header");
+  });
+
+  it("static assets are classified like admin pages, so role, host and network rules apply to them too", () => {
+    for (const p of ["/_next/static/chunks/app.js", "/_next/image", "/favicon.ico"]) {
+      assert.equal(classifyPath(p), "admin", p);
+      assert.deepEqual(decideExposure(admin, { pathname: p, host: "panel.example.test", realIp: "203.0.113.9" }), { allow: false, status: 404, reason: "network" }, p);
+      assert.deepEqual(decideExposure(api, { pathname: p, host: "api.example.test", realIp: "203.0.113.9" }), { allow: false, status: 404, reason: "role" }, p);
+      assert.deepEqual(decideExposure(admin, { pathname: p, host: "evil.example", realIp: "10.77.0.5" }), { allow: false, status: 421, reason: "host" }, p);
+      assert.deepEqual(decideExposure(admin, { pathname: p, host: "panel.example.test", realIp: "10.77.0.5" }), { allow: true }, p);
+    }
+  });
+
+  it("the decision looks only at Host, the forwarded host and the real address: a request with any other header decides the same", () => {
+    const forged = ["next-router-prefetch", "x-middleware-prefetch", "purpose", "rsc", "next-url", "x-nextjs-data", "x-middleware-subrequest"];
+    // decideExposure has no header input at all besides those three values; this documents and pins the signature
+    assert.equal(decideExposure.length, 2);
+    for (let i = 0; i < forged.length; i++) assert.deepEqual(decideExposure(admin, req("/login", "panel.example.test", "203.0.113.9")), { allow: false, status: 404, reason: "network" });
+  });
+});

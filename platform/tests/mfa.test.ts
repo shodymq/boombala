@@ -4,7 +4,7 @@ import { authenticate, completeMfaLogin, MAX_FAILURES_PER_EMAIL } from "../src/c
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../src/core/errors.ts";
 import { beginEnrollment, isEnrolled, recoveryCodesLeft, resetUserMfa, resetUserMfaByEmail, verifySecondFactor } from "../src/core/mfa.ts";
 import { can } from "../src/core/rbac.ts";
-import { createSession, validateSession } from "../src/core/session.ts";
+import { createSession, revokeAllSessions, revokeSessionsWithoutMfa, validateSession } from "../src/core/session.ts";
 import { resetPasswordFromConsole } from "../src/core/users.ts";
 import { totpAt } from "../src/core/totp.ts";
 import { makeUser, startTestDb, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
@@ -176,9 +176,56 @@ describe("Second factor (TOTP) for staff", () => {
       const u = await newStaff("manager");
       const legacy = await createSession(db.pool, u.id, { ip: "10.77.0.40" });
       assert.ok(await validateSession(db.pool, legacy.token), "accepted while the policy is off");
-      assert.equal(await validateSession(db.pool, legacy.token, { requireEnrolled: true }), null, "refused once it is mandatory");
+      assert.equal(await validateSession(db.pool, legacy.token, { requireMfa: true }), null, "refused once it is mandatory");
       const x = await enrolled();
-      assert.ok(await validateSession(db.pool, x.token, { requireEnrolled: true }), "an enrolled user's session stays valid");
+      assert.ok(await validateSession(db.pool, x.token, { requireMfa: true }), "an enrolled user's session stays valid");
+    });
+  });
+
+  describe("a session issued BEFORE the second factor became mandatory cannot be used, even by someone who enrolled since", () => {
+    it("the enrolled person's old session is refused when the factor is mandatory; only a session that passed the factor is accepted", async () => {
+      const x = await enrolled("manager"); // enrolled, holds a session that passed the factor
+      const old = await createSession(db.pool, x.user.id, { ip: "10.77.0.70" }); // the kind of session the system issued earlier (password only)
+      assert.ok(await validateSession(db.pool, old.token), "accepted while the policy is off");
+      assert.equal(await validateSession(db.pool, old.token, { requireMfa: true }), null, "REFUSED once it is mandatory, although the user is enrolled");
+      assert.ok(await validateSession(db.pool, x.token, { requireMfa: true }), "the session that passed the second factor stays valid");
+      // the same refusal for every role
+      for (const role of ["owner", "manager", "editor"] as const) {
+        const y = await enrolled(role);
+        const legacy = await createSession(db.pool, y.user.id, {});
+        assert.equal(await validateSession(db.pool, legacy.token, { requireMfa: true }), null, role);
+      }
+    });
+
+    it("a pending session and a password-only login in the mandatory mode never become usable without the code", async () => {
+      const x = await enrolled("owner");
+      const login = await passwordStep(x.user.email, "10.77.0.71");
+      assert.ok(login.ok);
+      assert.equal(await validateSession(db.pool, login.token, { requireMfa: true }), null);
+      assert.equal(await validateSession(db.pool, login.token, { state: "verified", requireMfa: true }), null);
+      // a forged state cannot turn a pending session into a verified one
+      await assert.rejects(() => q("UPDATE bb.sessions SET mfa_state = 'anything' WHERE user_id = $1", [x.user.id]), /check constraint/i);
+    });
+
+    it("the forced revocation ends exactly the legacy sessions, leaves the proven and the pending ones, is audited without personal data, and can be repeated", async () => {
+      const x = await enrolled("manager");
+      const legacy1 = await createSession(db.pool, x.user.id, {});
+      const legacy2 = await createSession(db.pool, x.user.id, {});
+      const pendingLogin = await passwordStep(x.user.email, "10.77.0.72");
+      assert.ok(pendingLogin.ok);
+      const ended = await revokeSessionsWithoutMfa(db.pool);
+      assert.ok(ended >= 2);
+      assert.equal(await validateSession(db.pool, legacy1.token), null, "legacy ended for good, also with the policy off");
+      assert.equal(await validateSession(db.pool, legacy2.token), null);
+      assert.ok(await validateSession(db.pool, x.token, { requireMfa: true }), "the proven session is untouched");
+      assert.ok(await validateSession(db.pool, pendingLogin.token, { state: "pending" }), "a pending login in progress is untouched");
+      assert.equal(await revokeSessionsWithoutMfa(db.pool), 0, "repeatable");
+    });
+
+    it("a full sign-out ends everything", async () => {
+      const x = await enrolled("editor");
+      assert.ok((await revokeAllSessions(db.pool)) >= 1);
+      assert.equal(await validateSession(db.pool, x.token), null);
     });
   });
 
@@ -233,7 +280,7 @@ describe("Second factor (TOTP) for staff", () => {
     it("RBAC is the same for the three roles after a second-factor login", async () => {
       for (const role of ["owner", "manager", "editor"] as const) {
         const x = await enrolled(role);
-        const s = await validateSession(db.pool, x.token, { requireEnrolled: true });
+        const s = await validateSession(db.pool, x.token, { requireMfa: true });
         assert.equal(s?.user.role, role);
         assert.equal(can(role, "users.manage"), role === "owner");
         assert.equal(can(role, "contacts.view"), role !== "editor");

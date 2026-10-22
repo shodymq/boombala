@@ -10,23 +10,34 @@
 // Row security is ON for every table (harden_schema); the owner bypasses it, other roles need a policy, created here.
 import type { Pool } from "../src/core/db.ts";
 
-/** Tables the public API may touch, and how. Everything else in `bb` is closed to it. */
-export const API_GRANTS: Record<string, string> = {
-  contacts: "SELECT, INSERT, UPDATE (last_activity_at)", // the upsert of an enquiry reads the contact and touches its activity time
-  lead_requests: "SELECT, INSERT",
-  consent_registrations: "SELECT, INSERT",
-  consent_events: "SELECT, INSERT",
-  legal_documents: "SELECT",
-  packages: "SELECT",
-  rooms: "SELECT",
-  time_slots: "SELECT",
-  price_rules: "SELECT",
-  slot_reservations: "SELECT",
-  news_posts: "SELECT",
-  news_images: "SELECT",
-  outbox: "INSERT",
-  audit_log: "INSERT",
+export interface ApiTable {
+  privileges: string;
+  /** Row filter: the API role sees only these rows (a draft or an unpublished post does not exist for it). */
+  using?: string;
+}
+
+/**
+ * What the public API role may read directly: PUBLIC data only. It has NO privilege on contacts, enquiries, consent
+ * registrations or history, the notification queue or the audit log: personal data is written only through the narrow
+ * `bb.intake_*` functions (migration 012), which return one row per call and never a name or a phone.
+ */
+export const API_GRANTS: Record<string, ApiTable> = {
+  legal_documents: { privileges: "SELECT", using: "status = 'published'" },
+  packages: { privileges: "SELECT" },
+  rooms: { privileges: "SELECT" },
+  time_slots: { privileges: "SELECT" },
+  price_rules: { privileges: "SELECT" },
+  // free/busy only: which cell is taken, never who took it or for how much
+  slot_reservations: { privileges: "SELECT (slot_date, slot_id, room_id, released_at)" },
+  news_posts: { privileges: "SELECT", using: "status = 'published' AND published_at <= now()" },
+  news_images: {
+    privileges: "SELECT",
+    using: "EXISTS (SELECT 1 FROM bb.news_posts p WHERE p.status = 'published' AND p.published_at <= now() AND (p.cover_image_id = news_images.id OR position('img:' || news_images.id::text in lower(p.body)) > 0))",
+  },
 };
+
+/** The only functions the API role may execute. */
+export const API_FUNCTION_PREFIX = "intake_";
 
 /** Tables the staff application may delete from (everything else is append-only or never deleted). */
 export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "news_posts", "news_images"] as const;
@@ -68,10 +79,13 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
     await pool.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA bb TO ${ident(role)}`);
     for (const t of tables) await pool.query(`DROP POLICY IF EXISTS ${ident(`${role}_access`)} ON bb.${ident(t)}`);
   }
-  for (const [t, privileges] of Object.entries(API_GRANTS)) {
+  for (const [t, { privileges, using }] of Object.entries(API_GRANTS)) {
     await pool.query(`GRANT ${privileges} ON bb.${ident(t)} TO ${ident(api)}`);
-    await pool.query(`CREATE POLICY ${ident(`${api}_access`)} ON bb.${ident(t)} FOR ALL TO ${ident(api)} USING (true) WITH CHECK (true)`);
+    await pool.query(`CREATE POLICY ${ident(`${api}_access`)} ON bb.${ident(t)} FOR SELECT TO ${ident(api)} USING (${using ?? "true"})`);
   }
+  const fns = (await pool.query<{ sig: string }>("SELECT p.oid::regprocedure::text AS sig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname LIKE $1", [`${API_FUNCTION_PREFIX}%`])).rows;
+  if (fns.length === 0) throw new Error("no bb.intake_* functions found: apply migration 012 first");
+  for (const f of fns) await pool.query(`GRANT EXECUTE ON FUNCTION ${f.sig} TO ${ident(api)}`);
   for (const t of tables) {
     await pool.query(`GRANT SELECT, INSERT, UPDATE ON bb.${ident(t)} TO ${ident(admin)}`);
     if ((ADMIN_DELETE as readonly string[]).includes(t)) await pool.query(`GRANT DELETE ON bb.${ident(t)} TO ${ident(admin)}`);

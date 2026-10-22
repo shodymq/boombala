@@ -2,7 +2,6 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 import type { Client, Pool } from "./db.ts";
 import { withTx } from "./db.ts";
-import { writeAudit } from "./audit.ts";
 import { almatyToday, isValidDate } from "./dates.ts";
 import { ConsentUnavailableError, ValidationError } from "./errors.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
@@ -59,18 +58,12 @@ function fieldErrors(error: z.ZodError): Record<string, string> {
   return out;
 }
 
+/**
+ * All writes of personal data go through the narrow SECURITY DEFINER functions of migration 012 (`bb.intake_*`): the public
+ * API database role has no table privileges on contacts, enquiries, consents, the notification queue or the audit log.
+ */
 async function upsertContact(tx: Client, name: string, phone: string | null, source: "qr" | "birthday_form"): Promise<string> {
-  if (phone === null) {
-    // No phone, no identity: never merged by name, never given a placeholder number. Each registration is its own contact.
-    const created = await tx.query<{ id: string }>("INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ($1, $2, NULL, $3) RETURNING id", [name, nameKey(name), source]);
-    return created.rows[0].id;
-  }
-  const { rows } = await tx.query<{ id: string }>(
-    `INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (phone_e164, name_key) DO UPDATE SET last_activity_at = now()
-     RETURNING id`,
-    [name, nameKey(name), phone, source],
-  );
+  const { rows } = await tx.query<{ id: string }>("SELECT bb.intake_upsert_contact($1, $2, $3, $4) AS id", [name, nameKey(name), phone, source]);
   return rows[0].id;
 }
 
@@ -103,7 +96,7 @@ export async function submitLead(pool: Pool, raw: LeadInput, meta: IntakeMeta = 
   const roomId = input.roomId || null;
 
   return withTx(pool, async (tx) => {
-    const existing = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.lead_requests WHERE idempotency_key = $1", [input.idempotencyKey]);
+    const existing = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_find_lead($1)", [input.idempotencyKey]);
     if (existing.rows[0]) return { leadId: existing.rows[0].id, seq: Number(existing.rows[0].seq), duplicate: true };
 
     const consentDoc = await publishedDoc(tx, "personal_data_consent");
@@ -113,24 +106,18 @@ export async function submitLead(pool: Pool, raw: LeadInput, meta: IntakeMeta = 
 
     const contactId = await upsertContact(tx, name, phone, "birthday_form");
     const created = await tx.query<{ id: string; seq: string }>(
-      `INSERT INTO bb.lead_requests (idempotency_key, contact_id, package_id, room_id, requested_date, children, page, referrer, utm_source, utm_medium, utm_campaign, slot_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       ON CONFLICT (idempotency_key) DO NOTHING RETURNING id, seq`,
+      "SELECT id, seq FROM bb.intake_insert_lead($1, $2, $3, $4, $5::date, $6::smallint, $7, $8, $9, $10, $11, $12::smallint)",
       [input.idempotencyKey, contactId, packageId, roomId, input.date, input.children ?? null, input.page, input.referrer, input.utmSource, input.utmMedium, input.utmCampaign, input.slotId ?? null],
     );
     if (!created.rows[0]) {
       // A parallel request with the same key committed first: return its result, create nothing.
-      const winner = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.lead_requests WHERE idempotency_key = $1", [input.idempotencyKey]);
+      const winner = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_find_lead($1)", [input.idempotencyKey]);
       return { leadId: winner.rows[0].id, seq: Number(winner.rows[0].seq), duplicate: true };
     }
     const leadId = created.rows[0].id;
-    await tx.query(
-      `INSERT INTO bb.consent_events (contact_id, document_id, event, method, ip_hash, user_agent, lead_request_id)
-       VALUES ($1, $2, 'given', 'web_checkbox', $3, $4, $5)`,
-      [contactId, consentDoc.id, hashIp(meta.ip, meta.ipPepper), meta.userAgent ? meta.userAgent.slice(0, 400) : null, leadId],
-    );
-    await tx.query("INSERT INTO bb.outbox (topic, ref_id) VALUES ('telegram.lead', $1)", [leadId]);
-    await writeAudit(tx, { actorUserId: null, action: "lead.created", entityType: "lead_request", entityId: leadId });
+    await tx.query("SELECT bb.intake_add_consent($1, $2, $3, $4, $5, NULL)", [contactId, consentDoc.id, hashIp(meta.ip, meta.ipPepper), meta.userAgent ? meta.userAgent.slice(0, 400) : null, leadId]);
+    await tx.query("SELECT bb.intake_queue_notification($1)", [leadId]);
+    await tx.query("SELECT bb.intake_audit('lead.created', 'lead_request', $1)", [leadId]);
     return { leadId, seq: Number(created.rows[0].seq), duplicate: false };
   });
 }
@@ -160,12 +147,8 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
     // Parallel sends of one key are served one after another: without this the losers would each create a phoneless
     // contact (nothing merges them) before finding out they lost. Transaction-level lock: safe through a pooler.
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`consent:${input.idempotencyKey}`]);
-    const existing = await tx.query<{ id: string; seq: string; contact_id: string }>("SELECT id, seq, contact_id FROM bb.consent_registrations WHERE idempotency_key = $1", [input.idempotencyKey]);
-    const docsFor = async (registrationId: string) =>
-      (await tx.query<{ kind: string; version: number }>(
-        "SELECT d.kind::text AS kind, d.version FROM bb.consent_events e JOIN bb.legal_documents d ON d.id = e.document_id WHERE e.registration_id = $1 ORDER BY d.kind",
-        [registrationId],
-      )).rows;
+    const existing = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_find_registration($1)", [input.idempotencyKey]);
+    const docsFor = async (registrationId: string) => (await tx.query<{ kind: string; version: number }>("SELECT kind, version FROM bb.intake_registration_documents($1)", [registrationId])).rows;
     if (existing.rows[0]) {
       return { registrationId: existing.rows[0].id, seq: Number(existing.rows[0].seq), duplicate: true, documents: await docsFor(existing.rows[0].id) };
     }
@@ -181,23 +164,16 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
     docs.push({ kind: "personal_data_consent", id: pd.id });
 
     const contactId = await upsertContact(tx, name, phone, "qr");
-    const created = await tx.query<{ id: string; seq: string }>(
-      "INSERT INTO bb.consent_registrations (idempotency_key, contact_id) VALUES ($1, $2) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id, seq",
-      [input.idempotencyKey, contactId],
-    );
+    const created = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_insert_registration($1, $2)", [input.idempotencyKey, contactId]);
     if (!created.rows[0]) {
-      const winner = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.consent_registrations WHERE idempotency_key = $1", [input.idempotencyKey]);
+      const winner = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_find_registration($1)", [input.idempotencyKey]);
       return { registrationId: winner.rows[0].id, seq: Number(winner.rows[0].seq), duplicate: true, documents: await docsFor(winner.rows[0].id) };
     }
     const registrationId = created.rows[0].id;
     for (const d of docs) {
-      await tx.query(
-        `INSERT INTO bb.consent_events (contact_id, document_id, event, method, ip_hash, user_agent, registration_id)
-         VALUES ($1, $2, 'given', 'web_checkbox', $3, $4, $5)`,
-        [contactId, d.id, hashIp(meta.ip, meta.ipPepper), meta.userAgent ? meta.userAgent.slice(0, 400) : null, registrationId],
-      );
+      await tx.query("SELECT bb.intake_add_consent($1, $2, $3, $4, NULL, $5)", [contactId, d.id, hashIp(meta.ip, meta.ipPepper), meta.userAgent ? meta.userAgent.slice(0, 400) : null, registrationId]);
     }
-    await writeAudit(tx, { actorUserId: null, action: "consent.registered", entityType: "consent_registration", entityId: registrationId });
+    await tx.query("SELECT bb.intake_audit('consent.registered', 'consent_registration', $1)", [registrationId]);
     return { registrationId, seq: Number(created.rows[0].seq), duplicate: false, documents: await docsFor(registrationId) };
   });
 }

@@ -59,7 +59,8 @@ export async function notifySite(slugs: string[]): Promise<void> {
   const token = process.env.REVALIDATE_TOKEN || process.env.PLATFORM_INTAKE_TOKEN;
   if (!/^https?:\/\/[^/]+$/.test(base) || !token) return;
   try {
-    const oidcToken = await getVercelOidcToken().catch(() => "");
+    // Only on Vercel (protected Preview). On our own server nothing is requested from a Vercel service.
+    const oidcToken = process.env.VERCEL === "1" ? await getVercelOidcToken().catch(() => "") : "";
     await fetch(`${base}/api/revalidate-news`, {
       method: "POST",
       headers: {

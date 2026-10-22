@@ -10,7 +10,7 @@ import { SESSION_COOKIE, mfaRequired } from "./env.ts";
 /** The current staff session, or null. Verified against the database on every request (cached per request). */
 export const getSession = cache(async (): Promise<ValidSession | null> => {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  return validateSession(getPool(), token, { state: "verified", requireEnrolled: mfaRequired });
+  return validateSession(getPool(), token, { state: "verified", requireMfa: mfaRequired });
 });
 
 /** A session that passed the password but not yet the second factor. Only the second-factor page uses it. */

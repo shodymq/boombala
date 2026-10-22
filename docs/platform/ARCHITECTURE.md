@@ -1,5 +1,9 @@
 # Boom Bala Platform: архитектура админки, бронирования, CRM и новостей
 
+> **Место этого документа в схеме.** Описывает тестовую среду (Vercel Preview + Supabase `boombala-test`). Production целиком в Казахстане,
+> Vercel используется только для тестового Preview: см. `PRODUCTION-PLAN-KZ.md` и `ADMIN-ISOLATION-KZ.md`.
+
+
 > **Обновление.** Решение о собственном VPS заменено: PostgreSQL на Supabase (разработка и MVP), приложения на Vercel. Актуальное размещение, юридическая оговорка и план: [`SUPABASE-ADAPTATION.md`](SUPABASE-ADAPTATION.md), [`LEAD-PIPELINE-MIGRATION.md`](LEAD-PIPELINE-MIGRATION.md), [`OPERATIONS.md`](OPERATIONS.md). Разделы ниже о VPS сохранены как история решения.
 
 Статус: **решение принято для Этапа 1**, остальные этапы реализуются по плану ниже.

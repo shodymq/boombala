@@ -15,3 +15,9 @@ log_parameter_max_length_on_error = 0
 log_statement = 'none'
 # The application roles carry their own timeouts (scripts/db-roles.ts); this is the ceiling for everyone else.
 idle_in_transaction_session_timeout = '60s'
+
+# Continuous archiving for point-in-time recovery: every WAL segment is shipped (encrypted) to the EXTERNAL backup repositories.
+wal_level = replica
+archive_mode = on
+archive_command = 'pgbackrest --stanza=boombala archive-push %p'
+archive_timeout = 300

@@ -38,11 +38,16 @@ export async function createSession(
   userId: string,
   meta: SessionMeta = {},
   state: "verified" | "pending" = "verified",
+  /** `mfaVerified: true` only for the session issued right after the second factor was proven. */
+  options: { mfaVerified?: boolean } = {},
 ): Promise<{ token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString("base64url");
+  // The column of migration 011 is named only when it is needed, so the application still works on a database that has
+  // migrations up to 010 as long as the second factor is not mandatory (the current Preview).
+  const withMfa = options.mfaVerified === true && state === "verified";
   const { rows } = await db.query<{ expires_at: Date }>(
-    `INSERT INTO bb.sessions (token_hash, user_id, expires_at, ip, user_agent, mfa_state)
-     VALUES ($1, $2, now() + make_interval(secs => $3), $4, $5, $6)
+    `INSERT INTO bb.sessions (token_hash, user_id, expires_at, ip, user_agent, mfa_state${withMfa ? ", mfa_verified_at" : ""})
+     VALUES ($1, $2, now() + make_interval(secs => $3), $4, $5, $6${withMfa ? ", now()" : ""})
      RETURNING expires_at`,
     [hashToken(token), userId, state === "pending" ? PENDING_SESSION_SECONDS : SESSION_ABSOLUTE_SECONDS, meta.ip ?? null, meta.userAgent ? meta.userAgent.slice(0, 400) : null, state],
   );
@@ -52,8 +57,11 @@ export async function createSession(
 export interface ValidateOptions {
   /** Which kind of session is wanted. The admin only ever accepts "verified"; the second-factor page accepts "pending". */
   state?: "verified" | "pending";
-  /** When the second factor is mandatory: a verified session of a user without an enrolled factor is refused (it predates the policy). */
-  requireEnrolled?: boolean;
+  /**
+   * The second factor is mandatory: only a session that PASSED it (mfa_verified_at is set) is accepted. A session issued
+   * earlier, without the factor, is refused even if its owner has enrolled since. Needs migration 011.
+   */
+  requireMfa?: boolean;
 }
 
 /** Returns the user behind a token, or null when it is unknown, revoked, expired, idle too long or the user is disabled. */
@@ -77,9 +85,8 @@ export async function validateSession(db: Queryable, token: string | undefined, 
         AND s.expires_at > now()
         AND s.last_seen_at > now() - make_interval(secs => $2)
         AND u.is_active
-        AND s.mfa_state = $4
-        AND ($5::boolean = false OR s.mfa_state = 'pending' OR EXISTS (SELECT 1 FROM bb.user_mfa m WHERE m.user_id = u.id AND m.enrolled_at IS NOT NULL))`,
-    [hashToken(token), SESSION_IDLE_SECONDS, TOUCH_EVERY_SECONDS, options.state ?? "verified", options.requireEnrolled === true],
+        AND s.mfa_state = $4${options.requireMfa === true && (options.state ?? "verified") === "verified" ? "\n        AND s.mfa_verified_at IS NOT NULL" : ""}`,
+    [hashToken(token), SESSION_IDLE_SECONDS, TOUCH_EVERY_SECONDS, options.state ?? "verified"],
   );
   const row = rows[0];
   if (!row || !isRole(row.role)) return null;
@@ -106,5 +113,23 @@ export async function purgeExpiredSessions(db: Queryable): Promise<number> {
   const res = await db.query(
     "DELETE FROM bb.sessions WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '30 days'",
   );
+  return res.rowCount ?? 0;
+}
+
+/**
+ * Ends every session that did not pass the second factor (the ones issued before it was mandatory). The admin already refuses
+ * them (see requireMfa); this removes them for good and returns how many were ended. Run it when switching MFA_MODE to
+ * `required` on a database that has been in use. Idempotent.
+ */
+export async function revokeSessionsWithoutMfa(db: Queryable): Promise<number> {
+  const res = await db.query(
+    "UPDATE bb.sessions SET revoked_at = now() WHERE revoked_at IS NULL AND mfa_state = 'verified' AND mfa_verified_at IS NULL",
+  );
+  return res.rowCount ?? 0;
+}
+
+/** Ends every open session of everyone (a full sign-out, e.g. after a suspected leak). Returns how many. */
+export async function revokeAllSessions(db: Queryable): Promise<number> {
+  const res = await db.query("UPDATE bb.sessions SET revoked_at = now() WHERE revoked_at IS NULL");
   return res.rowCount ?? 0;
 }

@@ -1,9 +1,9 @@
 #!/usr/sbin/nft -f
 # Firewall of the Kazakhstan VPS. Default: drop. Only three things are reachable:
 #   - UDP @WG_PORT@                      WireGuard (the door for employees)
-#   - TCP 80/443 on the PUBLIC interface  the public API (nginx binds the admin to the VPN address, not to this one)
+#   - TCP 80/443 on the PUBLIC interface  the public site (nginx binds the admin to the VPN address, not to this one)
 #   - TCP 22/443 and UDP 53 on wg0        SSH, the admin and the VPN's own DNS, only from VPN addresses
-# PostgreSQL (5432) and the two application ports (@ADMIN_PORT@, @API_PORT@) are not mentioned: dropped from everywhere except loopback.
+# PostgreSQL (5432) and the three application ports (@SITE_PORT@, @API_PORT@, @ADMIN_PORT@) are not mentioned: dropped from everywhere except loopback.
 flush ruleset
 
 table inet bb {

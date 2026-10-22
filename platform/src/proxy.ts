@@ -10,6 +10,7 @@ const dev = process.env.NODE_ENV === "development";
  * 2. OPTIMISTIC redirect of visitors without a session cookie. This is only a convenience: real authorization
  *    happens on the server in the data access layer (src/server/dal.ts) for every page and action.
  */
+const STATIC_ASSET = /^\/(_next\/(static|image)\/|favicon\.ico$)/;
 const exposure = exposureFromEnv();
 const problems = profileProblems();
 if (problems.length) console.error(JSON.stringify({ event: "profile.invalid", problems }));
@@ -21,6 +22,9 @@ export function proxy(request: NextRequest) {
   // What this process may show at all (role, host, source network). Answers carry no body and no hint of what exists.
   const decision = decideExposure(exposure, { pathname, host: request.headers.get("x-forwarded-host") ?? request.headers.get("host"), realIp: request.headers.get("x-real-ip") });
   if (!decision.allow) return new NextResponse(null, { status: decision.status, headers: { "Cache-Control": "no-store" } });
+  // Build assets carry no data and need no nonce or login redirect, but they follow the same exposure rules (a stranger must not
+  // learn that an application lives here by fetching its scripts).
+  if (STATIC_ASSET.test(pathname)) return NextResponse.next();
   // Machine endpoints authenticate themselves (Bearer secrets) and must not be redirected to the login page.
   const isPublic = pathname === "/login" || pathname === "/api/health" || pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/") || pathname.startsWith("/api/cron/");
   if (!isPublic && !request.cookies.get(SESSION_COOKIE)) {
@@ -57,6 +61,10 @@ export function proxy(request: NextRequest) {
   return response;
 }
 
-export const config = {
-  matcher: [{ source: "/((?!_next/static|_next/image|favicon.ico).*)", missing: [{ type: "header", key: "next-router-prefetch" }] }],
-};
+/**
+ * The matcher is "everything". It must NOT carry a `missing`/`has` condition on a request header such as
+ * `next-router-prefetch` (the example in the CSP guide does): a header is chosen by the client, so such a condition
+ * lets anyone skip every check in this file (role, Host, VPN network, fail-closed profile) by sending that header.
+ * Static assets are let through below, but only AFTER the exposure decision.
+ */
+export const config = { matcher: "/:path*" };

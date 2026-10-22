@@ -1,0 +1,8 @@
+[Unit]
+Description=Full encrypted Boom Bala backup to both external repositories
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+ExecStart=/usr/bin/pgbackrest --stanza=boombala --type=full backup

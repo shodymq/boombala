@@ -28,7 +28,7 @@ const FUTURE = (() => {
 const KEY = Buffer.alloc(32, 21).toString("base64");
 
 /** Tables the public API must never reach. Every table of the schema is either in API_GRANTS or here, so a new table forces a decision. */
-const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations"];
+const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log"];
 
 describe("Database roles: one per application, least privilege", () => {
   let db: TestDb;
@@ -105,29 +105,121 @@ describe("Database roles: one per application, least privilege", () => {
       }
     });
 
-    it("cannot change or delete what it only reads or inserts, cannot anonymise, cannot touch history, cannot build or drop anything", async () => {
-      await denied(api, "UPDATE bb.contacts SET name = 'x'");
-      await denied(api, "UPDATE bb.contacts SET anonymized_at = now()");
-      await denied(api, "UPDATE bb.contacts SET phone_e164 = NULL");
-      await denied(api, "DELETE FROM bb.contacts");
-      await denied(api, "DELETE FROM bb.lead_requests");
-      await denied(api, "UPDATE bb.lead_requests SET status = 'cancelled'");
-      await denied(api, "UPDATE bb.consent_events SET ip_hash = NULL");
-      await denied(api, "DELETE FROM bb.consent_events");
-      await denied(api, "INSERT INTO bb.users (email, name, password_hash, role) VALUES ('a@b.test', 'x', 'x', 'owner')");
-      await denied(api, "UPDATE bb.legal_documents SET status = 'published'");
-      await denied(api, "INSERT INTO bb.slot_reservations (kind, slot_date, slot_id, room_id, created_by) VALUES ('block', current_date + 90, 1, 'roblox-room', gen_random_uuid())");
-      await denied(api, "UPDATE bb.news_posts SET status = 'published'");
-      await denied(api, "CREATE TABLE bb.evil (x int)");
-      await denied(api, "CREATE TABLE public.evil (x int)");
-      await denied(api, "TRUNCATE bb.contacts");
-      await denied(api, "DROP TABLE bb.contacts");
-      await denied(api, "ALTER TABLE bb.contacts DISABLE TRIGGER ALL");
-      await denied(api, "ALTER ROLE bb_api SUPERUSER");
+    it("cannot read contacts, enquiries, registrations or the consent history: not whole, not by column, not by count, not by a join", async () => {
+      for (const sql of [
+        "SELECT * FROM bb.contacts",
+        "SELECT count(*) FROM bb.contacts",
+        "SELECT id FROM bb.contacts",
+        "SELECT name FROM bb.contacts",
+        "SELECT phone_e164 FROM bb.contacts WHERE phone_e164 LIKE '+7%'",
+        "SELECT name_key FROM bb.contacts",
+        "SELECT * FROM bb.lead_requests",
+        "SELECT count(*) FROM bb.lead_requests",
+        "SELECT contact_id, idempotency_key FROM bb.lead_requests",
+        "SELECT * FROM bb.consent_registrations",
+        "SELECT * FROM bb.consent_events",
+        "SELECT ip_hash, user_agent FROM bb.consent_events",
+        "SELECT c.name FROM bb.slot_reservations r JOIN bb.contacts c ON c.id = r.contact_id",
+        "SELECT (SELECT name FROM bb.contacts LIMIT 1)",
+        "SELECT row_to_json(c) FROM bb.contacts c",
+        "SELECT * FROM bb.contacts TABLESAMPLE SYSTEM (100)",
+        "COPY bb.contacts TO STDOUT",
+        "WITH x AS (SELECT * FROM bb.contacts) SELECT * FROM x",
+        "SELECT * FROM bb.slot_reservations",
+        "SELECT contact_id FROM bb.slot_reservations",
+        "SELECT price_kzt FROM bb.slot_reservations",
+        "SELECT note FROM bb.slot_reservations",
+      ]) await denied(api, sql);
+      assert.ok((await api.query("SELECT slot_date, slot_id, room_id, released_at FROM bb.slot_reservations")).rows.length >= 0, "free/busy columns stay readable");
     });
 
-    it("KNOWN LIMIT, kept visible: it can read the contacts table (the enquiry upsert needs it); a compromised API process could read contacts", async () => {
-      assert.ok((await api.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n > 0);
+    it("the only doors to personal data are the intake functions: each returns one row or only non-personal columns, with no way to list or search", async () => {
+      const fns = (await db.pool.query("SELECT p.oid, p.proname, pg_get_function_result(p.oid) result, p.prosecdef, p.proconfig FROM pg_proc p WHERE p.pronamespace = 'bb'::regnamespace AND p.proname LIKE 'intake\\_%' ORDER BY 2")).rows;
+      assert.equal(fns.length, 9);
+      for (const f of fns) {
+        assert.equal(f.prosecdef, true, `${f.proname} is SECURITY DEFINER`);
+        assert.ok((f.proconfig ?? []).some((c: string) => c.startsWith("search_path=")), `${f.proname} pins its search_path`);
+        assert.ok(!/(name|phone|ip_hash|user_agent|note|email)/i.test(f.result), `${f.proname} returns no personal column (${f.result})`);
+        assert.ok(!/\bSETOF\b/i.test(f.result), `${f.proname} is not an open-ended row source`);
+      }
+      // who may execute what: the API role runs exactly these nine and no other function of the schema
+      const exec = (await db.pool.query("SELECT p.proname, has_function_privilege('bb_api', p.oid, 'EXECUTE') ok FROM pg_proc p WHERE p.pronamespace = 'bb'::regnamespace")).rows;
+      for (const e of exec) assert.equal(e.ok, e.proname.startsWith("intake_"), e.proname);
+      await denied(api, "SELECT bb.contacts_guard()");
+      await denied(api, "SELECT bb.consent_events_guard()");
+      await denied(api, "SELECT bb.harden_schema()");
+    });
+
+    it("the intake functions refuse what the public API must never do", async () => {
+      const refused = (sql: string, params: unknown[] = []) => assert.rejects(() => api.query(sql, params), /unknown intake source|exactly one|not published|not an intake audit|unknown enquiry|invalid_parameter|violates|permission denied/i, sql);
+      await refused("SELECT bb.intake_upsert_contact('x', 'x', '+77010000999', 'manual')");
+      await refused("SELECT bb.intake_upsert_contact('x', 'x', '+77010000999', 'staff')");
+      await refused("SELECT bb.intake_upsert_contact('x', 'x', 'not a phone', 'qr')");
+      const doc = (await db.pool.query("SELECT id FROM bb.legal_documents WHERE status = 'published' LIMIT 1")).rows[0].id;
+      const draft = await createDraft(admin, { id: owner.id, role: "owner" }, { kind: "privacy_policy", title: "черновик", body: "не опубликован" });
+      const c = (await api.query("SELECT bb.intake_upsert_contact('Проверка Функций', 'проверка функций', NULL, 'qr') AS id")).rows[0].id;
+      await refused("SELECT bb.intake_add_consent($1, $2, NULL, NULL, NULL, NULL)", [c, doc]); // neither enquiry nor registration
+      await refused("SELECT bb.intake_add_consent($1, $2, NULL, NULL, $3, $3)", [c, doc, randomUUID()]); // both
+      await refused("SELECT bb.intake_add_consent($1, $2, NULL, NULL, NULL, $3)", [c, draft.id, randomUUID()]); // a document that is not published
+      await refused("SELECT bb.intake_queue_notification($1)", [randomUUID()]);
+      await refused("SELECT bb.intake_audit('user.created', 'user', 'x')");
+      await refused("SELECT bb.intake_audit('lead.created', 'user', 'x')");
+      await refused("SELECT bb.intake_audit('mfa.reset', 'consent_registration', 'x')");
+      // a withdrawal, a staff-made consent or a delete cannot be produced through any of them
+      assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.consent_events WHERE contact_id = $1", [c])).rows[0].n, 0);
+    });
+
+    it("lookups need the unguessable handle: an unknown key finds nothing, a known one finds exactly its own row", async () => {
+      const key = randomUUID();
+      const lead = await submitLead(api, { idempotencyKey: key, name: "Ключ Проверка", phone: "+77010000444", date: FUTURE, consent: true });
+      assert.equal((await api.query("SELECT * FROM bb.intake_find_lead($1)", [randomUUID()])).rows.length, 0);
+      assert.equal((await api.query("SELECT * FROM bb.intake_find_lead(NULL)")).rows.length, 0);
+      const found = (await api.query("SELECT * FROM bb.intake_find_lead($1)", [key])).rows;
+      assert.equal(found.length, 1);
+      assert.equal(found[0].id, lead.leadId);
+      assert.deepEqual(Object.keys(found[0]).sort(), ["id", "seq"]);
+      assert.equal((await api.query("SELECT * FROM bb.intake_find_registration($1)", [randomUUID()])).rows.length, 0);
+      assert.equal((await api.query("SELECT * FROM bb.intake_registration_documents($1)", [randomUUID()])).rows.length, 0);
+    });
+
+    it("KNOWN LIMIT, kept visible: whether an exact (name, phone) pair exists can be learned (an id comes back), never the data itself", async () => {
+      const a = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000555', 'birthday_form') AS id")).rows[0].id;
+      const b = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000555', 'birthday_form') AS id")).rows[0].id;
+      assert.equal(a, b, "the same pair gives the same contact (and so confirms it exists)");
+      const other = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000556', 'birthday_form') AS id")).rows[0].id;
+      assert.notEqual(a, other);
+    });
+
+    it("sees only what is public: not a draft document, not an unpublished post", async () => {
+      assert.ok((await db.pool.query("SELECT count(*)::int n FROM bb.legal_documents WHERE status <> 'published'")).rows[0].n >= 1, "there is a draft in the database");
+      assert.equal((await api.query("SELECT count(*)::int n FROM bb.legal_documents WHERE status <> 'published'")).rows[0].n, 0);
+      const post = await createPost(admin, { id: owner.id, role: "owner" }, { kind: "news", title: "Черновик для роли", body: "секрет" });
+      assert.equal((await api.query("SELECT count(*)::int n FROM bb.news_posts WHERE id = $1", [post.id])).rows[0].n, 0, "an unpublished post does not exist for the API");
+      await publishPost(admin, { id: owner.id, role: "owner" }, post.id);
+      assert.equal((await api.query("SELECT count(*)::int n FROM bb.news_posts WHERE id = $1", [post.id])).rows[0].n, 1);
+      await unpublishPost(admin, { id: owner.id, role: "owner" }, post.id);
+      assert.equal((await api.query("SELECT count(*)::int n FROM bb.news_posts WHERE id = $1", [post.id])).rows[0].n, 0, "and it disappears again");
+      await deletePost(admin, { id: owner.id, role: "owner" }, post.id);
+    });
+
+    it("cannot change or delete anything directly, cannot anonymise, cannot touch history, cannot build or drop anything", async () => {
+      for (const sql of [
+        "UPDATE bb.contacts SET name = 'x'", "UPDATE bb.contacts SET anonymized_at = now()", "UPDATE bb.contacts SET last_activity_at = now()", "DELETE FROM bb.contacts",
+        "INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ('a', 'a', '+77010000001', 'qr')",
+        "INSERT INTO bb.lead_requests (idempotency_key, contact_id, requested_date) VALUES (gen_random_uuid(), gen_random_uuid(), current_date)",
+        "DELETE FROM bb.lead_requests", "UPDATE bb.lead_requests SET status = 'cancelled'",
+        "INSERT INTO bb.consent_events (contact_id, document_id, event, method) VALUES (gen_random_uuid(), gen_random_uuid(), 'revoked', 'staff')",
+        "UPDATE bb.consent_events SET ip_hash = NULL", "DELETE FROM bb.consent_events",
+        "INSERT INTO bb.outbox (topic, ref_id) VALUES ('telegram.lead', gen_random_uuid())",
+        "INSERT INTO bb.audit_log (action) VALUES ('user.created')",
+        "INSERT INTO bb.users (email, name, password_hash, role) VALUES ('a@b.test', 'x', 'x', 'owner')",
+        "UPDATE bb.legal_documents SET status = 'published'",
+        "INSERT INTO bb.slot_reservations (kind, slot_date, slot_id, room_id, created_by) VALUES ('block', current_date + 90, 1, 'roblox-room', gen_random_uuid())",
+        "UPDATE bb.news_posts SET status = 'published'",
+        "CREATE TABLE bb.evil (x int)", "CREATE TABLE public.evil (x int)", "TRUNCATE bb.contacts", "DROP TABLE bb.contacts",
+        "ALTER TABLE bb.contacts DISABLE TRIGGER ALL", "ALTER ROLE bb_api SUPERUSER",
+        "CREATE FUNCTION bb.evil() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+      ]) await denied(api, sql);
     });
   });
 

@@ -1,5 +1,9 @@
 # Переход на Supabase PostgreSQL: что меняется относительно Этапа 1
 
+> **Место этого документа в схеме.** Описывает тестовую среду (Vercel Preview + Supabase `boombala-test`). Production целиком в Казахстане,
+> Vercel используется только для тестового Preview: см. `PRODUCTION-PLAN-KZ.md` и `ADMIN-ISOLATION-KZ.md`.
+
+
 Решение владельца: **без собственного VPS на текущем этапе**. Публичный сайт и отдельная закрытая админка на Vercel,
 PostgreSQL на Supabase (для разработки и MVP). CRM и клиентская база остаются.
 

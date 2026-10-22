@@ -11,8 +11,7 @@ const KZ = join(REPO, "deploy/kz");
 
 const DEPLOY_ENV = `
 ADMIN_HOST=panel.example.test
-API_HOST=api.example.test
-PUBLIC_SITE_HOST=www.example.test
+PUBLIC_SITE_HOST=site.example.test
 PUBLIC_IP=198.51.100.10
 PUBLIC_IF=eth0
 WG_SERVER_ADDR=10.77.0.1
@@ -20,7 +19,12 @@ WG_SUBNET=10.77.0.0/24
 WG_PORT=51820
 ADMIN_PORT=3100
 API_PORT=3101
+SITE_PORT=3000
 DB_NAME=boombala
+BACKUP_S3_ENDPOINT=s3.backup.example.test
+BACKUP_S3_BUCKET=boombala-backups
+BACKUP_S3_REGION=kz-1
+BACKUP_SFTP_HOST=backup2.example.test
 `;
 
 const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : [join(dir, f)]));
@@ -43,7 +47,7 @@ describe("Kazakhstan deployment files", () => {
   describe("rendering", () => {
     it("fills every non-secret placeholder and refuses an incomplete deploy.env", () => {
       for (const f of walk(out)) {
-        const left = (read(f).match(/@[A-Z_]+@/g) ?? []).filter((p) => !/(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|TELEGRAM_CHAT_ID)@$/.test(p));
+        const left = (read(f).match(/@[A-Z0-9_]+@/g) ?? []).filter((p) => !/(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|TELEGRAM_CHAT_ID)@$/.test(p));
         assert.deepEqual(left, [], relative(out, f));
       }
       writeFileSync(join(tmp, "bad.env"), DEPLOY_ENV.replace("ADMIN_HOST=panel.example.test\n", ""));
@@ -74,25 +78,37 @@ describe("Kazakhstan deployment files", () => {
     });
   });
 
-  describe("nginx: the public API", () => {
-    it("exposes only health, public reads and intake; everything else is 404; no login, no admin", () => {
-      const all = r("nginx/api.conf");
-      const c = all.split(/\n(?=server \{)/).find((b) => b.includes("http2 on")) as string; // the TLS block of the API host
+  describe("nginx: the public site (the whole web contour is on this server)", () => {
+    const tls = () => (r("nginx/site.conf").split(/\n(?=server \{)/).find((b) => b.includes("server_name site.example.test;") && b.includes("http2 on")) as string);
+
+    it("serves only the site's own routes: the API routes it has, the pages, and nothing of the staff application", () => {
+      const c = tls();
       const locs = [...c.matchAll(/^\s*location\s+(=\s+)?(\S+)\s*\{/gm)].map((m) => (m[1] ? "= " : "") + m[2]);
-      assert.deepEqual(locs, ["= /api/health", "/api/public/", "/api/intake/", "/"]);
-      assert.match(c, /location \/ \{ return 404; \}/);
-      for (const bad of ["login", "contacts", "export", "media", "cron", "users"]) assert.ok(!new RegExp(`location[^\\n]*${bad}`).test(c), bad);
+      assert.deepEqual(locs, ["= /api/revalidate-news", "= /api/lead", "= /api/consent", "= /api/availability", "/api/", "/"]);
+      assert.match(c, /location = \/api\/revalidate-news \{ return 404; \}/, "the cache refresh is called on loopback only");
+      assert.match(c, /location \/api\/ \{ return 404; \}/, "no other API route exists");
+      for (const bad of ["login", "contacts", "export", "media", "cron", "users", "intake"]) assert.ok(!new RegExp(`location[^\\n]*${bad}`).test(c), bad);
+      const passes = [...c.matchAll(/proxy_pass\s+([^;]+);/g)].map((m) => m[1]);
+      assert.ok(passes.length >= 4 && passes.every((p) => p === "http://127.0.0.1:3000"), "only the site process on loopback, never the API or the admin");
     });
-    it("listens on the public address only, rate-limits, caps the body, allows one CORS origin", () => {
-      const c = r("nginx/api.conf");
-      for (const m of c.matchAll(/^\s*listen\s+([^;]+);/gm)) assert.match(m[1], /^198\.51\.100\.10:(80|443)/, m[1]);
-      assert.match(c, /limit_req zone=bb_health/);
-      assert.match(c, /limit_req zone=bb_server/);
-      assert.match(c, /client_max_body_size 8k;/);
-      assert.match(c, /"https:\/\/www\.example\.test" \$http_origin;/);
-      assert.ok(!/Access-Control-Allow-Origin\s+\*/.test(c), "no wildcard CORS");
-      assert.match(c, /ssl_reject_handshake on;/);
-      assert.match(c, /limit_except POST \{ deny all; \}/);
+    it("listens on the public address only, rate-limits the forms hard, caps the body, redirects other names, and answers nothing for an unknown name", () => {
+      const all = r("nginx/site.conf");
+      for (const m of all.matchAll(/^\s*listen\s+([^;]+);/gm)) assert.match(m[1], /^198\.51\.100\.10:(80|443)/, m[1]);
+      assert.match(all, /limit_req zone=bb_forms burst=3 nodelay;/);
+      assert.match(all, /rate=6r\/m/);
+      assert.match(all, /client_max_body_size 8k;/);
+      assert.match(all, /ssl_reject_handshake on;/);
+      assert.match(all, /return 444;/);
+      assert.match(all, /limit_except POST \{ deny all; \}/);
+      assert.match(all, /return 301 https:\/\/site\.example\.test\$request_uri;/);
+      assert.ok(!/Access-Control-Allow-Origin/.test(all), "no CORS at all: the browser only ever talks to its own site");
+    });
+    it("has no public API host any more: the API process has no nginx listener and no public name", () => {
+      assert.ok(!existsSync(join(KZ, "nginx/api.conf.template")));
+      const rendered = walk(out).filter((f) => f.startsWith(join(out, "nginx")));
+      for (const f of rendered) assert.ok(!/server_name[^;]*\bapi\./.test(read(f)), relative(out, f));
+      const api = r("systemd/bb-api.service");
+      assert.match(api, /-p 3101 -H 127\.0\.0\.1/);
     });
   });
 
@@ -149,13 +165,18 @@ describe("Kazakhstan deployment files", () => {
     it("runs the two applications as different users with different env files, on loopback, hardened", () => {
       const admin = r("systemd/bb-admin.service");
       const api = r("systemd/bb-api.service");
+      const site = r("systemd/bb-site.service");
       assert.match(admin, /^User=bbadmin$/m);
       assert.match(api, /^User=bbapi$/m);
+      assert.match(site, /^User=bbsite$/m);
+      assert.match(site, /^EnvironmentFile=\/etc\/boombala\/site\.env$/m);
+      assert.match(site, /-p 3000 -H 127\.0\.0\.1/);
+      assert.equal(new Set([admin, api, site].map((u) => /^User=(\w+)$/m.exec(u)?.[1])).size, 3, "three different operating-system users");
       assert.match(admin, /^EnvironmentFile=\/etc\/boombala\/admin\.env$/m);
       assert.match(api, /^EnvironmentFile=\/etc\/boombala\/api\.env$/m);
       assert.match(admin, /-p 3100 -H 127\.0\.0\.1/);
       assert.match(api, /-p 3101 -H 127\.0\.0\.1/);
-      for (const u of [admin, api]) {
+      for (const u of [admin, api, site]) {
         for (const d of ["NoNewPrivileges=true", "ProtectSystem=strict", "ProtectHome=true", "PrivateTmp=true", "CapabilityBoundingSet="]) assert.ok(u.includes(d), d);
         assert.ok(!/^Environment=.*(SECRET|TOKEN|KEY|PASSWORD)/mi.test(u), "no secret in the unit file");
       }
@@ -197,11 +218,22 @@ describe("Kazakhstan deployment files", () => {
       assert.match(read(join(KZ, "env/admin.env.example")), /DATABASE_URL=postgres:\/\/bb_admin:/);
       assert.match(read(join(KZ, "env/api.env.example")), /DATABASE_URL=postgres:\/\/bb_api:/);
     });
-    it("the Vercel site environment carries no database, second-factor or admin settings", () => {
-      const site = Object.keys(fill(read(join(KZ, "env/site.vercel.env.example"))));
-      for (const k of site) assert.ok(!/^(DATABASE|MFA|CRON|TELEGRAM|ADMIN|ALLOWED|PLATFORM_ROLE|PLATFORM_PROFILE|PLATFORM_IP_PEPPER)/.test(k), k);
-      assert.equal(fill(read(join(KZ, "env/site.vercel.env.example"))).LEAD_PIPELINE, "telegram-only");
-      assert.equal(fill(read(join(KZ, "env/site.vercel.env.example"))).CONSENT_FORM_ENABLED, "0");
+    it("the site environment carries no database, second-factor or admin settings, reaches the API on loopback, and keeps today's behaviour", () => {
+      const env = fill(r("env/site.env.example"));
+      for (const k of Object.keys(env)) assert.ok(!/^(DATABASE|MFA|CRON|ADMIN|ALLOWED|PLATFORM_ROLE|PLATFORM_PROFILE|PLATFORM_IP_PEPPER|SITE_REVALIDATE)/.test(k), k);
+      assert.equal(env.PLATFORM_URL, "http://127.0.0.1:3101");
+      assert.equal(env.LEAD_PIPELINE, "telegram-only");
+      assert.equal(env.CONSENT_FORM_ENABLED, "0");
+      assert.equal(env.NEXT_PUBLIC_SITE_URL, "https://site.example.test");
+    });
+    it("the admin refreshes the site's cache on loopback; the API is addressed on loopback; no production file points at Vercel", () => {
+      assert.match(r("env/admin.env.example"), /^SITE_REVALIDATE_URL=http:\/\/127\.0\.0\.1:3000$/m);
+      assert.match(r("env/api.env.example"), /^ALLOWED_HOSTS=127\.0\.0\.1:3101$/m);
+      for (const f of walk(KZ)) {
+        const t = read(f);
+        const stripped = t.replace(/^.*(X-Vercel|x-vercel).*$/gim, "");
+        assert.ok(!/vercel\.app|VERCEL_|@vercel/i.test(stripped), `${relative(REPO, f)} refers to Vercel`);
+      }
     });
   });
 
@@ -223,6 +255,51 @@ describe("Kazakhstan deployment files", () => {
           const hits = t.match(/admin\.boombala\.kz|boombala\.kz\/admin|Domain=\.?boombala\.kz/gi) ?? [];
           if (hits.length) assert.fail(`${relative(REPO, f)} mentions ${hits[0]}`);
         }
+      }
+    });
+  });
+
+
+  describe("external backups", () => {
+    it("two encrypted copies outside the server, retention, continuous archiving, and a restore drill that refuses a non-empty target", () => {
+      const c = r("backup/pgbackrest.conf");
+      assert.match(c, /^repo1-type=s3$/m);
+      assert.match(c, /^repo2-type=sftp$/m);
+      assert.equal((c.match(/^repo\d-cipher-type=aes-256-cbc$/gm) ?? []).length, 2, "both copies are encrypted");
+      assert.equal((c.match(/^repo\d-retention-full=4$/gm) ?? []).length, 2);
+      assert.match(c, /^repo1-s3-endpoint=s3\.backup\.example\.test$/m);
+      assert.ok(!/repo\d-type=posix/.test(c), "no copy on the same disk counts as a backup");
+      for (const m of c.matchAll(/^repo\d-(cipher-pass|s3-key|s3-key-secret)=(.*)$/gm)) assert.match(m[2], /^@[A-Z0-9_]+@$/, "secrets stay as markers");
+      const pg = read(join(KZ, "postgres/postgresql.conf.snippet"));
+      assert.match(pg, /^archive_mode = on$/m);
+      assert.match(pg, /pgbackrest --stanza=boombala archive-push %p/);
+      assert.match(r("backup/bb-backup-full.timer"), /OnCalendar=Sun/);
+      assert.match(r("backup/bb-backup-diff.timer"), /OnCalendar=Mon\.\.Sat/);
+      const drill = r("backup/restore-drill.sh");
+      assert.match(drill, /refusing: .* is not empty/);
+      assert.match(drill, /erasures|anonymised again/i, "the drill reminds to re-apply erasures after a restore");
+      const dir = mkdtempSync(join(tmp, "drill-"));
+      writeFileSync(join(dir, "x"), "x");
+      const res = spawnSync("bash", [join(out, "backup/restore-drill.sh")], { encoding: "utf8", env: { ...process.env, RESTORE_TARGET_DIR: dir, PATH: `${join(tmp)}:${process.env.PATH}` } });
+      assert.notEqual(res.status, 0);
+      assert.match(res.stderr, /refusing/);
+    });
+  });
+
+  describe("the web contour does not depend on Vercel when it runs on our own server", () => {
+    it("the trusted-OIDC call exists only behind a check that the process runs on Vercel, in the site and in the platform", () => {
+      for (const f of [join(REPO, "src/lib/platform.ts"), join(REPO, "platform/src/server/api.ts")]) {
+        const calls = read(f).split("\n").filter((l) => /getVercelOidcToken\(\)/.test(l) && !/^import/.test(l.trim()));
+        assert.ok(calls.length >= 1, f);
+        for (const l of calls) assert.match(l, /process\.env\.VERCEL === "1" \?/, `${relative(REPO, f)}: ${l.trim()}`);
+      }
+    });
+    it("the documents say that production is entirely in Kazakhstan and Vercel is for Preview and tests only", () => {
+      for (const doc of ["docs/platform/ADMIN-ISOLATION-KZ.md", "docs/platform/PRODUCTION-PLAN-KZ.md"]) {
+        const t = read(join(REPO, doc));
+        assert.match(t, /весь (веб-)?контур[^\n]*Казахстан|Production[^\n]*целиком в Казахстане/i, doc);
+        assert.match(t, /Vercel[^\n]*(только|лишь)[^\n]*(Preview|тест)/i, doc);
+        assert.ok(!/публичный сайт \(Vercel/i.test(t), `${doc} still places the public site on Vercel`);
       }
     });
   });
@@ -329,14 +406,14 @@ describe("Kazakhstan deployment files", () => {
 
     it("the isolation check passes on a correctly closed server and FAILS when something is exposed", () => {
       const run = (mode: string, env: Record<string, string>) =>
-        spawnSync("bash", [join(KZ, "scripts/verify-isolation.sh")], { encoding: "utf8", env: { ...process.env, MODE: mode, CURL_BIN: join(bin, "curl"), NC_BIN: join(bin, "nc"), DIG_BIN: join(bin, "dig"), PUBLIC_IP: "198.51.100.10", API_HOST: "api.example.test", ADMIN_HOST: "panel.example.test", WG_SERVER_ADDR: "10.77.0.1", ...env } });
+        spawnSync("bash", [join(KZ, "scripts/verify-isolation.sh")], { encoding: "utf8", env: { ...process.env, MODE: mode, CURL_BIN: join(bin, "curl"), NC_BIN: join(bin, "nc"), DIG_BIN: join(bin, "dig"), PUBLIC_IP: "198.51.100.10", SITE_HOST: "site.example.test", ADMIN_HOST: "panel.example.test", WG_SERVER_ADDR: "10.77.0.1", ...env } });
       // a correctly closed server
       stub("nc", "exit 1"); // every port closed
       stub("dig", "exit 0"); // no public DNS record
       stub("curl", `url="\${@: -1}"; for a in "$@"; do case "$a" in https://*) url="$a";; esac; done
 case "$url" in
-  *api.example.test/api/health) printf 200;;
-  *api.example.test/*) printf 404;;
+  https://site.example.test/) printf 200;;
+  *site.example.test/*) printf 404;;
   *panel.example.test/*|*198.51.100.10/*) printf 000;;
   *) printf 200;;
 esac`);
@@ -347,21 +424,21 @@ esac`);
 
       // the login page leaks on the public API
       stub("curl", `for a in "$@"; do case "$a" in https://*) url="$a";; esac; done
-case "$url" in *api.example.test/login*) printf 200;; *api.example.test/api/health) printf 200;; *api.example.test/*) printf 404;; *) printf 000;; esac`);
+case "$url" in *site.example.test/login*) printf 200;; https://site.example.test/) printf 200;; *site.example.test/*) printf 404;; *) printf 000;; esac`);
       const leak = run("outside", {});
       assert.notEqual(leak.status, 0);
-      assert.match(leak.stdout, /FAIL\s+public API: \/login answered 200/);
+      assert.match(leak.stdout, /FAIL\s+public site: \/login answered 200/);
 
       // the admin answers on the public address
       stub("curl", `for a in "$@"; do case "$a" in https://*) url="$a";; esac; done
-case "$url" in *panel.example.test/*) printf 200;; *api.example.test/api/health) printf 200;; *) printf 404;; esac`);
+case "$url" in *panel.example.test/*) printf 200;; https://site.example.test/) printf 200;; *) printf 404;; esac`);
       const exposed = run("outside", {});
       assert.notEqual(exposed.status, 0);
       assert.match(exposed.stdout, /FAIL\s+the admin name on the public address answered 200/);
 
       // the database port is open
       stub("curl", `for a in "$@"; do case "$a" in https://*) url="$a";; esac; done
-case "$url" in *api.example.test/api/health) printf 200;; *api.example.test/*) printf 404;; *) printf 000;; esac`);
+case "$url" in https://site.example.test/) printf 200;; *site.example.test/*) printf 404;; *) printf 000;; esac`);
       stub("nc", "exit 0");
       const db = run("outside", {});
       assert.notEqual(db.status, 0);

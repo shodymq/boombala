@@ -30,7 +30,9 @@ async function endpoint(path: string, env: Record<string, string | undefined> = 
   const token = (env.PLATFORM_INTAKE_TOKEN ?? "").trim();
   const safeBase = /^https:\/\/[^/]+$/.test(base) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base);
   if (!safeBase || token.length < 24) throw new PlatformError("not_configured");
-  const oidcToken = await getVercelOidcToken().catch(() => "");
+  // The trusted-OIDC header exists only for protected Vercel Previews. On our own server (Kazakhstan) it must never be requested:
+  // outside Vercel the library would look for a token and call a Vercel service on every request.
+  const oidcToken = process.env.VERCEL === "1" ? await getVercelOidcToken().catch(() => "") : "";
   return { url: `${base}${path}`, token, oidcToken };
 }
 

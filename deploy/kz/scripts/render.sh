@@ -8,13 +8,13 @@ set -euo pipefail
 [ $# -eq 2 ] || { echo "usage: render.sh <deploy.env> <out-dir>" >&2; exit 2; }
 ENV_FILE="$1"; OUT="$2"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-REQUIRED="ADMIN_HOST API_HOST PUBLIC_SITE_HOST PUBLIC_IP PUBLIC_IF WG_SERVER_ADDR WG_SUBNET WG_PORT ADMIN_PORT API_PORT DB_NAME"
+REQUIRED="ADMIN_HOST PUBLIC_SITE_HOST PUBLIC_IP PUBLIC_IF WG_SERVER_ADDR WG_SUBNET WG_PORT ADMIN_PORT API_PORT SITE_PORT DB_NAME BACKUP_S3_ENDPOINT BACKUP_S3_BUCKET BACKUP_S3_REGION BACKUP_SFTP_HOST"
 
 SED_SCRIPT="$(mktemp)"
 trap 'rm -f "$SED_SCRIPT"' EXIT
 while IFS='=' read -r k v; do
   case "$k" in ''|\#*) continue ;; esac
-  [[ "$k" =~ ^[A-Z_]+$ ]] || continue
+  [[ "$k" =~ ^[A-Z0-9_]+$ ]] || continue
   printf 's|@%s@|%s|g\n' "$k" "$(printf '%s' "$v" | sed 's/[|&\\]/\\&/g')" >> "$SED_SCRIPT"
 done < "$ENV_FILE"
 for k in $REQUIRED; do
@@ -27,11 +27,11 @@ render() {
   mkdir -p "$(dirname "$dst")"
   sed -f "$SED_SCRIPT" "$src" > "$dst"
   # What may stay as a marker: secrets, which are filled on the server by hand.
-  if grep -o '@[A-Z_]*@' "$dst" | grep -vE '(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|TELEGRAM_CHAT_ID)@$' >/dev/null; then
-    echo "unfilled placeholder in $dst:" >&2; grep -n '@[A-Z_]*@' "$dst" >&2; exit 1
+  if grep -o '@[A-Z0-9_]*@' "$dst" | grep -vE '(PASSWORD|_TOKEN|_KEY|_SECRET|PEPPER|TELEGRAM_CHAT_ID)@$' >/dev/null; then
+    echo "unfilled placeholder in $dst:" >&2; grep -n '@[A-Z0-9_]*@' "$dst" >&2; exit 1
   fi
 }
-for dir in wireguard nftables postgres systemd nginx dns; do
+for dir in wireguard nftables postgres systemd nginx dns backup; do
   for f in "$HERE/$dir"/*.template; do
     [ -e "$f" ] || continue
     render "$f" "$OUT/$dir/$(basename "$f" .template)"
@@ -39,5 +39,6 @@ for dir in wireguard nftables postgres systemd nginx dns; do
 done
 for f in "$HERE/nginx/bb-proxy.conf" "$HERE/nginx/bb-tls.conf"; do cp "$f" "$OUT/nginx/$(basename "$f")"; done
 cp "$HERE/systemd/bb-outbox.timer" "$OUT/systemd/bb-outbox.timer"
+for f in "$HERE"/backup/*.service "$HERE"/backup/*.timer "$HERE"/backup/restore-drill.sh; do mkdir -p "$OUT/backup"; cp "$f" "$OUT/backup/$(basename "$f")"; done
 for f in "$HERE"/env/*.example; do render "$f" "$OUT/env/$(basename "$f")"; done
 echo "rendered to $OUT"

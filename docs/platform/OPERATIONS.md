@@ -1,5 +1,9 @@
 # Boom Bala Platform: эксплуатация (Vercel + Supabase PostgreSQL)
 
+> **Место этого документа в схеме.** Описывает тестовую среду (Vercel Preview + Supabase `boombala-test`). Production целиком в Казахстане,
+> Vercel используется только для тестового Preview: см. `PRODUCTION-PLAN-KZ.md` и `ADMIN-ISOLATION-KZ.md`.
+
+
 Статус: черновик. Production не меняется и миграции к production-базе не применяются без подтверждения владельца.
 
 > **Персональные данные.** У Supabase нет региона в Казахстане. Пока нет отдельного решения о законном размещении, платформа

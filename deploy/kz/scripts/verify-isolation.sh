@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks, from the outside and from the inside, that the admin is invisible to the internet and the database is closed.
-#   MODE=outside PUBLIC_IP=203.0.113.10 API_HOST=api.example.org ADMIN_HOST=panel.example.net ./verify-isolation.sh
+#   MODE=outside PUBLIC_IP=203.0.113.10 SITE_HOST=www.example.org ADMIN_HOST=panel.example.net ./verify-isolation.sh
 #       run from a machine that is NOT on the VPN (your laptop on mobile data, another server)
 #   MODE=inside  WG_SERVER_ADDR=10.77.0.1 ADMIN_HOST=panel.example.net ./verify-isolation.sh
 #       run from a device that IS on the VPN
@@ -19,15 +19,15 @@ need() { for v in "$@"; do [ -n "${!v:-}" ] || { echo "set $v" >&2; exit 2; }; d
 
 case "$MODE" in
   outside)
-    need PUBLIC_IP API_HOST ADMIN_HOST
-    for port in 22 5432 3100 3101 3000; do
+    need PUBLIC_IP SITE_HOST ADMIN_HOST
+    for port in 22 5432 3000 3100 3101; do
       closed "$PUBLIC_IP" "$port" && pass "port $port is closed on the public address" || fail "port $port is OPEN on the public address"
     done
-    s="$(status "https://$API_HOST/api/health" --resolve "$API_HOST:443:$PUBLIC_IP")"
-    [ "$s" = "200" ] && pass "public API health answers (200)" || fail "public API health: $s"
-    for p in /login /login/mfa /contacts /requests /bookings /users /audit /export /retention /api/export /api/media/1 /api/cron/outbox; do
-      s="$(status "https://$API_HOST$p" --resolve "$API_HOST:443:$PUBLIC_IP")"
-      [ "$s" = "404" ] && pass "public API: $p does not exist (404)" || fail "public API: $p answered $s"
+    s="$(status "https://$SITE_HOST/" --resolve "$SITE_HOST:443:$PUBLIC_IP")"
+    [ "$s" = "200" ] && pass "the public site answers (200)" || fail "the public site: $s"
+    for p in /login /login/mfa /contacts /requests /bookings /users /audit /export /retention /admin /admin/login /api/export /api/media/1 /api/cron/outbox /api/intake/lead /api/public/legal /api/revalidate-news; do
+      s="$(status "https://$SITE_HOST$p" --resolve "$SITE_HOST:443:$PUBLIC_IP")"
+      [ "$s" = "404" ] && pass "public site: $p does not exist (404)" || fail "public site: $p answered $s"
     done
     # The admin name, asked on the public address, must not be served: no certificate for it, no content.
     s="$(status "https://$ADMIN_HOST/login" --resolve "$ADMIN_HOST:443:$PUBLIC_IP")"

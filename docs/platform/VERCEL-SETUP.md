@@ -1,5 +1,9 @@
 # Vercel: проект `boombala-platform` (только Preview)
 
+> **Место этого документа в схеме.** Описывает тестовую среду (Vercel Preview + Supabase `boombala-test`). Production целиком в Казахстане,
+> Vercel используется только для тестового Preview: см. `PRODUCTION-PLAN-KZ.md` и `ADMIN-ISOLATION-KZ.md`.
+
+
 ## Checklist (короткий)
 
 **Проект**

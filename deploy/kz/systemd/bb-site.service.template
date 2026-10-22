@@ -1,0 +1,28 @@
+[Unit]
+Description=Boom Bala public site
+After=network-online.target bb-api.service
+Wants=network-online.target
+
+[Service]
+User=bbsite
+Group=bbsite
+WorkingDirectory=/opt/boombala/site
+EnvironmentFile=/etc/boombala/site.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p @SITE_PORT@ -H 127.0.0.1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+ReadWritePaths=/opt/boombala/site/.next/cache
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

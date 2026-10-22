@@ -1,0 +1,79 @@
+# PUBLIC SITE: the whole production web contour lives here (Kazakhstan). The visitor talks to nginx only; nginx talks to
+# bb-site on loopback; bb-site talks to bb-api on loopback. bb-api has NO public listener and NO public name.
+# Listens on the PUBLIC address only. The admin is another listener (admin.conf) that is not on this address.
+limit_req_zone $binary_remote_addr zone=bb_pages:10m rate=20r/s;
+limit_req_zone $binary_remote_addr zone=bb_forms:10m rate=6r/m;
+limit_req_zone $binary_remote_addr zone=bb_availability:10m rate=60r/m;
+limit_conn_zone $binary_remote_addr zone=bb_conn:10m;
+
+# Anything that is not for this site (an IP address, another name, a scanner) gets no certificate and no answer.
+server {
+  listen @PUBLIC_IP@:443 ssl default_server;
+  ssl_reject_handshake on;
+}
+server {
+  listen @PUBLIC_IP@:80 default_server;
+  return 444;
+}
+server {
+  listen @PUBLIC_IP@:80;
+  server_name @PUBLIC_SITE_HOST@ www.@PUBLIC_SITE_HOST@;
+  location /.well-known/acme-challenge/ { root /var/www/acme; }
+  location / { return 301 https://@PUBLIC_SITE_HOST@$request_uri; }
+}
+server {
+  listen @PUBLIC_IP@:443 ssl;
+  http2 on;
+  server_name www.@PUBLIC_SITE_HOST@;
+  include /etc/nginx/boombala/bb-tls.conf;
+  ssl_certificate     /etc/ssl/boombala/site.fullchain.pem;
+  ssl_certificate_key /etc/ssl/boombala/site.key;
+  return 301 https://@PUBLIC_SITE_HOST@$request_uri;
+}
+
+server {
+  listen @PUBLIC_IP@:443 ssl;
+  http2 on;
+  server_name @PUBLIC_SITE_HOST@;
+  include /etc/nginx/boombala/bb-tls.conf;
+  ssl_certificate     /etc/ssl/boombala/site.fullchain.pem;
+  ssl_certificate_key /etc/ssl/boombala/site.key;
+
+  server_tokens off;
+  client_max_body_size 8k;          # the site accepts forms, never uploads
+  client_body_timeout 10s;
+  client_header_timeout 10s;
+  keepalive_timeout 15s;
+  limit_conn bb_conn 40;
+  add_header Strict-Transport-Security "max-age=31536000" always;
+  add_header X-Content-Type-Options nosniff always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+  include /etc/nginx/boombala/bb-proxy.conf;
+
+  # Called on loopback by the staff application after a news change; never from outside.
+  location = /api/revalidate-news { return 404; }
+
+  # The only API routes the site has. Forms are rate-limited hard; the body is small.
+  location = /api/lead {
+    limit_except POST { deny all; }
+    limit_req zone=bb_forms burst=3 nodelay;
+    proxy_pass http://127.0.0.1:@SITE_PORT@;
+  }
+  location = /api/consent {
+    limit_except POST { deny all; }
+    limit_req zone=bb_forms burst=3 nodelay;
+    proxy_pass http://127.0.0.1:@SITE_PORT@;
+  }
+  location = /api/availability {
+    limit_except GET HEAD { deny all; }
+    limit_req zone=bb_availability burst=20 nodelay;
+    proxy_pass http://127.0.0.1:@SITE_PORT@;
+  }
+  location /api/ { return 404; }
+
+  location / {
+    limit_req zone=bb_pages burst=80 nodelay;
+    proxy_pass http://127.0.0.1:@SITE_PORT@;
+  }
+}

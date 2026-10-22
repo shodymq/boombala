@@ -17,6 +17,7 @@ import { createUser } from "../src/core/users.ts";
 import { beginEnrollment, confirmEnrollment } from "../src/core/mfa.ts";
 import { createPool } from "../src/core/db.ts";
 import { totpAt } from "../src/core/totp.ts";
+import { createSession, revokeSessionsWithoutMfa } from "../src/core/session.ts";
 
 const DB = process.env.DATABASE_URL;
 if (!DB || !/@(127\.0\.0\.1|localhost)[:/]/.test(DB)) throw new Error("DATABASE_URL must point to a LOCAL database");
@@ -186,6 +187,52 @@ try {
     ok(!reasons.includes(ROLE_ADMIN_PW) && !reasons.includes(MFA_KEY), "no secret appears in those logs");
   }
 
+  // ══ 3b. Forged request headers must not change any decision ═══════════════════════════════════════════════
+  console.log("## 3b. forged framework and proxy headers cannot skip the checks");
+  {
+    const FORGED = [
+      { "next-router-prefetch": "1" }, { "next-router-prefetch": "true" }, { "x-middleware-prefetch": "1" }, { purpose: "prefetch" }, { rsc: "1" },
+      { "next-router-state-tree": "%5B%22%22%5D" }, { "next-url": "/login" }, { "x-nextjs-data": "1" },
+      { "x-middleware-subrequest": "middleware" }, { "x-middleware-subrequest": "proxy" }, { "x-middleware-subrequest": "src/middleware" }, { "x-middleware-subrequest": "src/proxy" },
+      { "x-middleware-subrequest": "middleware:middleware:middleware:middleware:middleware" }, { "x-middleware-subrequest": "proxy:proxy:proxy:proxy:proxy" },
+      { "x-forwarded-for": VPN_IP }, { "x-vercel-forwarded-for": VPN_IP }, { forwarded: `for=${VPN_IP}` }, { "x-original-url": "/login" }, { "x-rewrite-url": "/login" },
+      { "next-router-prefetch": "1", "x-middleware-prefetch": "1", purpose: "prefetch", rsc: "1" },
+    ];
+    // a real build asset, taken from the login page the VPN sees
+    const loginPage = await raw(ADMIN.port, "/login", { host: ADMIN.host, ip: VPN_IP });
+    const asset = /\/_next\/static\/[^"' ]+\.js/.exec(loginPage.body)?.[0];
+    ok(!!asset, `found a real build asset (${asset})`);
+    ok((await raw(ADMIN.port, asset, { host: ADMIN.host, ip: VPN_IP })).status === 200, "from the VPN the asset is served");
+    const wrongNet = [{ ip: OUTSIDE_IP }, { ip: undefined }, { ip: "10.78.0.5" }];
+    let bypass = 0, checks = 0;
+    const same = (r, status) => (checks++, r.status === status && r.body === "" && !r.headers["set-cookie"] && !r.headers.location ? 0 : 1);
+    for (const h of FORGED) {
+      for (const net of wrongNet) {
+        for (const p of ["/login", "/contacts", "/", "/api/health", "/api/export", "/api/cron/outbox", "/login/mfa", asset]) {
+          bypass += same(await raw(ADMIN.port, p, { host: ADMIN.host, ip: net.ip, headers: h }), 404);
+        }
+      }
+      bypass += same(await raw(ADMIN.port, "/login", { host: "evil.example", ip: VPN_IP, headers: h }), 421);
+      bypass += same(await raw(ADMIN.port, asset, { host: "evil.example", ip: VPN_IP, headers: h }), 421);
+      for (const p of ["/login", "/login/mfa", "/contacts", "/api/export", "/api/cron/outbox", asset]) {
+        bypass += same(await raw(API.port, p, { host: API.host, ip: OUTSIDE_IP, headers: h }), 404);
+      }
+      bypass += same(await raw(API.port, "/api/health", { host: "evil.example", ip: OUTSIDE_IP, headers: h }), 421);
+      for (const p of ["/login", "/api/health", "/"]) {
+        const r = await raw(BAD.port, p, { host: BAD.host, ip: VPN_IP, headers: h });
+        checks++;
+        if (r.status !== 503 || r.headers["set-cookie"]) bypass++;
+      }
+      bypass += same(await raw(PROD.port, "/login", { host: PROD.host, ip: OUTSIDE_IP, headers: h }), 404);
+      bypass += same(await raw(PROD.port, "/login", { host: "evil.example", ip: VPN_IP, headers: h }), 421);
+    }
+    ok(bypass === 0, `${checks} forged-header requests: none got past role, Host, VPN network or the fail-closed profile (${bypass} bypasses)`);
+    // the forged headers also do not widen a legitimate request into something else
+    const asVpn = await raw(ADMIN.port, "/contacts", { host: ADMIN.host, ip: VPN_IP, headers: { "next-router-prefetch": "1" } });
+    ok(asVpn.status === 307 || asVpn.status === 303 || asVpn.status === 302, "inside the VPN a prefetch header does not turn a missing login into access (redirected to the login)");
+    ok((await raw(API.port, asset, { host: API.host, ip: OUTSIDE_IP })).status === 404, "the public API does not serve the admin's build assets");
+  }
+
   // ══ 4. The public site ══════════════════════════════════════════════════════════════════════════════════════
   console.log("## 4. public site: no staff routes, no staff cookies");
   {
@@ -214,6 +261,7 @@ try {
   };
   const bodyText = async (page) => (await page.locator("body").innerText()).replace(/\s+/g, " ");
   let ownerSecret = "";
+  let enrolCode = "";
   let ownerCodes = [];
   {
     const ctx = await vpnCtx();
@@ -240,7 +288,8 @@ try {
     await finish(page, "000000", "Включить и войти");
     await page.getByText("Неверный код.").waitFor();
     ok(true, "a wrong code is refused");
-    await finish(page, totpAt(ownerSecret, Date.now()), "Включить и войти");
+    enrolCode = totpAt(ownerSecret, Date.now());
+    await finish(page, enrolCode, "Включить и войти");
     await page.locator("[data-testid=recovery-codes]").waitFor();
     ownerCodes = (await page.locator("[data-testid=recovery-codes] li").allInnerTexts()).map((s) => s.trim());
     ok(ownerCodes.length === 10 && ownerCodes.every((c) => /^[A-Z2-9]{5}-[A-Z2-9]{5}$/.test(c)), "ten recovery codes are shown once");
@@ -323,7 +372,7 @@ try {
     await login(page, staff.owner.email);
     await page.waitForURL(/\/login\/mfa/);
     ok((await page.locator("[data-testid=mfa-secret]").count()) === 0, "second visit asks for a code only");
-    await finish(page, totpAt(ownerSecret, Date.now()));
+    await finish(page, enrolCode); // the very code that enrolled the device: its time step is spent
     await page.getByText("Неверный код.").waitFor();
     ok(true, "the code that enrolled the device cannot be replayed");
     await finish(page, ownerCodes[0]);
@@ -335,6 +384,27 @@ try {
     await finish(page, ownerCodes[0]);
     await page.getByText("Неверный код.").waitFor();
     ok(true, "a used recovery code is dead");
+    await ctx.close();
+  }
+
+  // ══ 5b. A session issued before the second factor became mandatory ═══════════════════════════════════════════
+  console.log("## 5b. an old session (password only, issued earlier) is useless once the second factor is mandatory");
+  {
+    // the Editor IS enrolled; this session was issued the old way, without the factor
+    const legacy = await createSession(owner, staff.editor.id, { ip: VPN_IP });
+    const ctx = await vpnCtx();
+    await ctx.addCookies([{ name: "bb_session", value: legacy.token, url: A }]);
+    const page = await ctx.newPage();
+    for (const p of ["/news", "/", "/account"]) {
+      await page.goto(A + p);
+      const t = await bodyText(page);
+      ok(new URL(page.url()).pathname === "/login" && !/Здравствуйте|Новости и акции|Мой пароль/.test(t), `an old session for an enrolled user does not open ${p} (sent to the login)`);
+    }
+    const viaApi = await ctx.request.get(A + "/api/media/00000000-0000-0000-0000-000000000000", { maxRedirects: 0 });
+    ok(viaApi.status() !== 200, "nor the admin API");
+    const ended = await revokeSessionsWithoutMfa(owner);
+    ok(ended >= 1, `the forced revocation ends such sessions for good (${ended})`);
+    ok(Number((await owner.query("SELECT count(*)::int n FROM bb.sessions WHERE token_hash = $1 AND revoked_at IS NOT NULL", [(await import("node:crypto")).createHash("sha256").update(legacy.token).digest()])).rows[0].n) === 1, "the old session is marked ended");
     await ctx.close();
   }
 
