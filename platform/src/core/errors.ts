@@ -29,3 +29,18 @@ export class ConsentUnavailableError extends Error {
     this.name = "ConsentUnavailableError";
   }
 }
+
+export class NotFoundError extends Error {
+  constructor(message = "not_found") {
+    super(message);
+    this.name = "NotFoundError";
+  }
+}
+
+/** Automatic processing was requested but is switched off (or not legally confirmed). Nothing was changed. */
+export class RetentionDisabledError extends Error {
+  constructor() {
+    super("retention_disabled");
+    this.name = "RetentionDisabledError";
+  }
+}

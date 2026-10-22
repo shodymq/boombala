@@ -15,6 +15,8 @@ export const PERMISSIONS = [
   "contacts.export",
   "legal.manage",
   "news.manage",
+  /** Withdrawal of consent, anonymisation and the retention settings: the Owner only. */
+  "privacy.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

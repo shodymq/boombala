@@ -294,6 +294,43 @@ console.log("## 6b. QR form without a phone, with a wrong phone, and repeated");
   ok(leadNoPhone.status === 400, "the birthday enquiry still refuses a missing phone");
 }
 
+// ══ 6c. Withdrawal of consent and anonymisation (Owner only) ═════════════════════════════════════════════════
+console.log("## 6c. withdrawal of consent and anonymisation in the admin");
+{
+  const NAME = `ТЕСТ Отзыв ${run}`;
+  const send = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json", "user-agent": "E2E-Browser" }, body: JSON.stringify({ name: NAME, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+  ok(send.status === 200, "a synthetic QR registration without a phone exists");
+  const id = await scalar("SELECT id v FROM bb.contacts WHERE name = $1", [NAME]);
+  const owner = await newCtx(); await login(owner.page, "owner@qa.test");
+  await owner.page.goto(ADMIN + "/contacts/" + id, { waitUntil: "networkidle" });
+  const section = owner.page.locator("section[aria-labelledby=privacy-h]");
+  ok((await section.innerText()).includes("действует"), "the Owner sees the consent as active");
+  ok((await owner.page.getByRole("button", { name: "Обезличить контакт" }).count()) === 0, "anonymisation is not offered before the consent is withdrawn");
+  await owner.page.getByRole("button", { name: "Отозвать согласие" }).click();
+  await owner.page.waitForURL(/notice=revoked/);
+  ok((await owner.page.locator("main").innerText()).includes("Отзыв согласия записан"), "the withdrawal is confirmed");
+  ok(Number(await scalar("SELECT count(*) v FROM bb.consent_events WHERE contact_id = $1 AND event = 'revoked'", [id])) === 1, "one 'revoked' event was appended");
+  await owner.page.getByRole("button", { name: "Обезличить контакт" }).click();
+  await owner.page.waitForURL(/notice=anonymized/);
+  ok((await owner.page.locator("h1").innerText()).includes("Анонимизировано"), "the card now shows the anonymised contact");
+  ok((await scalar("SELECT (anonymized_at IS NOT NULL AND phone_e164 IS NULL) v FROM bb.contacts WHERE id = $1", [id])) === "true", "name and phone are gone in the database");
+  ok(Number(await scalar("SELECT count(*) v FROM bb.consent_events WHERE contact_id = $1 AND (ip_hash IS NOT NULL OR user_agent IS NOT NULL)", [id])) === 0, "indirect identifiers on the consent history are erased");
+  ok(Number(await scalar("SELECT count(*) v FROM bb.consent_events WHERE contact_id = $1", [id])) >= 3, "the consent history itself is kept");
+  await owner.page.goto(ADMIN + "/retention", { waitUntil: "networkidle" });
+  const rep = await owner.page.locator("main").innerText();
+  ok(rep.includes("Автоматическая обработка: выключена") && rep.includes("dry-run"), "the retention page is a report and shows automatic processing OFF");
+  ok(!rep.includes(NAME), "the report shows no names");
+  await owner.ctx.close();
+
+  const manager = await newCtx(); await login(manager.page, "manager@qa.test");
+  const other = await scalar("SELECT id v FROM bb.contacts WHERE name <> $1 AND anonymized_at IS NULL ORDER BY created_at DESC LIMIT 1", [NAME]);
+  await manager.page.goto(ADMIN + "/contacts/" + other, { waitUntil: "networkidle" });
+  ok((await manager.page.locator("section[aria-labelledby=privacy-h]").count()) === 0, "a manager sees no withdrawal or anonymisation controls");
+  const r = await manager.page.goto(ADMIN + "/retention", { waitUntil: "networkidle" });
+  ok(!new URL(manager.page.url()).pathname.startsWith("/retention") || (r && r.status() >= 400), "a manager cannot open the retention report");
+  await manager.ctx.close();
+}
+
 // ══ 7. Export permissions ═════════════════════════════════════════════════════════════════════════════════════
 console.log("## 7. export is available only to permitted roles");
 {

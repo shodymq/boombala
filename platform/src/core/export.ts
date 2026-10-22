@@ -94,7 +94,8 @@ export async function exportContacts(pool: Pool, actor: Actor, req: ExportReques
       params,
     );
     if (res.rows.length > MAX_ROWS) throw new ValidationError({ to: `Слишком много строк (больше ${MAX_ROWS}): сузьте период` });
-    const logged = { ...req.filters };
+    // The free-text search may be a name or a phone: the log is append-only, so only the fact that one was used is kept.
+    const logged = { ...req.filters, ...(req.filters?.q ? { q: "[redacted]" } : {}) };
     await tx.query(
       "INSERT INTO bb.export_log (user_id, format, date_from, date_to, filters, columns, row_count, ip) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
       [actor.id, req.format, req.from ?? null, req.to ?? null, JSON.stringify(logged), cols, res.rows.length, meta.ip ?? null],

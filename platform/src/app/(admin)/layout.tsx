@@ -10,12 +10,13 @@ const NAV: Array<NavItem & { permission: Permission }> = [
   { href: "/news", label: "Новости", permission: "news.manage" },
   { href: "/contacts", label: "Клиенты", permission: "contacts.view" },
   { href: "/legal", label: "Документы", permission: "legal.manage" },
+  { href: "/retention", label: "Хранение данных", permission: "privacy.manage" },
   { href: "/users", label: "Сотрудники", permission: "users.manage" },
   { href: "/audit", label: "Журнал", permission: "audit.view" },
   { href: "/account", label: "Мой пароль", permission: "dashboard.view" },
 ];
 
-const ORDER = ["/", "/bookings", "/requests", "/news", "/contacts", "/export", "/legal", "/users", "/audit", "/account"];
+const ORDER = ["/", "/bookings", "/requests", "/news", "/contacts", "/export", "/legal", "/retention", "/users", "/audit", "/account"];
 
 const ROLE_LABEL = { owner: "Владелец", manager: "Менеджер", editor: "Редактор" } as const;
 

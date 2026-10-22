@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getContact } from "@/core/crm";
+import { assessContact, type Blocker } from "@/core/privacy";
+import { can } from "@/core/rbac";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { anonymizeContactAction, revokeConsentAction } from "./actions";
 
 export const metadata: Metadata = { title: "Клиент" };
 
@@ -11,20 +14,33 @@ const KIND: Record<string, string> = {
   privacy_policy: "Политика обработки данных", visit_rules: "Правила посещения", companion_duties: "Обязанности сопровождающего",
   personal_data_consent: "Согласие на обработку данных", third_party_escort: "Сопровождение третьим лицом", group_visits: "Групповые посещения",
 };
+const BLOCKER: Record<Blocker, string> = {
+  active_booking: "есть активная бронь",
+  open_enquiry: "есть незакрытая заявка",
+  booking_record: "есть запись о бронировании (срок хранения определяет юрист)",
+  enquiry_record: "есть заявка (срок хранения определяет юрист)",
+};
+const NOTICES: Record<string, string> = { revoked: "Отзыв согласия записан в историю.", anonymized: "Контакт обезличен: имя и телефон удалены." };
+const ERRORS: Record<string, string> = { blocked: "Действие недоступно: данные нужно сохранить.", forbidden: "Недостаточно прав.", failed: "Не удалось выполнить действие." };
 const STATUS: Record<string, string> = { new: "Новая", in_progress: "В работе", confirmed: "Подтверждена", cancelled: "Отменена", completed: "Завершена" };
 
-export default async function ContactPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ContactPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string; error?: string }> }) {
   const { user } = await requirePermission("contacts.view");
   const { id } = await params;
+  const { notice, error } = await searchParams;
   const card = await getContact(getPool(), { id: user.id, role: user.role }, id);
   if (!card) notFound();
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
   const { contact: c } = card;
+  const actor = { id: user.id, role: user.role };
+  const privacy = can(user.role, "privacy.manage") ? await assessContact(getPool(), actor, id) : null;
 
   return (
     <div className="grid gap-5">
       <Link href="/contacts" className="text-sm font-extrabold text-grape-700">← Все клиенты</Link>
       <h1 className="text-3xl font-black tracking-tight text-grape-800">{c.name}</h1>
+      {notice && NOTICES[notice] ? <p role="status" className="rounded-2xl bg-grape-100 p-3 text-sm font-bold text-grape-900">{NOTICES[notice]}</p> : null}
+      {error ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{ERRORS[error] ?? ERRORS.failed}</p> : null}
       <section className="rounded-3xl border border-line bg-white p-5 text-sm">
         <p><b>Телефон:</b> {c.phone ? `${c.phone} (${c.phoneVerification === "verified" ? "подтверждён" : "не подтверждён"})` : "не указан"}</p>
         <p><b>Источник:</b> {c.source}</p>
@@ -60,6 +76,39 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
         </ul>
         <p className="mt-2 text-xs text-muted">Отметка на сайте не является электронной цифровой подписью.</p>
       </section>
+      {privacy ? (
+        <section className="rounded-3xl border border-line bg-white p-5 text-sm" aria-labelledby="privacy-h">
+          <h2 id="privacy-h" className="text-lg font-black text-grape-800">Согласие и хранение данных</h2>
+          {privacy.anonymized ? (
+            <p className="mt-2">Контакт обезличен: имя и телефон удалены, история согласий сохранена без косвенных идентификаторов.</p>
+          ) : (
+            <>
+              <p className="mt-2">Согласие на обработку данных: <b>{privacy.consentActive ? "действует" : "отозвано или не давалось"}</b></p>
+              {privacy.blockers.length ? (
+                <div className="mt-2 rounded-2xl bg-sun-100 p-3 text-grape-900">
+                  <p className="font-bold">Контакт нельзя обезличить сейчас:</p>
+                  <ul className="list-disc pl-5">{privacy.blockers.map((b) => <li key={b}>{BLOCKER[b]}</li>)}</ul>
+                </div>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {privacy.consentActive ? (
+                  <form action={revokeConsentAction}>
+                    <input type="hidden" name="id" value={id} />
+                    <button type="submit" className="h-11 rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50">Отозвать согласие</button>
+                  </form>
+                ) : null}
+                {!privacy.consentActive && privacy.blockers.length === 0 ? (
+                  <form action={anonymizeContactAction}>
+                    <input type="hidden" name="id" value={id} />
+                    <button type="submit" className="h-11 rounded-full bg-grape-700 px-5 text-sm font-extrabold text-white hover:bg-grape-600">Обезличить контакт</button>
+                  </form>
+                ) : null}
+              </div>
+              <p className="mt-2 text-xs text-muted">Обезличивание необратимо: имя и телефон удаляются, история согласий, заявки и брони остаются.</p>
+            </>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }
