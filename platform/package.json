@@ -16,12 +16,16 @@
     "db:migrate": "node --no-warnings scripts/migrate.ts",
     "db:seed": "node --no-warnings scripts/seed.ts",
     "user:create": "node --no-warnings scripts/create-user.ts",
+    "user:mfa-reset": "node --no-warnings scripts/mfa-reset.ts",
+    "user:set-password": "node --no-warnings scripts/set-password.ts",
+    "db:roles": "node --no-warnings scripts/db-roles.ts",
     "e2e": "node --no-warnings e2e/platform.e2e.mjs",
     "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
     "verify:remote": "node --no-warnings scripts/verify-remote.ts",
     "e2e:news": "node --no-warnings e2e/news.e2e.mjs",
     "e2e:release": "node --no-warnings e2e/release.e2e.mjs",
+    "e2e:isolation": "node --no-warnings e2e/isolation.e2e.mjs",
     "backup:check": "node --no-warnings scripts/backup-restore-check.mjs"
   },
   "dependencies": {

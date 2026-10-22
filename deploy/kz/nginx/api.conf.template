@@ -1,0 +1,69 @@
+# PUBLIC API: api.<domain>. The only thing on the internet besides the public site. Only the paths a client needs exist.
+# Listens on the PUBLIC address only. The admin is on another listener (admin.conf) that is not on this address.
+limit_req_zone $binary_remote_addr zone=bb_health:1m rate=30r/m;
+limit_req_zone $binary_remote_addr zone=bb_server:10m rate=120r/m;
+limit_req_zone $binary_remote_addr zone=bb_client:10m rate=12r/m;
+limit_conn_zone $binary_remote_addr zone=bb_conn:10m;
+
+# Browsers may call the API only from the public site. (Reserved for the browser-direct intake: see docs, "changes in code".)
+map $http_origin $bb_cors_origin {
+  default "";
+  "https://@PUBLIC_SITE_HOST@" $http_origin;
+}
+
+# Anything that is not for this host (an IP address, another name, a scanner) gets no certificate and no answer.
+server {
+  listen @PUBLIC_IP@:443 ssl default_server;
+  ssl_reject_handshake on;
+}
+server {
+  listen @PUBLIC_IP@:80 default_server;
+  return 444;
+}
+server {
+  listen @PUBLIC_IP@:80;
+  server_name @API_HOST@;
+  location /.well-known/acme-challenge/ { root /var/www/acme; }
+  location / { return 301 https://$host$request_uri; }
+}
+
+server {
+  listen @PUBLIC_IP@:443 ssl;
+  http2 on;
+  server_name @API_HOST@;
+  include /etc/nginx/boombala/bb-tls.conf;
+  ssl_certificate     /etc/ssl/boombala/api.fullchain.pem;
+  ssl_certificate_key /etc/ssl/boombala/api.key;
+
+  server_tokens off;
+  client_max_body_size 8k;
+  client_body_timeout 10s;
+  client_header_timeout 10s;
+  keepalive_timeout 15s;
+  limit_conn bb_conn 20;
+  add_header Strict-Transport-Security "max-age=31536000" always;
+  add_header X-Content-Type-Options nosniff always;
+  add_header Cache-Control "no-store" always;
+
+  include /etc/nginx/boombala/bb-proxy.conf;
+
+  location = /api/health {
+    limit_req zone=bb_health burst=10 nodelay;
+    proxy_pass http://127.0.0.1:@API_PORT@;
+  }
+
+  # Server-to-server calls of the public site (a shared secret authenticates them) and public reads.
+  location /api/public/ {
+    limit_except GET HEAD { deny all; }
+    limit_req zone=bb_server burst=40 nodelay;
+    proxy_pass http://127.0.0.1:@API_PORT@;
+  }
+  location /api/intake/ {
+    limit_except POST { deny all; }
+    limit_req zone=bb_server burst=20 nodelay;
+    proxy_pass http://127.0.0.1:@API_PORT@;
+  }
+
+  # Everything else does not exist here: no login, no admin pages, no admin API, no cron.
+  location / { return 404; }
+}

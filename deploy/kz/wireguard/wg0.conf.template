@@ -1,0 +1,9 @@
+# WireGuard server (Kazakhstan VPS). Rendered by render.sh; the private key is NOT in this file: it is read from a root-only file.
+# No packet forwarding: a VPN peer reaches THIS server only (the admin app, DNS, SSH), never the internet or the database host.
+# Peers are not listed here. They are kept in the device registry and applied by `wg-staff.sh restore` after every start
+# (see systemd/bb-vpn-peers.service), so adding or revoking a device never needs a config edit and a revoked device cannot come back.
+[Interface]
+Address = @WG_SERVER_ADDR@/24
+ListenPort = @WG_PORT@
+PostUp = wg set %i private-key /etc/wireguard/server.key
+SaveConfig = false

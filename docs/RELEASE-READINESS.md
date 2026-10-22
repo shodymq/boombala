@@ -81,7 +81,7 @@
 2. **Project Name:** `boombala-platform`. **Framework Preset:** Next.js. **Root Directory:** `platform` (Edit → выбрать папку; галочку «Include source files outside of the Root Directory» можно оставить).
 3. **Environment Variables** на этом экране не добавлять (сначала создать). **Deploy**. Первый деплой из `main` не соберётся (в `main` ещё нет `platform/`): это нормально.
 4. **Settings → Build & Deployment → Ignored Build Step → Custom:** `case "$VERCEL_GIT_COMMIT_REF" in feat/platform-*|release/*) exit 1;; *) exit 0;; esac` (собирать ветки `feat/platform-*` и `release/*`, пропускать `main` и остальное).
-5. **Settings → Deployment Protection → Vercel Authentication:** включить для Preview (и для Production, если доступно). **Settings → Domains:** оставить только `*.vercel.app`, `admin.boombala.kz` не добавлять.
+5. **Settings → Deployment Protection → Vercel Authentication:** включить для Preview (и для Production, если доступно). **Settings → Domains:** оставить только `*.vercel.app`, домен админки на домен сайта не добавлять (админка живёт на отдельном нейтральном домене за VPN, см. `docs/platform/ADMIN-ISOLATION-KZ.md`).
 6. **Settings → Environment Variables** (Environment: только **Preview**, переключатель Sensitive):
    - `DATABASE_URL` = Supabase `boombala-test` → Connect → **Transaction pooler** (порт 6543). Пароль: Project Settings → Database (Reset database password, показать один раз).
    - `DATABASE_CA_CERT` = корневой сертификат Supabase (PEM, Project Settings → Database → SSL Configuration → Download certificate).

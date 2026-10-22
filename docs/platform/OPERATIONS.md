@@ -11,7 +11,7 @@
 | Проект | Root directory | Назначение |
 |---|---|---|
 | site | `/` (корень репозитория) | публичный сайт boombala.kz (как сейчас) |
-| platform | `platform/` | закрытая админка + серверные API; отдельный URL (`admin.boombala.kz` или `*.vercel.app`) |
+| platform | `platform/` | закрытая админка + серверные API; отдельный URL: на Preview `*.vercel.app`, в Production отдельный нейтральный домен за VPN (`ADMIN-ISOLATION-KZ.md`) |
 
 Платформа ничего не публикует для поисковиков (`noindex`), cookie сессии ставит только её origin. Сайт обращается к платформе
 **с сервера** (не из браузера).

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { listEnrolledUserIds } from "@/core/mfa";
 import { ROLES } from "@/core/rbac";
 import { listUsers } from "@/core/users";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
-import { changeRoleAction, createUserAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
+import { changeRoleAction, createUserAction, resetMfaAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
 
 export const metadata: Metadata = { title: "Сотрудники" };
 
@@ -14,6 +15,7 @@ const NOTICES: Record<string, string> = {
   active: "Статус изменён.",
   export: "Право на выгрузку изменено. Сотрудника попросят войти заново.",
   password: "Пароль изменён, все сессии сотрудника завершены.",
+  mfa: "Второй фактор сброшен, сессии сотрудника завершены. При следующем входе он включит его заново.",
 };
 
 function errorText(code: string): string {
@@ -35,7 +37,9 @@ const btnGhost = "h-11 rounded-full border-2 border-grape-700 px-4 text-sm font-
 export default async function UsersPage({ searchParams }: { searchParams: Promise<{ notice?: string; error?: string }> }) {
   const { user } = await requirePermission("users.manage");
   const { notice, error } = await searchParams;
-  const users = await listUsers(getPool(), { id: user.id, role: user.role });
+  const actor = { id: user.id, role: user.role };
+  const users = await listUsers(getPool(), actor);
+  const enrolled = await listEnrolledUserIds(getPool(), actor);
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
 
   return (
@@ -94,6 +98,15 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
             ) : u.role === "owner" ? (
               <p className="mt-3 text-sm text-muted">Выгрузка клиентской базы: всегда разрешена</p>
             ) : null}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted">Второй фактор: {enrolled.has(u.id) ? "включён" : "не включён"}</span>
+              {enrolled.has(u.id) && u.id !== user.id ? (
+                <form action={resetMfaAction}>
+                  <input type="hidden" name="id" value={u.id} />
+                  <button type="submit" className={btnGhost}>Сбросить второй фактор</button>
+                </form>
+              ) : null}
+            </div>
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-extrabold text-grape-700">Задать новый пароль</summary>
               <form action={resetPasswordAction} className="mt-2 flex flex-wrap items-center gap-2">

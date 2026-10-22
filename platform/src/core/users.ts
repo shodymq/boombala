@@ -146,6 +146,23 @@ export async function setPassword(
   });
 }
 
+/**
+ * Break-glass, run on the server by an administrator (a locked-out Owner, no other Owner available). Same effect as an
+ * Owner's reset: every session of the person ends. The audit entry names the server console, not a person.
+ */
+export async function resetPasswordFromConsole(pool: Pool, email: string, password: string): Promise<boolean> {
+  const parsed = passwordSchema.safeParse(password);
+  if (!parsed.success) throw new ValidationError({ password: parsed.error.issues[0].message });
+  const passwordHash = await hashPassword(parsed.data);
+  return withTx(pool, async (tx) => {
+    const u = await tx.query<{ id: string }>("UPDATE bb.users SET password_hash = $2, updated_at = now() WHERE email = $1 RETURNING id", [email.trim().toLowerCase(), passwordHash]);
+    if (!u.rows[0]) return false;
+    const ended = await revokeUserSessions(tx, u.rows[0].id);
+    await writeAudit(tx, { actorUserId: null, action: "user.password_changed", entityType: "user", entityId: u.rows[0].id, after: { via: "server_console", sessionsEnded: ended } });
+    return true;
+  });
+}
+
 /** Self-service change: the current password must be proven first. Other devices are signed out, this one stays. */
 export async function changeOwnPassword(
   pool: Pool,

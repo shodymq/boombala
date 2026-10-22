@@ -1,0 +1,9 @@
+# Split-DNS, served ONLY on the VPN address: the admin domain exists for VPN peers and nowhere else.
+# There is NO public DNS record for the admin domain, so the existence of the admin is not advertised.
+# (The ACME DNS-01 challenge needs only a temporary TXT record at the registrar; see README.)
+listen-address=@WG_SERVER_ADDR@
+bind-interfaces
+no-resolv
+no-hosts
+address=/@ADMIN_HOST@/@WG_SERVER_ADDR@
+# Everything else is not answered here: the phone keeps using its own resolver (split tunnel).

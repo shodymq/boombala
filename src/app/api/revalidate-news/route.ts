@@ -7,7 +7,9 @@ export const runtime = "nodejs";
 /** Called by the platform after publish / edit / unpublish / delete so a takedown shows up immediately. */
 export async function POST(request: Request) {
   if (!newsEnabled()) return Response.json({ ok: false }, { status: 404 });
-  const secret = (process.env.PLATFORM_INTAKE_TOKEN ?? "").trim();
+  // A secret of its own (REVALIDATE_TOKEN) so the staff application and the public API do not share one. Until it is set the
+  // old shared token keeps working.
+  const secret = (process.env.REVALIDATE_TOKEN || process.env.PLATFORM_INTAKE_TOKEN || "").trim();
   const given = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? "";
   const same = secret.length >= 24 && timingSafeEqual(createHash("sha256").update(given).digest(), createHash("sha256").update(secret).digest());
   if (!same) return Response.json({ ok: false }, { status: 401 });

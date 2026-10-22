@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { decideExposure, exposureFromEnv, profileProblems } from "./server/exposure.ts";
 
 const https = process.env.PLATFORM_HTTPS === "1";
 const SESSION_COOKIE = https ? "__Host-bb_session" : "bb_session";
@@ -9,8 +10,17 @@ const dev = process.env.NODE_ENV === "development";
  * 2. OPTIMISTIC redirect of visitors without a session cookie. This is only a convenience: real authorization
  *    happens on the server in the data access layer (src/server/dal.ts) for every page and action.
  */
+const exposure = exposureFromEnv();
+const problems = profileProblems();
+if (problems.length) console.error(JSON.stringify({ event: "profile.invalid", problems }));
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  // Fail closed: a production deployment with a wrong configuration serves nothing.
+  if (problems.length) return new NextResponse("Service unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  // What this process may show at all (role, host, source network). Answers carry no body and no hint of what exists.
+  const decision = decideExposure(exposure, { pathname, host: request.headers.get("x-forwarded-host") ?? request.headers.get("host"), realIp: request.headers.get("x-real-ip") });
+  if (!decision.allow) return new NextResponse(null, { status: decision.status, headers: { "Cache-Control": "no-store" } });
   // Machine endpoints authenticate themselves (Bearer secrets) and must not be redirected to the login page.
   const isPublic = pathname === "/login" || pathname === "/api/health" || pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/") || pathname.startsWith("/api/cron/");
   if (!isPublic && !request.cookies.get(SESSION_COOKIE)) {

@@ -36,7 +36,7 @@ PostgreSQL на Supabase (для разработки и MVP). CRM и клиен
 Посетитель ──> boombala.kz (Vercel, проект «site»)
                   │  server-to-server, Bearer PLATFORM_INTAKE_TOKEN (только при включённых флагах)
                   ▼
-Сотрудники ──> admin.boombala.kz (Vercel, проект «platform», root = platform/)
+Сотрудники ──> адрес админки (Vercel Preview `*.vercel.app`; в Production отдельный домен за VPN, см. ADMIN-ISOLATION-KZ.md)
                   │  pg по Transaction pooler (TLS)
                   ▼
               Supabase PostgreSQL (схема bb, RLS, Data API отключить)

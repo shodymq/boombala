@@ -55,7 +55,8 @@ export async function tryDeliver(refId?: string): Promise<void> {
 /** Tells the public site to refresh its cached news pages (best effort: pages also refresh on their own every minute). */
 export async function notifySite(slugs: string[]): Promise<void> {
   const base = (process.env.SITE_REVALIDATE_URL ?? "").trim().replace(/\/+$/, "");
-  const token = process.env.PLATFORM_INTAKE_TOKEN;
+  // The admin deployment holds REVALIDATE_TOKEN only; the shared intake token is the fallback for the current Preview.
+  const token = process.env.REVALIDATE_TOKEN || process.env.PLATFORM_INTAKE_TOKEN;
   if (!/^https?:\/\/[^/]+$/.test(base) || !token) return;
   try {
     const oidcToken = await getVercelOidcToken().catch(() => "");

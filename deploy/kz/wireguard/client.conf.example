@@ -1,0 +1,13 @@
+# One device of one employee. The device generates its own key pair (the WireGuard app does it); the PRIVATE key never leaves the device.
+# AllowedIPs is ONLY the server: this is a split tunnel, the phone's normal internet traffic does not go through the VPN.
+[Interface]
+PrivateKey = <generated on the device, paste it only into the WireGuard app>
+Address = @CLIENT_ADDR@/32
+DNS = @WG_SERVER_ADDR@
+
+[Peer]
+PublicKey = @SERVER_PUBLIC_KEY@
+PresharedKey = @PRESHARED_KEY@
+Endpoint = @VPN_ENDPOINT@:@WG_PORT@
+AllowedIPs = @WG_SERVER_ADDR@/32
+PersistentKeepalive = 25

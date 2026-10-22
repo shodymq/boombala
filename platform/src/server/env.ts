@@ -11,3 +11,11 @@ export function requireDatabaseUrl(): string {
   if (!url) throw new Error("DATABASE_URL is not set");
   return url;
 }
+
+/**
+ * `MFA_MODE=required`: every staff login needs a second factor (TOTP). It is `off` only for local development and the
+ * existing Preview; the Kazakhstan production profile refuses to start without `required` (see server/exposure.ts).
+ */
+export const mfaRequired = process.env.MFA_MODE === "required";
+/** AES-256-GCM key (32 bytes, base64) that encrypts TOTP secrets in the database. Only the admin app has it. */
+export const mfaKey = process.env.MFA_ENC_KEY;
