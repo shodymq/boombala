@@ -219,6 +219,21 @@ for (const prof of PROFILES) {
   await page.locator('input[name="children"]').fill("6");
   await page.locator('input[name="consent"]').check();
 
+  // Preferred time (calendar OFF): three fixed intervals, a wish only, no invented availability or prices.
+  const pt = page.locator('dialog [data-testid="preferred-time"]');
+  ok((await pt.count()) === 1 && (await page.locator('dialog [data-testid="availability"]').count()) === 0, "calendar OFF: the 'Предпочитаемое время' block is shown, the availability panel is not");
+  ok((await pt.locator("[role=radio]").allInnerTexts()).map((t) => t.trim()).join("|") === "10:00–14:00|14:00–18:00|18:00–22:00", "three intervals: 10:00–14:00, 14:00–18:00, 18:00–22:00");
+  ok((await pt.innerText()).includes("Желаемое время. Менеджер подтвердит доступность."), "the note says the manager confirms availability");
+  const ptText = await pt.innerText();
+  ok(!/свободн|занято|₸|Стоимость/i.test(ptText), "no invented availability, free rooms or prices");
+  const ptSmall = await pt.locator("[role=radio]").evaluateAll((bs) => bs.filter((b) => b.getBoundingClientRect().height < 44).length);
+  ok(ptSmall === 0, "each interval is at least 44px tall");
+  await pt.locator('[data-preferred-slot="2"]').click();
+  ok((await pt.locator('[data-preferred-slot="2"]').getAttribute("aria-checked")) === "true", "an interval can be chosen");
+  await pt.locator('[data-preferred-slot="2"]').click();
+  ok((await pt.locator("[role=radio][aria-checked=true]").count()) === 0, "a second tap clears the choice (the wish is optional)");
+  await pt.locator('[data-preferred-slot="2"]').click();
+
   // The server can refuse a field (tampered request, outdated list): the pickers must say so to assistive technology.
   await page.route("**/api/lead", (r) =>
     r.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, error: "validation", fieldErrors: { package: "Выберите пакет", room: "Выберите комнату из списка" } }) }),
@@ -247,9 +262,11 @@ for (const prof of PROFILES) {
   ok(true, "a valid enquiry is accepted");
   const sent = leadRequests.at(-1);
   ok(sent && sent.package === "boom-party" && sent.room === "rapunzel-room" && sent.date === iso && sent.phone.startsWith("+7") && sent.consent === true && sent.children === "6", "the request carries package, room, ISO date, +7 phone and consent");
+  ok(sent && sent.slot === "2", "the chosen interval is sent with the enquiry (slot 2)");
   await page.waitForTimeout(200);
   // With LEAD_PIPELINE=dual the platform (not this script's mock) delivers to Telegram: set SKIP_TELEGRAM_CHECK=1 there.
   if (process.env.SKIP_TELEGRAM_CHECK !== "1") ok(received.some((t) => t.includes("BOOM PARTY") && t.includes("Rapunzel Room")), "Telegram (mock) received the lead with package and room");
+  if (process.env.SKIP_TELEGRAM_CHECK !== "1") ok(received.some((t) => t.includes("Предпочитаемый слот: 14:00–18:00")), "Telegram (mock) received the preferred interval");
 
   // close / focus / scroll restoration / reopen
   await page.getByRole("button", { name: "Закрыть" }).first().click();
