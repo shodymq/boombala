@@ -46,6 +46,11 @@ const consentSchema = z.object({
   name: z.string().trim().min(1, "Укажите имя").max(120, "Слишком длинное имя"),
   /** Optional in the QR form (emergency contact). Empty / missing means "no phone"; a filled value must be a valid number. */
   phone: z.string().trim().max(40, "Проверьте номер телефона").optional().nullable(),
+  /** How many children come with the adult. Only a number: no names, no birth dates, no ID numbers of children are collected. */
+  childrenCount: z.union(
+    [z.number().int().min(1, "Укажите от 1 до 50 детей").max(50, "Укажите от 1 до 50 детей"), z.string().trim().regex(/^\d{1,2}$/, "Укажите от 1 до 50 детей").transform(Number).pipe(z.number().int().min(1, "Укажите от 1 до 50 детей").max(50, "Укажите от 1 до 50 детей"))],
+    { error: "Укажите от 1 до 50 детей" },
+  ),
   acceptRules: z.literal(true, "Необходимо подтвердить ознакомление с правилами"),
   acceptPersonalData: z.literal(true, "Необходимо согласие на обработку данных"),
 });
@@ -164,7 +169,7 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
     docs.push({ kind: "personal_data_consent", id: pd.id });
 
     const contactId = await upsertContact(tx, name, phone, "qr");
-    const created = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_insert_registration($1, $2)", [input.idempotencyKey, contactId]);
+    const created = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_insert_registration($1, $2, $3::smallint)", [input.idempotencyKey, contactId, input.childrenCount]);
     if (!created.rows[0]) {
       const winner = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_find_registration($1)", [input.idempotencyKey]);
       return { registrationId: winner.rows[0].id, seq: Number(winner.rows[0].seq), duplicate: true, documents: await docsFor(winner.rows[0].id) };

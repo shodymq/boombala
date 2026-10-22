@@ -49,6 +49,10 @@ export async function POST(request: Request) {
     if (name.length < 2) fieldErrors.name = "Укажите имя";
     else if (name.length > NAME_MAX) fieldErrors.name = "Слишком длинное имя";
     if (rawPhone && !phone) fieldErrors.phone = "Проверьте номер телефона";
+    // Number of children with the adult: an integer 1..50, nothing else is accepted (the browser's counter is only a convenience).
+    const rawCount = body.childrenCount;
+    const childrenCount = typeof rawCount === "number" ? rawCount : typeof rawCount === "string" && /^\d{1,2}$/.test(rawCount.trim()) ? Number(rawCount.trim()) : NaN;
+    if (!Number.isInteger(childrenCount) || childrenCount < 1 || childrenCount > 50) fieldErrors.childrenCount = "Укажите от 1 до 50 детей";
     if (body.acceptRules !== true) fieldErrors.acceptRules = "Подтвердите, что ознакомились с правилами";
     if (body.acceptPersonalData !== true) fieldErrors.acceptPersonalData = "Необходимо согласие на обработку данных";
     if (Object.keys(fieldErrors).length) return json({ ok: false, error: "validation", fieldErrors }, 400);
@@ -79,6 +83,7 @@ export async function POST(request: Request) {
         idempotencyKey: UUID.test(clip(body.idempotencyKey, 40)) ? clip(body.idempotencyKey, 40) : crypto.randomUUID(),
         name,
         phone,
+        childrenCount,
         acceptRules: true,
         acceptPersonalData: true,
         clientIp: ip,

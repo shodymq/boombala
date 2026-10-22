@@ -87,7 +87,7 @@ for (const [email, role] of [["manager@qa.test", "manager"], ["editor@qa.test", 
   await login(page, email, PW);
   ok(new URL(page.url()).pathname === "/", `${role} signs in`);
   const nav = (await page.locator("nav[aria-label=Разделы]").innerText()).split("\n").map((s) => s.trim()).filter(Boolean);
-  const expectedNav = role === "manager" ? ["Обзор", "Календарь", "Заявки", "Клиенты", "Мой пароль"] : ["Обзор", "Новости", "Мой пароль"];
+  const expectedNav = role === "manager" ? ["Обзор", "Календарь", "Заявки", "Посещаемость", "Клиенты", "Мой пароль"] : ["Обзор", "Новости", "Мой пароль"];
   ok(JSON.stringify(nav) === JSON.stringify(expectedNav), `${role} sees only: ${nav.join(", ")}`);
   for (const path of ["/users", "/audit"]) {
     await page.goto(B + path, { waitUntil: "networkidle" });
@@ -230,7 +230,7 @@ console.log("## CRM: machine endpoints, pages, export (needs PLATFORM_INTAKE_TOK
   const bad = await post("/api/intake/lead", { ...lead, idempotencyKey: crypto.randomUUID(), phone: "12" });
   ok(bad.status === 422, "invalid enquiry is refused (422)");
 
-  const reg = { idempotencyKey: crypto.randomUUID(), name: "E2E QR", phone: "+77470000002", acceptRules: true, acceptPersonalData: true };
+  const reg = { idempotencyKey: crypto.randomUUID(), name: "E2E QR", phone: "+77470000002", childrenCount: 1, acceptRules: true, acceptPersonalData: true };
   const r1 = await post("/api/intake/consent", reg);
   ok(r1.status === 201, "QR registration saved");
   ok((await post("/api/intake/consent", reg)).status === 200, "QR registration is idempotent");

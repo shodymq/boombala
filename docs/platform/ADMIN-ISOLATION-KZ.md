@@ -247,7 +247,7 @@
 
 1. Хостинг: 2FA панели, консоль вне сети, снимки; обновления, `chrony`, пользователи `bbsite`, `bbapi`, `bbadmin`.
 2. `render.sh` с `deploy.env`; `nftables`; WireGuard (`wg genkey` на сервере в `/etc/wireguard/server.key`, 0600); `wg-quick@wg0`, `bb-vpn-peers.service`.
-3. PostgreSQL: конфиг и `pg_hba`; БД и `bb_owner`; `npm run db:migrate` (001…012) под `bb_owner`; `npm run db:roles` (создаёт `bb_api`, `bb_admin`, права и политики); `npm run db:seed`; Owner (`user:create`).
+3. PostgreSQL: конфиг и `pg_hba`; БД и `bb_owner`; `npm run db:migrate` (001…013) под `bb_owner`; `npm run db:roles` (создаёт `bb_api`, `bb_admin`, права и политики); `npm run db:seed`; Owner (`user:create`).
 4. Приложения: готовые сборки сайта и платформы; `site.env`, `api.env`, `admin.env` из примеров (секреты генерируются на сервере); `bb-site`, `bb-api`, `bb-admin`, `bb-outbox.timer`.
 5. nginx: сайт на публичном адресе; админка на адресе VPN; сертификаты; `dnsmasq`.
 6. Резервные копии: `pgbackrest.conf`, stanza, первая полная копия, **тренировка восстановления**.

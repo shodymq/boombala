@@ -279,15 +279,15 @@ console.log("## 6b. QR form without a phone, with a wrong phone, and repeated");
   // repeated and parallel sends of the same key through the real site API create one registration; a second visitor with the same name stays separate
   const key = crypto.randomUUID();
   const REP = `ТЕСТ QR повтор ${run}`;
-  const send = (k, name = REP) => fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, acceptRules: true, acceptPersonalData: true, idempotencyKey: k }) });
+  const send = (k, name = REP) => fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, childrenCount: 1, acceptRules: true, acceptPersonalData: true, idempotencyKey: k }) });
   const results = await Promise.all([send(key), send(key), send(key)]);
   ok(results.every((r) => r.status === 200), "repeated sends of the same key are all answered OK");
   ok((await regs(REP)) === 1, "three parallel sends of one key create one registration");
   ok((await send(crypto.randomUUID())).status === 200 && (await regs(REP)) === 2, "another visitor with the same name and no phone is a separate registration");
   ok(Number(await scalar("SELECT count(DISTINCT c.id) v FROM bb.contacts c WHERE c.name = $1", [REP])) === 2, "they are not merged into one contact");
-  const bad = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: REP, phone: "12345", acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+  const bad = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: REP, phone: "12345", childrenCount: 1, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
   ok(bad.status === 400 && (await bad.json()).fieldErrors?.phone, "the API refuses a wrong phone with a field error");
-  const noConsent = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: REP, acceptRules: true, acceptPersonalData: false, idempotencyKey: crypto.randomUUID() }) });
+  const noConsent = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: REP, childrenCount: 1, acceptRules: true, acceptPersonalData: false, idempotencyKey: crypto.randomUUID() }) });
   ok(noConsent.status === 400, "the personal-data consent is still required without a phone");
   // the enquiry form keeps its phone requirement
   const leadNoPhone = await fetch(SITE + "/api/lead", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "ТЕСТ", date: "2099-01-01", consent: true }) });
@@ -298,7 +298,7 @@ console.log("## 6b. QR form without a phone, with a wrong phone, and repeated");
 console.log("## 6c. withdrawal of consent and anonymisation in the admin");
 {
   const NAME = `ТЕСТ Отзыв ${run}`;
-  const send = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json", "user-agent": "E2E-Browser" }, body: JSON.stringify({ name: NAME, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+  const send = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json", "user-agent": "E2E-Browser" }, body: JSON.stringify({ name: NAME, childrenCount: 1, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
   ok(send.status === 200, "a synthetic QR registration without a phone exists");
   const id = await scalar("SELECT id v FROM bb.contacts WHERE name = $1", [NAME]);
   const owner = await newCtx(); await login(owner.page, "owner@qa.test");

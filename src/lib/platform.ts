@@ -109,6 +109,8 @@ export async function sendConsentToPlatform(input: {
   name: string;
   /** Optional: the QR registration may be made without a phone. */
   phone?: string | null;
+  /** Children who come with the adult, 1..50. Only a number is collected. */
+  childrenCount: number;
   acceptRules: true;
   acceptPersonalData: true;
   clientIp: string;

@@ -66,7 +66,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
 
   it("refuses to collect personal data while the consent text is not published", async () => {
     await assert.rejects(() => submitLead(db.pool, lead()), ConsentUnavailableError);
-    await assert.rejects(() => submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "А", phone: "+77471112233", acceptRules: true, acceptPersonalData: true }), ConsentUnavailableError);
+    await assert.rejects(() => submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "А", phone: "+77471112233", childrenCount: 1, acceptRules: true, acceptPersonalData: true }), ConsentUnavailableError);
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n, 0);
   });
 
@@ -152,7 +152,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
   });
 
   it("QR registration creates a contact and one consent event per document version, and is idempotent", async () => {
-    const input = { idempotencyKey: randomUUID(), name: "Сауле Гость", phone: "+7 701 555 44 33", acceptRules: true as const, acceptPersonalData: true as const };
+    const input = { idempotencyKey: randomUUID(), name: "Сауле Гость", phone: "+7 701 555 44 33", childrenCount: 2, acceptRules: true as const, acceptPersonalData: true as const };
     const r = await submitConsent(db.pool, input, { ip: "198.51.100.1", ipPepper: "p" });
     assert.deepEqual(r.documents.map((d) => d.kind).sort(), ["companion_duties", "personal_data_consent", "visit_rules"]);
     assert.ok(r.documents.every((d) => d.version >= 1));
@@ -164,7 +164,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
   });
 
   describe("QR registration: the phone is optional", () => {
-    const base = () => ({ idempotencyKey: randomUUID(), name: "Гость Безномера", acceptRules: true as const, acceptPersonalData: true as const });
+    const base = () => ({ idempotencyKey: randomUUID(), name: "Гость Безномера", childrenCount: 2, acceptRules: true as const, acceptPersonalData: true as const });
     const contactsOf = async (registrationId: string) =>
       (await db.pool.query("SELECT c.id, c.phone_e164, c.source FROM bb.consent_registrations r JOIN bb.contacts c ON c.id = r.contact_id WHERE r.id = $1", [registrationId])).rows;
 
@@ -265,7 +265,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
 
   it("same person across QR and lead is one contact with two events; same phone, other name stays separate", async () => {
     const phone = "+77025551100";
-    await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "Марат  Иванов", phone, acceptRules: true, acceptPersonalData: true });
+    await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "Марат  Иванов", phone, childrenCount: 1, acceptRules: true, acceptPersonalData: true });
     await submitLead(db.pool, lead({ name: "марат иванов", phone: "8 702 555 11 00" }));
     await submitLead(db.pool, lead({ name: "Ольга Другая", phone }));
     const list = await listContacts(db.pool, owner, { q: "5551100" });
@@ -316,7 +316,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
     });
 
     it("phone numbers keep their +7 and stay TEXT in XLSX (never a number or a formula); CSV keeps the plain value", async () => {
-      await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "+7 Имя с плюсом", phone: "+7 701 000 00 02", acceptRules: true, acceptPersonalData: true });
+      await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "+7 Имя с плюсом", phone: "+7 701 000 00 02", childrenCount: 1, acceptRules: true, acceptPersonalData: true });
       const x = await exportContacts(db.pool, owner, { format: "xlsx", columns: ["name", "phone"], filters: { q: "00 00 02".replace(/ /g, "") } });
       const dir = mkdtempSync(join(tmpdir(), "bbx-"));
       try {
@@ -344,7 +344,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
       assert.equal(guardCell("\t=1"), "'\t=1");
       assert.equal(guardCell("+77471112233"), "+77471112233");
       assert.equal(guardCell("Обычное имя"), "Обычное имя");
-      await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: '=HYPERLINK("http://evil","x")', phone: "+77010000001", acceptRules: true, acceptPersonalData: true });
+      await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: '=HYPERLINK("http://evil","x")', phone: "+77010000001", childrenCount: 1, acceptRules: true, acceptPersonalData: true });
       const csv = await exportContacts(db.pool, owner, { format: "csv", columns: ["name", "phone"], filters: { q: "HYPERLINK" } });
       const text = csv.body.toString("utf8");
       assert.ok(text.startsWith("﻿"));

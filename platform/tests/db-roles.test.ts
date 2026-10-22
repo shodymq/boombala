@@ -28,7 +28,7 @@ const FUTURE = (() => {
 const KEY = Buffer.alloc(32, 21).toString("base64");
 
 /** Tables the public API must never reach. Every table of the schema is either in API_GRANTS or here, so a new table forces a decision. */
-const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log"];
+const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections"];
 
 describe("Database roles: one per application, least privilege", () => {
   let db: TestDb;
@@ -83,10 +83,10 @@ describe("Database roles: one per application, least privilege", () => {
       const lead = await submitLead(api, { idempotencyKey: randomUUID(), name: "Роль Апи", phone: "+77010000777", date: FUTURE, children: 5, consent: true });
       assert.equal(lead.duplicate, false);
       assert.equal((await submitLead(api, { idempotencyKey: randomUUID(), name: "Роль Апи", phone: "+77010000777", date: FUTURE, consent: true })).duplicate, false, "same person, a second enquiry");
-      const qr = await submitConsent(api, { idempotencyKey: randomUUID(), name: "Роль Кьюар", acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.1", ipPepper: "p", userAgent: "UA" });
-      assert.equal((await submitConsent(api, { idempotencyKey: randomUUID(), name: "Роль Кьюар Два", phone: "+7 701 000 07 78", acceptRules: true, acceptPersonalData: true })).duplicate, false);
+      const qr = await submitConsent(api, { idempotencyKey: randomUUID(), name: "Роль Кьюар", childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.1", ipPepper: "p", userAgent: "UA" });
+      assert.equal((await submitConsent(api, { idempotencyKey: randomUUID(), name: "Роль Кьюар Два", phone: "+7 701 000 07 78", childrenCount: 1, acceptRules: true, acceptPersonalData: true })).duplicate, false);
       const key = randomUUID();
-      const burst = await Promise.all(Array.from({ length: 5 }, () => submitConsent(api, { idempotencyKey: key, name: "Роль Гонка", acceptRules: true, acceptPersonalData: true })));
+      const burst = await Promise.all(Array.from({ length: 5 }, () => submitConsent(api, { idempotencyKey: key, name: "Роль Гонка", childrenCount: 1, acceptRules: true, acceptPersonalData: true })));
       assert.equal(new Set(burst.map((b) => b.registrationId)).size, 1, "the per-key lock works for this role too");
       assert.ok(qr.registrationId);
       assert.equal((await dayAvailability(api, FUTURE)).slots.length, 3);
@@ -189,7 +189,7 @@ describe("Database roles: one per application, least privilege", () => {
       let rules: string;
       const contact = async (name: string) => String((await api.query("SELECT bb.intake_upsert_contact($1, $2, NULL, 'qr') AS id", [name, name.toLowerCase()])).rows[0].id);
       const lead = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_lead($1, $2, NULL, NULL, $3::date, NULL, NULL, NULL, NULL, NULL, NULL, NULL)", [randomUUID(), contactId, FUTURE])).rows[0].id);
-      const registration = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_registration($1, $2)", [randomUUID(), contactId])).rows[0].id);
+      const registration = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_registration($1, $2, 2::smallint)", [randomUUID(), contactId])).rows[0].id);
       const consents = async (where: string, id: string) => (await db.pool.query(`SELECT count(*)::int n FROM bb.consent_events WHERE ${where} = $1`, [id])).rows[0].n;
 
       before(async () => {
@@ -372,7 +372,7 @@ describe("Database roles: one per application, least privilege", () => {
         await denied(api, `SELECT last_value FROM bb.${q.relname}`);
       }
       // and the intake still works, because the functions run as their owner
-      assert.ok((await submitConsent(api, { idempotencyKey: randomUUID(), name: "Последовательность Ок", acceptRules: true, acceptPersonalData: true })).registrationId);
+      assert.ok((await submitConsent(api, { idempotencyKey: randomUUID(), name: "Последовательность Ок", childrenCount: 1, acceptRules: true, acceptPersonalData: true })).registrationId);
       assert.ok((await submitLead(api, { idempotencyKey: randomUUID(), name: "Последовательность Ок", phone: "+77010000333", date: FUTURE, consent: true })).leadId);
     });
 
@@ -433,7 +433,7 @@ describe("Database roles: one per application, least privilege", () => {
       await resetUserMfa(admin, owner2(), staff.id);
 
       // CRM, privacy
-      const q = await submitConsent(api, { idempotencyKey: randomUUID(), name: "Для Роли Админ", acceptRules: true, acceptPersonalData: true });
+      const q = await submitConsent(api, { idempotencyKey: randomUUID(), name: "Для Роли Админ", childrenCount: 1, acceptRules: true, acceptPersonalData: true });
       const contactId = String((await db.pool.query("SELECT contact_id v FROM bb.consent_registrations WHERE id = $1", [q.registrationId])).rows[0].v);
       assert.ok((await listContacts(admin, owner2(), {})).total >= 1);
       assert.equal((await revokeConsent(admin, owner2(), contactId)).revokedDocuments, 1);

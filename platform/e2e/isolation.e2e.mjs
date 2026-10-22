@@ -291,7 +291,7 @@ try {
     const strict = await post(SITE_STRICT, "/api/lead", body("+77010000602"));
     ok(strict.status === 502 && strict.body.includes("delivery_failed"), `a safe configuration with intake switched OFF still takes nothing (refused, not sent anywhere else) [${strict.status} ${strict.body.slice(0, 80)}]`);
     ok((await leads()) === 0 && telegramHits === beforeHits, "...and nothing is stored or sent");
-    ok((await post(SITE_STRICT, "/api/consent", JSON.stringify({ name: LEAD_NAME, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }))).status === 503, "the registration route refuses too while its own flag is off");
+    ok((await post(SITE_STRICT, "/api/consent", JSON.stringify({ name: LEAD_NAME, childrenCount: 1, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }))).status === 503, "the registration route refuses too while its own flag is off");
 
     // the rollback deployment: pages yes, forms never, even with the legacy Telegram variables copied into it
     const hitsBeforeRollback = telegramHits;

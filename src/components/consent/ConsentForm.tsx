@@ -12,6 +12,10 @@ interface Doc {
   body: string;
 }
 
+const MAX_KIDS = 50;
+const stepBtn =
+  "flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 border-grape-300 bg-white font-display text-3xl font-black leading-none text-grape-800 transition-colors hover:bg-grape-50 active:bg-grape-100 disabled:cursor-not-allowed disabled:opacity-40";
+
 const field =
   "h-12 w-full rounded-2xl border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none disabled:bg-grape-50 aria-[invalid=true]:border-lava-500";
 
@@ -37,6 +41,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [kids, setKids] = useState("1");
   // A tick belongs to the editions it was given for: when the documents change, the ticks stop counting by themselves.
   const sig = documents.map((d) => `${d.kind}:${d.version}`).join("|");
   const [rulesSig, setRulesSig] = useState<string | null>(null);
@@ -48,6 +53,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<Status>("idle");
   const [savedDocs, setSavedDocs] = useState<Doc[]>([]);
+  const [savedKids, setSavedKids] = useState(1);
   const inFlight = useRef(false);
   const key = useRef<string | null>(null);
   const rulesDocs = documents.filter((d) => d.kind !== "personal_data_consent");
@@ -62,6 +68,8 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
     const national = phoneDigits(phone);
     if (name.trim().length < 2) next.name = "Укажите имя";
     if (national.length > 0 && national.length !== 10) next.phone = "Введите 10 цифр после +7 или оставьте поле пустым";
+    const kidsNumber = /^\d{1,2}$/.test(kids) ? Number(kids) : NaN;
+    if (!(kidsNumber >= 1 && kidsNumber <= MAX_KIDS)) next.childrenCount = `Укажите от 1 до ${MAX_KIDS} детей`;
     if (!rules) next.acceptRules = "Подтвердите, что ознакомились с правилами";
     if (!data) next.acceptPersonalData = "Необходимо согласие на обработку данных";
     setErrors(next);
@@ -80,6 +88,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
         body: JSON.stringify({
           name,
           ...(national ? { phone: `+7${national}` } : {}),
+          childrenCount: Number(kids),
           acceptRules: true,
           acceptPersonalData: true,
           website: honeypot,
@@ -90,6 +99,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
       const body = await res.json().catch(() => ({}));
       if (res.ok && body.ok === true) {
         setSavedDocs(documents);
+        setSavedKids(Number(kids));
         return setStatus("success");
       }
       if (res.status === 409 && body.error === "documents_changed") {
@@ -123,6 +133,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
             </li>
           ))}
         </ul>
+        <p className="text-sm">Детей с вами: <b>{savedKids}</b>. Количество фактически вошедших подтверждает администратор на входе.</p>
         <p className="text-sm text-muted">Это не бронирование и не отметка о посещении.</p>
       </div>
     );
@@ -169,6 +180,36 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
               <input id={`${uid}-phone`} name="phone" type="tel" inputMode="tel" autoComplete="tel-national" placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} {...inv("phone")} />
             </div>
             {err("phone")}
+          </div>
+          <div role="group" aria-labelledby={`${uid}-kids-label`} className="grid gap-2">
+            <span id={`${uid}-kids-label`} className="font-display text-sm font-extrabold text-grape-800">
+              Сколько детей с вами? <span className="font-normal text-muted">(обязательно)</span>
+            </span>
+            <div className="flex items-center gap-3">
+              <button type="button" aria-label="Уменьшить количество детей" disabled={!(Number(kids) > 1)} onClick={() => setKids(String(Math.max(1, (Number(kids) || 1) - 1)))} className={stepBtn}>
+                −
+              </button>
+              <input
+                name="childrenCount"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="off"
+                maxLength={2}
+                aria-labelledby={`${uid}-kids-label`}
+                aria-describedby={`${uid}-kids-hint`}
+                value={kids}
+                onChange={(e) => setKids(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                onBlur={() => setKids(String(Math.min(MAX_KIDS, Math.max(1, Number(kids) || 1))))}
+                className="h-14 w-20 rounded-2xl border-2 border-grape-200 bg-white text-center font-display text-2xl font-black text-grape-800 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500"
+                {...inv("childrenCount")}
+              />
+              <button type="button" aria-label="Увеличить количество детей" disabled={!(Number(kids) < MAX_KIDS)} onClick={() => setKids(String(Math.min(MAX_KIDS, (Number(kids) || 0) + 1)))} className={stepBtn}>
+                +
+              </button>
+            </div>
+            <p id={`${uid}-kids-hint`} className="text-xs leading-relaxed text-muted">От 1 до {MAX_KIDS}. Нужно только количество: имена, даты рождения и документы детей не запрашиваются.</p>
+            {err("childrenCount")}
           </div>
           <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
             <input tabIndex={-1} autoComplete="off" name="website" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
