@@ -141,39 +141,39 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
 
   const err = (k: string) => (errors[k] ? <p id={`${uid}-${k}-err`} className="mt-1.5 text-sm font-semibold text-[#b3261e]">{errors[k]}</p> : null);
   const inv = (k: string) => (errors[k] ? { "aria-invalid": true as const, "aria-describedby": `${uid}-${k}-err`, "data-consent-invalid": true } : {});
+  const DOC_LABEL: Record<string, string> = {
+    visit_rules: "Правила посещения",
+    companion_duties: "Обязанности сопровождающего",
+    personal_data_consent: "Согласие на обработку персональных данных",
+  };
+  const docLabel = (d: Doc) => DOC_LABEL[d.kind] ?? d.title;
+  // A compact, collapsible row: the full text of the edition the visitor sees (and consents to) opens in place.
   const docCard = (d: Doc) => (
-    <details key={d.kind} className="rounded-2xl border border-grape-200 bg-white" data-doc-kind={d.kind}>
-      <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-        <span className="font-display text-sm font-extrabold text-grape-800">{d.title}</span>
-        <span className="shrink-0 rounded-full bg-grape-50 px-3 py-1 text-xs font-bold text-grape-700">редакция {d.version}</span>
+    <details key={d.kind} className="rounded-xl border border-grape-200 bg-white" data-doc-kind={d.kind}>
+      <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-sm">
+        <span className="font-bold text-grape-800 underline decoration-grape-300 underline-offset-4">{docLabel(d)}</span>
+        <span className="shrink-0 rounded-full bg-grape-50 px-2.5 py-0.5 text-xs font-bold text-grape-700">редакция {d.version}</span>
       </summary>
-      <div tabIndex={0} role="region" aria-label={`${d.title}, полный текст`} className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-grape-100 px-4 py-3 text-sm leading-relaxed text-grape-900">
+      <div tabIndex={0} role="region" aria-label={`${docLabel(d)}, полный текст`} className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-grape-100 px-3 py-3 text-sm leading-relaxed text-grape-900">
         {d.body}
       </div>
     </details>
   );
-  const heading = (n: string, label: string) => (
-    <h2 className="flex items-center gap-3 font-display text-lg font-black text-grape-800">
-      <span aria-hidden="true" className="rounded-full bg-grape-100 px-2.5 py-0.5 text-xs font-black text-grape-600">{n}</span>
-      {label}
-    </h2>
-  );
 
   return (
-    <form onSubmit={onSubmit} noValidate aria-busy={busy} className="mt-6 grid gap-6">
-      <fieldset disabled={busy} className="grid gap-6 border-0 p-0">
-        <section className="grid gap-4" aria-label="Ваши данные">
-          {heading("01", "Ваши данные")}
+    <form onSubmit={onSubmit} noValidate aria-busy={busy} className="grid gap-5">
+      <fieldset disabled={busy} className="grid gap-5 border-0 p-0">
+        <div className="grid gap-5" role="group" aria-label="Данные сопровождающего">
           <div className="grid gap-2">
             <label htmlFor={`${uid}-name`} className="font-display text-sm font-extrabold text-grape-800">
-              Ваше имя <span className="font-normal text-muted">(взрослый сопровождающий)</span>
+              Имя сопровождающего
             </label>
             <input id={`${uid}-name`} name="name" autoComplete="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} className={field} {...inv("name")} />
             {err("name")}
           </div>
           <div className="grid gap-2">
             <label htmlFor={`${uid}-phone`} className="font-display text-sm font-extrabold text-grape-800">
-              Телефон для экстренной связи <span className="font-normal text-muted">(необязательно)</span>
+              Телефон <span className="font-normal text-muted">(необязательно)</span>
             </label>
             <div className="relative">
               <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-grape-800">+7</span>
@@ -208,22 +208,15 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
                 +
               </button>
             </div>
-            <p id={`${uid}-kids-hint`} className="text-xs leading-relaxed text-muted">От 1 до {MAX_KIDS}. Нужно только количество: имена, даты рождения и документы детей не запрашиваются.</p>
+            <p id={`${uid}-kids-hint`} className="text-xs leading-relaxed text-muted">От 1 до {MAX_KIDS}. Другие данные о детях не нужны.</p>
             {err("childrenCount")}
           </div>
           <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
             <input tabIndex={-1} autoComplete="off" name="website" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
           </div>
-        </section>
+        </div>
 
-        <section className="grid gap-3" aria-label="Документы">
-          {heading("02", "Документы")}
-          <p className="text-sm text-muted">Откройте документ, чтобы прочитать полный текст. Редакция указана рядом с названием.</p>
-          {[...rulesDocs, ...(dataDoc ? [dataDoc] : [])].map(docCard)}
-        </section>
-
-        <section className="grid gap-4" aria-label="Подтверждения">
-          {heading("03", "Подтверждения")}
+        <div className="grid gap-4 border-t border-grape-100 pt-5" role="group" aria-label="Документы и подтверждения">
           {stale ? (
             <p role="alert" className="rounded-2xl border border-sun-300 bg-sun-100 px-4 py-3 text-sm font-semibold text-grape-900">
               Документы были обновлены, ваши подтверждения сняты. Прочитайте новую редакцию и подтвердите заново.
@@ -234,6 +227,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
               <input type="checkbox" name="acceptRules" checked={rules} onChange={(e) => setRulesSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptRules")} />
               <span>Я ознакомился(ась) с правилами посещения{rulesDocs.length > 1 ? " и обязанностями сопровождающего" : ""}.</span>
             </label>
+            <div className="ml-9 mt-1 grid gap-2">{rulesDocs.map(docCard)}</div>
             {err("acceptRules")}
           </div>
           <div>
@@ -241,9 +235,10 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
               <input type="checkbox" name="acceptPersonalData" checked={data} onChange={(e) => setDataSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptPersonalData")} />
               <span>Я даю согласие на обработку моих персональных данных.</span>
             </label>
+            {dataDoc ? <div className="ml-9 mt-1 grid gap-2">{docCard(dataDoc)}</div> : null}
             {err("acceptPersonalData")}
           </div>
-        </section>
+        </div>
       </fieldset>
 
       <div aria-live="polite" className="grid gap-2">
@@ -258,6 +253,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
       <button type="submit" disabled={busy} className={buttonClass("primary", "w-full disabled:opacity-60")}>
         {busy ? "Сохраняем…" : status === "error" || status === "rate" ? "Попробовать снова" : "Зарегистрироваться"}
       </button>
+      <p className="text-center text-xs text-muted" data-testid="consent-operator">Оператор персональных данных: ИП Аманов</p>
     </form>
   );
 }
