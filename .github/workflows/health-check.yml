@@ -1,0 +1,30 @@
+name: Production health check
+
+# External monitor of the public site and the platform. No secrets are used: both endpoints are public and reveal nothing.
+# A failed run notifies the repository owner by e-mail (GitHub's default for scheduled workflows). The platform's /api/health runs
+# SELECT 1 on the database, so this also shows that the database is awake and reachable (a free Supabase project pauses when idle).
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Platform and database
+        run: |
+          body=$(curl -fsS --max-time 20 --retry 2 --retry-delay 5 https://boombala-platform.vercel.app/api/health)
+          echo "$body"
+          echo "$body" | grep -q '"ok":true'
+      - name: Public site
+        run: |
+          for path in / /birthdays /menu /privacy; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 5 "https://boombala.kz$path")
+            echo "$path $code"
+            [ "$code" = "200" ]
+          done
