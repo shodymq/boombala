@@ -1,0 +1,43 @@
+name: Verify live Boom Bala privacy (read only)
+on:
+  push:
+    branches:
+      - qa/privacy-prod-verify-89ea220
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+jobs:
+  privacy-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public privacy page without printing personal data
+        env:
+          NODE_NO_WARNINGS: "1"
+        run: |
+          node <<'NODE'
+          (async () => {
+            const url = 'https://boombala.kz/privacy?liveqa=' + Date.now();
+            const response = await fetch(url, {
+              headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+              redirect: 'follow',
+              signal: AbortSignal.timeout(15000),
+            });
+            const html = await response.text();
+            const checks = {
+              status200: response.status === 200,
+              ruPolicyHeading: html.includes('Политика обработки персональных данных Boom Bala'),
+              kkPolicyHeading: html.includes('Boom Bala дербес деректерді өңдеу саясаты'),
+              fullOperatorIin: /ИИН\s*\d{12}/.test(html),
+              registeredAddress: html.includes('Адрес регистрации ИП:'),
+              noMissingRequisitesWarning: !html.includes('Полные реквизиты ИП ещё не настроены'),
+              noOldBinPlaceholder: !html.includes('Реквизиты оператора данных (наименование юридического лица, БИН)'),
+            };
+            console.log('HTTP status:', response.status);
+            console.log('Deployment/cache header:', response.headers.get('x-vercel-cache') || 'n/a');
+            for (const [key, ok] of Object.entries(checks)) console.log(key + ': ' + (ok ? 'PASS' : 'FAIL'));
+            if (Object.values(checks).some(ok => !ok)) process.exitCode = 1;
+          })().catch(error => { console.error('Remote page could not be verified: ' + error.name); process.exitCode = 1; });
+          NODE
