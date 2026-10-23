@@ -1,0 +1,107 @@
+name: QR to attendance — isolated browser E2E
+
+# Only the one-off QA branch; never enables Production flags, never uses Production secrets.
+on:
+  push:
+    branches:
+      - qa/qr-attendance-smoke
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qr-to-attendance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:qa-synthetic-password@127.0.0.1:5432/boombala_qa
+      PLATFORM_URL: http://127.0.0.1:3100
+      SITE_URL: http://127.0.0.1:3000
+      PLATFORM_INTAKE_TOKEN: qa-isolated-synthetic-token-2026-very-long
+      CONSENT_FORM_ENABLED: "1"
+      PII_INTAKE_ENABLED: "1"
+      E2E_PASSWORD: QaSyntheticOnlyPassword2026
+      TELEGRAM_NOTIFY_LEVEL: minimal
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: qa-synthetic-password
+          POSTGRES_DB: boombala_qa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d boombala_qa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.21.0"
+
+      - name: Install app dependencies
+        run: |
+          npm ci
+          npm ci --prefix platform
+
+      - name: Migrate disposable database and seed catalog
+        run: |
+          cd platform
+          npm run db:migrate
+          npm run db:seed
+
+      - name: Create synthetic staff users and published TEST document versions
+        run: |
+          cd platform
+          for role in owner manager editor; do
+            BB_PASSWORD="$E2E_PASSWORD" npm run user:create -- --email "$role@qa.test" --name "QA ${role^}" --role "$role"
+          done
+          mkdir -p /tmp/boombala-qa-docs
+          printf '# QA visit rules (not for visitors)\nSynthetic test rules: adult supervises child.\n' > /tmp/boombala-qa-docs/visit_rules.md
+          printf '# QA data consent (not for visitors)\nSynthetic names only. No real people, no external transfer, disposable database.\n' > /tmp/boombala-qa-docs/personal_data_consent.md
+          OWNER_EMAIL=owner@qa.test npm run legal:load -- --dir /tmp/boombala-qa-docs --publish
+
+      - name: Select Chromium browser
+        run: |
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$chrome" ]; then
+            npx --yes playwright@1.64.1 install chromium
+            chrome="$(find "$HOME/.cache/ms-playwright" -type f \( -path '*/chrome-linux64/chrome' -o -path '*/chrome-linux/chrome' \) -print -quit)"
+          fi
+          test -x "$chrome"
+          echo "E2E_CHROME=$chrome" >> "$GITHUB_ENV"
+
+      - name: Start both local applications
+        run: |
+          (cd platform && nohup npm run dev -- --hostname 127.0.0.1 > /tmp/boombala-platform-qa.log 2>&1 < /dev/null &)
+          (nohup npm run dev -- --hostname 127.0.0.1 > /tmp/boombala-site-qa.log 2>&1 < /dev/null &)
+          ready=0
+          for i in $(seq 1 90); do
+            if curl --silent --fail --max-time 2 http://127.0.0.1:3100/api/health >/dev/null && curl --silent --fail --max-time 3 http://127.0.0.1:3000/consent >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then
+            tail -n 90 /tmp/boombala-platform-qa.log || true
+            tail -n 90 /tmp/boombala-site-qa.log || true
+            exit 1
+          fi
+
+      - name: E2E QR registration → staff /attendance → 2 actually entered
+        run: npm run e2e:attendance --prefix platform
+
+      - name: Server logs on failure
+        if: failure()
+        run: |
+          echo 'Platform log tail:'
+          tail -n 90 /tmp/boombala-platform-qa.log || true
+          echo 'Site log tail:'
+          tail -n 90 /tmp/boombala-site-qa.log || true
