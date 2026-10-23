@@ -44,3 +44,4 @@ next-env.d.ts
 # safety: mistyped env filename must never be committed
 local.env
 env.local
+/dist
