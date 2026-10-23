@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { privacyPolicy, type PolicyText } from "@/content/privacy";
+import { privacyPolicy, privacyPolicyKz, type PolicyText } from "@/content/privacy";
 import { Container } from "@/components/ui/Container";
 
 export const metadata: Metadata = {
@@ -67,6 +67,8 @@ function Policy({ id, lang, text }: { id: string; lang: "ru" | "kk"; text: Polic
 }
 
 export default function PrivacyPage() {
+  // The Kazakhstan deployment publishes the text for its own scheme (storage and processing in Kazakhstan, Telegram without personal data).
+  const policy = process.env.SITE_PROFILE === "kz-production" ? privacyPolicyKz : privacyPolicy;
   return (
     <section aria-label="Политика обработки персональных данных" className="py-12 md:py-20">
       <Container>
@@ -81,8 +83,8 @@ export default function PrivacyPage() {
             <a href="#ru" className="underline decoration-sun-400 decoration-2 underline-offset-2">Русский</a>
             <a href="#kk" className="underline decoration-sun-400 decoration-2 underline-offset-2">Қазақша</a>
           </nav>
-          <Policy id="ru" lang="ru" text={privacyPolicy.ru} />
-          <Policy id="kk" lang="kk" text={privacyPolicy.kk} />
+          <Policy id="ru" lang="ru" text={policy.ru} />
+          <Policy id="kk" lang="kk" text={policy.kk} />
         </div>
       </Container>
     </section>

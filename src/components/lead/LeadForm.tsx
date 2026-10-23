@@ -24,6 +24,9 @@ import { useSelectedPackage } from "./SelectedPackage";
 import { AvailabilityPanel, calendarEnabled } from "@/components/booking/AvailabilityPanel";
 import { PreferredTime } from "@/components/booking/PreferredTime";
 
+/** Inlined at build time: the artifact for the Kazakhstan server is built with NEXT_PUBLIC_SITE_PROFILE=kz-production. */
+const KZ_PROFILE = process.env.NEXT_PUBLIC_SITE_PROFILE === "kz-production";
+
 /** A random UUID; `crypto.randomUUID` exists only in secure contexts, so fall back to getRandomValues. */
 function newKey(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -435,8 +438,17 @@ export function LeadForm({
             </span>
           </label>
           <p className="mt-1.5 pl-8 text-xs leading-relaxed text-muted">
-            Имя и телефон из заявки передаются сотрудникам Boom Bala через сервис Telegram; обработка может происходить за пределами Республики Казахстан. Передача не означает согласия на публикацию или рекламу ваших данных.
-            <span lang="kk" className="block">Өтінімдегі ат пен телефон қызметкерлерге Telegram сервисі арқылы жіберіледі; деректер Қазақстаннан тыс жерде өңделуі мүмкін. Бұл деректерді жариялауға немесе жарнамалауға келісім емес.</span>
+            {KZ_PROFILE ? (
+              <>
+                Имя и телефон из заявки сохраняются в CRM Boom Bala на сервере в Республике Казахстан. В Telegram сотрудникам уходит только уведомление без имени и телефона.
+                <span lang="kk" className="block">Өтінімдегі ат пен телефон Boom Bala CRM-ында Қазақстан Республикасындағы серверде сақталады. Telegram-ға қызметкерлерге тек ат пен телефонсыз хабарландыру жіберіледі.</span>
+              </>
+            ) : (
+              <>
+                Имя и телефон из заявки передаются сотрудникам Boom Bala через сервис Telegram; обработка может происходить за пределами Республики Казахстан. Передача не означает согласия на публикацию или рекламу ваших данных.
+                <span lang="kk" className="block">Өтінімдегі ат пен телефон қызметкерлерге Telegram сервисі арқылы жіберіледі; деректер Қазақстаннан тыс жерде өңделуі мүмкін. Бұл деректерді жариялауға немесе жарнамалауға келісім емес.</span>
+              </>
+            )}
           </p>
           {err("consent")}
         </div>
