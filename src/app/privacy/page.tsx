@@ -27,15 +27,22 @@ const p = "mt-3 text-base leading-relaxed text-grape-900 md:text-lg";
 
 export const dynamic = "force-dynamic";
 
-/** Operator requisites come from the environment, not from the repository. Missing values are simply left out. */
+/** Public operator details are read from private runtime variables; never silently publish a partial identity. */
+function legalOperator() {
+  const name = process.env.LEGAL_OPERATOR_NAME?.trim() ?? "";
+  const iin = process.env.LEGAL_OPERATOR_IIN?.trim() ?? "";
+  const address = process.env.LEGAL_OPERATOR_REG_ADDRESS?.trim() ?? "";
+  if (name.length < 5 || !/^\\d{12}$/.test(iin) || address.length < 10) return null;
+  return { name, iin, address };
+}
 function operator(lang: "ru" | "kk"): string {
-  const name = process.env.LEGAL_OPERATOR_NAME?.trim();
-  const iin = process.env.LEGAL_OPERATOR_IIN?.trim();
-  const address = process.env.LEGAL_OPERATOR_REG_ADDRESS?.trim();
-  if (lang === "ru") {
-    return `Оператор: ИП «АМАНОВ»${name ? `, ${name}` : ""}${iin ? ` (ИИН ${iin})` : ""}.${address ? ` Адрес регистрации ИП: ${address}.` : ""}`;
-  }
-  return `Оператор: «АМАНОВ» ЖК${name ? `, ${name}` : ""}${iin ? ` (ЖСН ${iin})` : ""}.${address ? ` ЖК тіркеу мекенжайы: ${address}.` : ""}`;
+  const data = legalOperator();
+  if (!data) return lang === "ru"
+    ? "Оператор: ИП «АМАНОВ». Полные регистрационные реквизиты временно недоступны на сайте; их необходимо разместить до запуска электронной регистрации."
+    : "Оператор: «АМАНОВ» ЖК. Толық тіркеу деректемелері сайтта уақытша қолжетімсіз; олар электрондық тіркеуді іске қосуға дейін жариялануы тиіс.";
+  return lang === "ru"
+    ? `Оператор: ИП «АМАНОВ», ${data.name} (ИИН ${data.iin}). Адрес регистрации ИП: ${data.address}.`
+    : `Оператор: «АМАНОВ» ЖК, ${data.name} (ЖСН ${data.iin}). ЖК тіркеу мекенжайы: ${data.address}.`;
 }
 
 function Policy({ id, lang, text }: { id: string; lang: "ru" | "kk"; text: PolicyText }) {
@@ -64,6 +71,12 @@ export default function PrivacyPage() {
     <section aria-label="Политика обработки персональных данных" className="py-12 md:py-20">
       <Container>
         <div className="max-w-3xl">
+          {!legalOperator() && (
+            <p role="alert" className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-grape-900">
+              Полные реквизиты ИП ещё не настроены. Новая редакция политики не готова к использованию при сборе данных.
+              <span lang="kk" className="mt-1 block">ЖК толық деректемелері әлі орнатылмаған. Деректерді жинау үшін бұл редакция дайын емес.</span>
+            </p>
+          )}
           <nav aria-label="Язык / Тіл" className="mb-6 flex gap-4 text-sm font-semibold text-grape-700">
             <a href="#ru" className="underline decoration-sun-400 decoration-2 underline-offset-2">Русский</a>
             <a href="#kk" className="underline decoration-sun-400 decoration-2 underline-offset-2">Қазақша</a>
