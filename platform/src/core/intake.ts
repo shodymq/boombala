@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Client, Pool } from "./db.ts";
 import { withTx } from "./db.ts";
 import { almatyToday, isValidDate } from "./dates.ts";
-import { ConsentUnavailableError, ValidationError } from "./errors.ts";
+import { ConsentUnavailableError, DocumentsChangedError, ValidationError } from "./errors.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
 
 export interface IntakeMeta {
@@ -51,6 +51,11 @@ const consentSchema = z.object({
     [z.number().int().min(1, "Укажите от 1 до 50 детей").max(50, "Укажите от 1 до 50 детей"), z.string().trim().regex(/^\d{1,2}$/, "Укажите от 1 до 50 детей").transform(Number).pipe(z.number().int().min(1, "Укажите от 1 до 50 детей").max(50, "Укажите от 1 до 50 детей"))],
     { error: "Укажите от 1 до 50 детей" },
   ),
+  /**
+   * The editions the visitor was shown, kind -> version. When given, they are compared INSIDE the transaction with the editions
+   * that are about to be recorded: a consent is never stored for an edition the visitor did not see.
+   */
+  documentVersions: z.record(z.string(), z.number().int()).optional(),
   acceptRules: z.literal(true, "Необходимо подтвердить ознакомление с правилами"),
   acceptPersonalData: z.literal(true, "Необходимо согласие на обработку данных"),
 });
@@ -161,12 +166,18 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
     const rules = await publishedDoc(tx, "visit_rules");
     const pd = await publishedDoc(tx, "personal_data_consent");
     if (!rules || !pd) throw new ConsentUnavailableError();
-    const docs: Array<{ kind: string; id: string }> = [{ kind: "visit_rules", id: rules.id }];
+    const docs: Array<{ kind: string; id: string; version: number }> = [{ kind: "visit_rules", id: rules.id, version: rules.version }];
     for (const kind of ACK_KINDS.filter((k) => k !== "visit_rules")) {
       const d = await publishedDoc(tx, kind);
-      if (d) docs.push({ kind, id: d.id });
+      if (d) docs.push({ kind, id: d.id, version: d.version });
     }
-    docs.push({ kind: "personal_data_consent", id: pd.id });
+    docs.push({ kind: "personal_data_consent", id: pd.id, version: pd.version });
+    // The check and the writes below are ONE transaction on these very rows: the consent is recorded against exactly the editions compared here,
+    // and intake_add_consent re-checks that each is still published at the moment of writing (a publish in between fails the whole submission).
+    if (input.documentVersions) {
+      const shown = input.documentVersions;
+      if (Object.keys(shown).length !== docs.length || docs.some((d) => shown[d.kind] !== d.version)) throw new DocumentsChangedError();
+    }
 
     const contactId = await upsertContact(tx, name, phone, "qr");
     const created = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_insert_registration($1, $2, $3::smallint)", [input.idempotencyKey, contactId, input.childrenCount]);
@@ -176,7 +187,13 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
     }
     const registrationId = created.rows[0].id;
     for (const d of docs) {
-      await tx.query("SELECT bb.intake_add_consent($1, $2, $3, $4, NULL, $5)", [contactId, d.id, hashIp(meta.ip, meta.ipPepper), meta.userAgent ? meta.userAgent.slice(0, 400) : null, registrationId]);
+      try {
+        await tx.query("SELECT bb.intake_add_consent($1, $2, $3, $4, NULL, $5)", [contactId, d.id, hashIp(meta.ip, meta.ipPepper), meta.userAgent ? meta.userAgent.slice(0, 400) : null, registrationId]);
+      } catch (error) {
+        // the edition was withdrawn between reading and writing: nothing of this submission is kept
+        if ((error as { code?: string }).code === "22023" && /not published/.test((error as Error).message)) throw new DocumentsChangedError();
+        throw error;
+      }
     }
     await tx.query("SELECT bb.intake_audit('consent.registered', 'consent_registration', $1)", [registrationId]);
     return { registrationId, seq: Number(created.rows[0].seq), duplicate: false, documents: await docsFor(registrationId) };

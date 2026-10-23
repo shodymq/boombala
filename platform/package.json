@@ -20,6 +20,7 @@
     "user:set-password": "node --no-warnings scripts/set-password.ts",
     "sessions:revoke": "node --no-warnings scripts/revoke-sessions.ts",
     "db:roles": "node --no-warnings scripts/db-roles.ts",
+    "preflight": "node --no-warnings scripts/preflight.ts",
     "e2e": "node --no-warnings e2e/platform.e2e.mjs",
     "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",

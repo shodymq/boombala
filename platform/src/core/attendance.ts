@@ -17,6 +17,18 @@ import type { RequestMeta } from "./users.ts";
  */
 
 export const MAX_CHILDREN = 50;
+/**
+ * MVP rule: a QR entry is confirmed and a manual entry is written ONLY for today (Asia/Almaty), whoever asks and whatever the form says.
+ * Past days can be read, and an existing entry can be corrected (audited), but nothing new is added to them.
+ * `onDate` is the day the person's screen showed; `allowBackfill` exists for tests and a future, separately approved back-fill tool
+ * and is never passed by the admin.
+ */
+function assertToday(onDate: string | undefined, at: Date | undefined, allowBackfill: boolean | undefined): void {
+  if (allowBackfill) return;
+  if (at) throw new ValidationError({ date: "Вход можно записать только за сегодня" });
+  if (onDate !== undefined && onDate !== almatyToday()) throw new ValidationError({ date: "Вход можно записать только за сегодня" });
+}
+
 export const CORRECTION_REASONS = ["miscount", "late_arrivals", "wrong_registration", "duplicate", "other"] as const;
 export type CorrectionReason = (typeof CORRECTION_REASONS)[number];
 
@@ -39,8 +51,10 @@ export interface DayFigures {
   adultsRegistered: number;
   /** Children declared by that day's registrations that staff has not confirmed yet. */
   childrenExpected: number;
-  /** Registrations of that day still waiting for confirmation (including old ones without a declared number). */
+  /** Registrations of that day still waiting for confirmation (including old ones without a declared number). Never includes cancelled ones. */
   registrationsWaiting: number;
+  /** Registrations of that day whose entry was cancelled by a correction (0 children): neither expected nor entered. */
+  registrationsCancelled: number;
 }
 
 const ALMATY_DAY = (col: string) => `(${col} AT TIME ZONE 'Asia/Almaty')::date`;
@@ -48,17 +62,20 @@ const ALMATY_DAY = (col: string) => `(${col} AT TIME ZONE 'Asia/Almaty')::date`;
 export async function dayFigures(db: Queryable, actor: Actor, date: string): Promise<DayFigures> {
   assertCan(actor, "attendance.manage");
   if (!isValidDate(date)) throw new ValidationError({ date: "Некорректная дата" });
-  const r = await db.query<{ children_entered: string; entries: string; adults: string; expected: string; waiting: string }>(
+  const r = await db.query<{ children_entered: string; entries: string; adults: string; expected: string; waiting: string; cancelled: string }>(
     `SELECT
        (SELECT COALESCE(sum(children_count), 0) FROM bb.attendance_entries WHERE entry_date = $1::date) AS children_entered,
        (SELECT count(*) FROM bb.attendance_entries WHERE entry_date = $1::date AND children_count > 0) AS entries,
        (SELECT count(*) FROM bb.consent_registrations r WHERE ${ALMATY_DAY("r.created_at")} = $1::date) AS adults,
        (SELECT COALESCE(sum(r.children_count), 0) FROM bb.consent_registrations r
          WHERE ${ALMATY_DAY("r.created_at")} = $1::date
-           AND NOT EXISTS (SELECT 1 FROM bb.attendance_entries e WHERE e.registration_id = r.id AND e.children_count > 0)) AS expected,
+           AND NOT EXISTS (SELECT 1 FROM bb.attendance_entries e WHERE e.registration_id = r.id)) AS expected,
        (SELECT count(*) FROM bb.consent_registrations r
          WHERE ${ALMATY_DAY("r.created_at")} = $1::date
-           AND NOT EXISTS (SELECT 1 FROM bb.attendance_entries e WHERE e.registration_id = r.id AND e.children_count > 0)) AS waiting`,
+           AND NOT EXISTS (SELECT 1 FROM bb.attendance_entries e WHERE e.registration_id = r.id)) AS waiting,
+       (SELECT count(*) FROM bb.consent_registrations r
+         WHERE ${ALMATY_DAY("r.created_at")} = $1::date
+           AND EXISTS (SELECT 1 FROM bb.attendance_entries e WHERE e.registration_id = r.id AND e.children_count = 0)) AS cancelled`,
     [date],
   );
   const row = r.rows[0];
@@ -69,6 +86,7 @@ export async function dayFigures(db: Queryable, actor: Actor, date: string): Pro
     adultsRegistered: Number(row.adults),
     childrenExpected: Number(row.expected),
     registrationsWaiting: Number(row.waiting),
+    registrationsCancelled: Number(row.cancelled),
   };
 }
 
@@ -207,14 +225,18 @@ export interface EntryResult {
 export async function confirmRegistrationEntry(
   pool: Pool,
   actor: Actor,
-  input: { registrationId: string; childrenCount: unknown; at?: Date },
+  input: { registrationId: string; childrenCount: unknown; onDate?: string; at?: Date; allowBackfill?: boolean },
   meta: RequestMeta = {},
 ): Promise<EntryResult> {
   assertCan(actor, "attendance.manage");
   if (!isUuid(input.registrationId)) throw new ValidationError({ registrationId: "Некорректная регистрация" });
   const count = requireCount(input.childrenCount);
+  assertToday(input.onDate, input.at, input.allowBackfill);
   return withTx(pool, async (tx) => {
-    if (!(await tx.query("SELECT 1 FROM bb.consent_registrations WHERE id = $1", [input.registrationId])).rowCount) throw new NotFoundError("registration");
+    const reg = await tx.query<{ today: boolean }>(`SELECT (${ALMATY_DAY("created_at")} = ${ALMATY_DAY("now()")}) AS today FROM bb.consent_registrations WHERE id = $1`, [input.registrationId]);
+    if (!reg.rows[0]) throw new NotFoundError("registration");
+    // A registration of an earlier day is not confirmed now (the entry would belong to a day the visitor did not register on).
+    if (!reg.rows[0].today && !input.allowBackfill) throw new ValidationError({ date: "Вход можно записать только за сегодня" });
     const ins = await tx.query<{ id: string }>(
       `INSERT INTO bb.attendance_entries (registration_id, method, children_count, confirmed_by, entered_at)
        VALUES ($1, 'qr', $2, $3, COALESCE($4::timestamptz, now()))
@@ -237,11 +259,12 @@ export async function confirmRegistrationEntry(
 export async function addManualEntry(
   pool: Pool,
   actor: Actor,
-  input: { childrenCount: unknown; idempotencyKey: string; at?: Date },
+  input: { childrenCount: unknown; idempotencyKey: string; onDate?: string; at?: Date; allowBackfill?: boolean },
   meta: RequestMeta = {},
 ): Promise<EntryResult> {
   assertCan(actor, "attendance.manage");
   const count = requireCount(input.childrenCount);
+  assertToday(input.onDate, input.at, input.allowBackfill);
   if (!isUuid(input.idempotencyKey)) throw new ValidationError({ idempotencyKey: "Обновите страницу и повторите" });
   return withTx(pool, async (tx) => {
     const ins = await tx.query<{ id: string }>(

@@ -212,7 +212,7 @@ console.log("## 5. editor publishes news, the site shows it, takedown removes it
   await page.getByRole("button", { name: "Опубликовать", exact: true }).click();
   await page.waitForURL(/notice=published/);
   ok(await until(async () => (await (await fetch(`${SITE}/news/${SLUG}`)).text()).includes(TITLE), 6000), "the published news appears on the site");
-  ok((await (await fetch(`${SITE}/sitemap.xml`)).text()).includes(SLUG), "and in the sitemap");
+  ok(await until(async () => (await (await fetch(`${SITE}/sitemap.xml`)).text()).includes(SLUG), 10000), "and in the sitemap");
   await page.getByRole("button", { name: "Снять с публикации" }).click();
   await page.waitForURL(/notice=unpublished/);
   ok(await until(async () => (await fetch(`${SITE}/news/${SLUG}`)).status === 404, 6000), "after takedown the page is gone (404)");
@@ -227,7 +227,9 @@ console.log("## 6. QR form stores a synthetic consent tied to the document versi
   const QR = `ТЕСТ QR ${run}`;
   await page.goto(SITE + "/consent", { waitUntil: "networkidle" });
   const body = await page.locator("main").innerText();
-  ok(body.includes("не означает посещение") && !/Количество детей/.test(body), "the QR page says registration is not a visit and asks no children count");
+  ok(body.includes("не означает посещение"), "the QR page says registration is not a visit");
+  ok((await page.locator('input[name="childrenCount"]').count()) === 1 && (await page.locator('input[name="childrenCount"]').inputValue()) === "1", "the QR page has the children counter (input[name=childrenCount], default 1)");
+  ok(!/имена? детей|дат[аы] рождения детей|ИИН/i.test(body.replace(/Нужно только количество[^.]*\./, "")), "the QR page asks nothing else about the children (no names, birth dates, ID numbers)");
   await page.locator('input[name="name"], form input[autocomplete=name]').first().fill(QR);
   await page.locator('input[type="tel"]').fill(phone(3));
   const boxes = page.locator('form input[type="checkbox"]');

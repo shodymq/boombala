@@ -19,7 +19,7 @@ function back(date: string, query: string): never {
 /** Only fixed codes travel in the URL; the page shows fixed texts. */
 function failure(date: string, error: unknown): never {
   let code = "failed";
-  if (error instanceof ValidationError) code = "invalid";
+  if (error instanceof ValidationError) code = error.fields.date ? "past" : "invalid";
   else if (error instanceof ConflictError) code = "changed";
   else if (error instanceof NotFoundError) code = "notfound";
   else if (error instanceof ForbiddenError) code = "forbidden";
@@ -31,7 +31,7 @@ export async function confirmEntryAction(formData: FormData): Promise<void> {
   const date = str(formData, "date");
   let duplicate = false;
   try {
-    const r = await confirmRegistrationEntry(getPool(), { id: user.id, role: user.role }, { registrationId: str(formData, "registrationId"), childrenCount: num(formData, "childrenCount") }, await requestMeta());
+    const r = await confirmRegistrationEntry(getPool(), { id: user.id, role: user.role }, { registrationId: str(formData, "registrationId"), childrenCount: num(formData, "childrenCount"), onDate: date }, await requestMeta());
     duplicate = r.duplicate;
   } catch (error) {
     return failure(date, error);
@@ -44,7 +44,7 @@ export async function manualEntryAction(formData: FormData): Promise<void> {
   const date = str(formData, "date");
   let duplicate = false;
   try {
-    const r = await addManualEntry(getPool(), { id: user.id, role: user.role }, { childrenCount: num(formData, "childrenCount"), idempotencyKey: str(formData, "idempotencyKey") }, await requestMeta());
+    const r = await addManualEntry(getPool(), { id: user.id, role: user.role }, { childrenCount: num(formData, "childrenCount"), idempotencyKey: str(formData, "idempotencyKey"), onDate: date }, await requestMeta());
     duplicate = r.duplicate;
   } catch (error) {
     return failure(date, error);

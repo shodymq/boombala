@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { attendanceSeries, CORRECTION_REASONS, dayFigures, listEntries, listRegistrations, rangeEndingAt, MAX_CHILDREN, type CorrectionReason } from "@/core/attendance";
 import { BUSINESS_TIME_ZONE } from "@/core/catalog";
 import { almatyToday, isValidDate } from "@/core/dates";
+import { attendanceSchemaReady } from "@/core/preflight";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { AttendanceChart } from "./chart";
@@ -20,6 +21,7 @@ const NOTICES: Record<string, string> = {
   duplicate: "Эта запись уже была сделана раньше: цифры не изменились.",
 };
 const ERRORS: Record<string, string> = {
+  past: "Новый вход можно записать только за сегодня. Прошлые дни доступны для просмотра и исправления существующих записей.",
   invalid: `Проверьте количество (целое число, для нового входа от 1 до ${MAX_CHILDREN}) и причину исправления.`,
   changed: "Кто-то уже изменил эту запись. Данные обновлены: проверьте цифру и повторите исправление.",
   notfound: "Запись не найдена.",
@@ -66,6 +68,17 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   const days = sp.days === "30" ? 30 : 14;
   const actor = { id: user.id, role: user.role };
   const pool = getPool();
+  if (!(await attendanceSchemaReady(pool))) {
+    return (
+      <div className="grid gap-4">
+        <h1 className="text-3xl font-black tracking-tight text-grape-800">Посещаемость</h1>
+        <p role="alert" className="rounded-2xl bg-sun-100 p-4 text-sm font-bold text-grape-900" data-testid="schema-outdated">
+          Раздел недоступен: схема базы данных устарела (нет миграции 013). Порядок запуска: миграции 001–013, затем <code>npm run db:roles</code>, затем <code>npm run preflight</code>.
+        </p>
+      </div>
+    );
+  }
+  const isToday = date === today;
   const range = rangeEndingAt(date, days);
   const [figures, registrations, entries, series] = await Promise.all([
     dayFigures(pool, actor, date),
@@ -99,7 +112,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Card testId="card-entered" label="Детей фактически вошло" value={figures.childrenEntered} hint="Сумма подтверждённых входов за день" />
           <Card testId="card-adults" label="Взрослых прошло QR-регистрацию" value={figures.adultsRegistered} hint="Регистрация — не посещение" />
-          <Card testId="card-expected" label="Детей ожидается" value={figures.childrenExpected} hint={`По регистрациям дня без подтверждения входа (${figures.registrationsWaiting})`} />
+          <Card testId="card-expected" label="Детей ожидается" value={figures.childrenExpected} hint={`Регистраций без решения: ${figures.registrationsWaiting}. Отменённые входы (${figures.registrationsCancelled}) не ожидаются`} />
           <Card testId="card-entries" label="Записей о входе" value={figures.entries} hint="Подтверждения и вход без QR" />
         </div>
       </section>
@@ -120,7 +133,9 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
                   {r.status === "confirmed" && r.enteredChildren !== null && r.enteredAt ? <span className="ml-2 text-sm text-muted">вошло {r.enteredChildren} в {time(r.enteredAt)}</span> : null}
                 </p>
               </div>
-              {r.status === "waiting" ? (
+              {r.status === "waiting" && !isToday ? (
+                <p className="text-sm text-muted">Вход подтверждается только в день регистрации.</p>
+              ) : r.status === "waiting" ? (
                 <form action={confirmEntryAction} className="flex flex-wrap items-end gap-2">
                   <input type="hidden" name="date" value={date} />
                   <input type="hidden" name="registrationId" value={r.id} />
@@ -141,7 +156,8 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
       <section aria-labelledby="manual" className="grid gap-3 rounded-3xl border border-line bg-white p-4 sm:p-5">
         <h2 id="manual" className="text-lg font-black text-grape-800">Вход без QR</h2>
         <p className="text-sm text-muted">Для посетителей, которые не проходили регистрацию. Записывается только количество детей.</p>
-        <form action={manualEntryAction} className="flex flex-wrap items-end gap-2" data-testid="manual-form">
+        {!isToday ? <p className="text-sm font-bold text-grape-900" data-testid="manual-closed">Новый вход записывается только за сегодня. Этот день открыт для просмотра и исправления записей.</p> : null}
+        {isToday ? <form action={manualEntryAction} className="flex flex-wrap items-end gap-2" data-testid="manual-form">
           <input type="hidden" name="date" value={date} />
           <input type="hidden" name="idempotencyKey" value={manualKey} />
           <label className="grid gap-1 text-xs font-bold text-muted">
@@ -149,7 +165,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
             <input name="childrenCount" type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2} required defaultValue="1" className={input} />
           </label>
           <button type="submit" className={btn}>Записать вход</button>
-        </form>
+        </form> : null}
       </section>
 
       <section aria-labelledby="entries" className="grid gap-3 rounded-3xl border border-line bg-white p-4 sm:p-5">
