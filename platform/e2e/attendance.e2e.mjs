@@ -30,8 +30,13 @@ const browser = await chromium.launch({ executablePath: chrome, headless: true }
 let fails = 0;
 const ok = (c, m) => (console.log(c ? "  ok  " : "  FAIL", m), c || fails++);
 const run = Date.now().toString(36);
-const startedAt = new Date().toISOString();
 const MARK = `ТЕСТ Посещаемость`;
+// Everything this run creates is TRACKED by the keys it generated or sent (registration idempotency keys, manual-entry keys); the cleanup at
+// the end removes exactly these rows and nothing else: no matching by time, by person or by a name pattern.
+const created = { regKeys: new Set(), manualKeys: new Set() };
+const VERS = Object.fromEntries(
+  (await pool.query("SELECT kind::text k, version v FROM bb.legal_documents WHERE status = 'published' AND kind IN ('visit_rules', 'companion_duties', 'personal_data_consent')")).rows.map((d) => [d.k, d.v]),
+);
 const TODAY_SQL = "(now() AT TIME ZONE 'Asia/Almaty')::date";
 const enteredToday = async () => Number(await scalar(`SELECT COALESCE(sum(children_count), 0) v FROM bb.attendance_entries WHERE entry_date = ${TODAY_SQL}`));
 const adultsToday = async () => Number(await scalar(`SELECT count(*) v FROM bb.consent_registrations WHERE (created_at AT TIME ZONE 'Asia/Almaty')::date = ${TODAY_SQL}`));
@@ -89,14 +94,15 @@ const NAME = `ТЕСТ Посещаемость ${run}`;
   const before = { adults: await adultsToday(), entered: await enteredToday() };
   await page.getByRole("button", { name: "Зарегистрироваться" }).click();
   await page.getByText("Регистрация сохранена").waitFor({ timeout: 10000 });
+  created.regKeys.add(posts[0].idempotencyKey);
   ok(posts.length === 1 && posts[0].childrenCount === 3, "the request carries childrenCount = 3 (a number)");
   ok((await page.locator("main").innerText()).includes("Детей с вами: 3"), "the confirmation names the number");
   ok(Number(await scalar("SELECT r.children_count v FROM bb.consent_registrations r JOIN bb.contacts c ON c.id = r.contact_id WHERE c.name = $1", [NAME])) === 3, "PostgreSQL stored 3");
   ok((await adultsToday()) === before.adults + 1 && (await enteredToday()) === before.entered, "the registration is not a visit: no children entered");
   // the API cannot be talked into a bad number
-  const send = (childrenCount) => fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `ТЕСТ Посещаемость API ${run}`, childrenCount, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+  const send = (childrenCount) => fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `ТЕСТ Посещаемость API ${run}`, childrenCount, documentVersions: VERS, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
   for (const bad of [0, 51, -2, 2.5, "x", null]) ok((await send(bad)).status === 400, `API refuses childrenCount ${JSON.stringify(bad)} (400)`);
-  ok((await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `ТЕСТ Посещаемость API ${run}`, acceptRules: true, acceptPersonalData: true }) })).status === 400, "API refuses a request without the number (400)");
+  ok((await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `ТЕСТ Посещаемость API ${run}`, documentVersions: VERS, acceptRules: true, acceptPersonalData: true }) })).status === 400, "API refuses a request without the number (400)");
   ok(Number(await scalar("SELECT count(*) v FROM bb.contacts WHERE name = $1", [`ТЕСТ Посещаемость API ${run}`])) === 0, "refused requests left no contact");
   ok(errs.length === 0, "no JavaScript errors");
   await ctx.close();
@@ -124,6 +130,7 @@ for (const n of [1, 3, 10, 50]) {
   await page.locator('input[name="acceptPersonalData"]').check();
   await page.getByRole("button", { name: "Зарегистрироваться" }).click();
   await page.getByText("Регистрация сохранена").waitFor({ timeout: 10000 });
+  created.regKeys.add(posts[0].idempotencyKey);
   ok(posts.length === 1 && posts[0].childrenCount === n && typeof posts[0].childrenCount === "number", `${n}: the payload carries childrenCount = ${n} (a number)`);
   ok(Number(await scalar("SELECT r.children_count v FROM bb.consent_registrations r JOIN bb.contacts c ON c.id = r.contact_id WHERE c.name = $1", [who])) === n, `${n}: PostgreSQL stored ${n}`);
   ok((await page.locator("main").innerText()).includes(`Детей с вами: ${n}`), `${n}: the confirmation names the number`);
@@ -159,6 +166,8 @@ console.log("## admin (manager): confirm an entry, repeat, manual entry, correct
   // manual entry (without QR); double click = one entry
   const manual = page.locator("[data-testid=manual-form]");
   await manual.locator('input[name="childrenCount"]').fill("4");
+  const manualKey = await manual.locator('input[name="idempotencyKey"]').inputValue();
+  created.manualKeys.add(manualKey);
   const listed = await page.locator("[data-testid=entries] li[data-entry]").count();
   await manual.getByRole("button", { name: "Записать вход" }).dblclick();
   // the previous action may have ended in a "duplicate" notice too, so wait for the NEW row, not for the URL
@@ -167,7 +176,7 @@ console.log("## admin (manager): confirm an entry, repeat, manual entry, correct
   const dbNow = await enteredToday();
   const shown = await card(page, "card-entered");
   ok(dbNow === e0 + 6 && shown === e0 + 6, `a manual entry of 4 added 4 once (before ${e0}, database ${dbNow}, screen ${shown})`);
-  ok(Number(await scalar(`SELECT count(*) v FROM bb.attendance_entries WHERE method = 'manual' AND confirmed_by = (SELECT id FROM bb.users WHERE email = 'manager@qa.test') AND entry_date = ${TODAY_SQL} AND children_count = 4 AND created_at > '${startedAt}'`)) === 1, "exactly one manual row was written");
+  ok(Number(await scalar("SELECT count(*) v FROM bb.attendance_entries WHERE method = 'manual' AND idempotency_key = $1 AND children_count = 4", [manualKey])) === 1, "exactly one manual row was written (by the form's own key)");
 
   // correction with a reason, kept in the log
   const entry = page.locator("[data-testid=entries] li[data-entry]", { hasText: `QR (${NAME})` });
@@ -184,8 +193,10 @@ console.log("## admin (manager): confirm an entry, repeat, manual entry, correct
 
   // a cancelled entry is a decision: it is not "expected" again
   const regC = `${MARK} cancel ${run}`;
+  const keyC = crypto.randomUUID();
+  created.regKeys.add(keyC);
   {
-    const r = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: regC, childrenCount: 3, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+    const r = await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: regC, childrenCount: 3, documentVersions: VERS, acceptRules: true, acceptPersonalData: true, idempotencyKey: keyC }) });
     ok(r.status === 200, "a second synthetic registration (3 children) was made through the real site API");
     await page.goto(ADMIN + "/attendance", { waitUntil: "networkidle" });
     const expBefore = await card(page, "card-expected");
@@ -207,7 +218,9 @@ console.log("## admin (manager): confirm an entry, repeat, manual entry, correct
   // a forged date in the form: the server refuses (the hidden field of the form is changed before sending)
   {
     const regT = `${MARK} tamper ${run}`;
-    await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: regT, childrenCount: 2, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+    const keyT = crypto.randomUUID();
+    created.regKeys.add(keyT);
+    await fetch(SITE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: regT, childrenCount: 2, documentVersions: VERS, acceptRules: true, acceptPersonalData: true, idempotencyKey: keyT }) });
     await page.goto(ADMIN + "/attendance", { waitUntil: "networkidle" });
     const yesterdayStr = await scalar(`SELECT to_char(${TODAY_SQL} - 1, 'YYYY-MM-DD') v`);
     const liT = page.locator("li[data-registration]", { hasText: regT });
@@ -218,6 +231,7 @@ console.log("## admin (manager): confirm an entry, repeat, manual entry, correct
     ok((await enteredToday()) === before && Number(await scalar("SELECT count(*) v FROM bb.attendance_entries e JOIN bb.consent_registrations r ON r.id = e.registration_id JOIN bb.contacts c ON c.id = r.contact_id WHERE c.name = $1", [regT])) === 0, "a forged past date in a confirmation is refused on the server: nothing was written");
     await page.goto(ADMIN + "/attendance", { waitUntil: "networkidle" });
     const man = page.locator("[data-testid=manual-form]");
+    created.manualKeys.add(await man.locator('input[name="idempotencyKey"]').inputValue());
     await man.locator('input[name="date"]').evaluate((el, v) => (el.value = v), yesterdayStr);
     await man.locator('input[name="childrenCount"]').fill("5");
     await man.getByRole("button", { name: "Записать вход" }).click();
@@ -270,10 +284,11 @@ try {
   try {
     await c.query("BEGIN");
     await c.query("SET LOCAL session_replication_role = replica");
-    const regs = (await c.query("SELECT r.id, r.contact_id FROM bb.consent_registrations r JOIN bb.contacts k ON k.id = r.contact_id WHERE k.name LIKE $1", [`${MARK}%${run}%`])).rows;
+    // exactly the rows whose keys this run generated or sent
+    const regs = (await c.query("SELECT id, contact_id FROM bb.consent_registrations WHERE idempotency_key = ANY($1::uuid[])", [[...created.regKeys]])).rows;
     const regIds = regs.map((r) => r.id);
     const contactIds = [...new Set(regs.map((r) => r.contact_id))];
-    const entries = (await c.query("SELECT id FROM bb.attendance_entries WHERE registration_id = ANY($1::uuid[]) OR (method = 'manual' AND created_at >= $2::timestamptz AND confirmed_by = (SELECT id FROM bb.users WHERE email = 'manager@qa.test'))", [regIds, startedAt])).rows.map((r) => r.id);
+    const entries = (await c.query("SELECT id FROM bb.attendance_entries WHERE registration_id = ANY($1::uuid[]) OR idempotency_key = ANY($2::uuid[])", [regIds, [...created.manualKeys]])).rows.map((r) => r.id);
     await c.query("DELETE FROM bb.attendance_corrections WHERE entry_id = ANY($1::uuid[])", [entries]);
     await c.query("DELETE FROM bb.attendance_entries WHERE id = ANY($1::uuid[])", [entries]);
     await c.query("DELETE FROM bb.consent_events WHERE registration_id = ANY($1::uuid[])", [regIds]);
@@ -284,7 +299,7 @@ try {
     console.log(`  cleanup: removed ${regIds.length} synthetic registrations and ${entries.length} entries of this run`);
   } catch (e) {
     await c.query("ROLLBACK").catch(() => {});
-    console.log(`  cleanup skipped (${e.code ?? "error"}): synthetic rows named "${MARK} ${run}…" remain in the local database`);
+    console.log(`  cleanup skipped (${e.code ?? "error"}): this run's synthetic rows (tracked by key) remain in the local database`);
   } finally {
     c.release();
   }

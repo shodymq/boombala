@@ -113,7 +113,7 @@ export async function sendConsentToPlatform(input: {
   /** Children who come with the adult, 1..50. Only a number is collected. */
   childrenCount: number;
   /** The editions the visitor saw (kind -> version); the platform compares them inside its transaction. */
-  documentVersions?: Record<string, number>;
+  documentVersions: Record<string, number>;
   acceptRules: true;
   acceptPersonalData: true;
   clientIp: string;

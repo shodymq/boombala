@@ -57,21 +57,18 @@ export async function POST(request: Request) {
     if (body.acceptPersonalData !== true) fieldErrors.acceptPersonalData = "Необходимо согласие на обработку данных";
     if (Object.keys(fieldErrors).length) return json({ ok: false, error: "validation", fieldErrors }, 400);
 
-    // The editions the visitor was SHOWN travel to the platform, which compares them with the editions it records INSIDE its
-    // transaction (no check-then-write gap on this side). A mismatch records nothing and answers 409. Clients that send no
-    // editions behave as before.
-    let documentVersions: Record<string, number> | undefined;
-    if (body.documentVersions !== undefined) {
-      const shown = body.documentVersions;
-      const ok =
-        !!shown &&
-        typeof shown === "object" &&
-        !Array.isArray(shown) &&
-        Object.keys(shown).length <= 10 &&
-        Object.entries(shown).every(([k, v]) => CONSENT_KINDS.includes(k) && typeof v === "number" && Number.isInteger(v));
-      if (!ok) return json({ ok: false, error: "bad_request" }, 400);
-      documentVersions = shown as Record<string, number>;
-    }
+    // The editions the visitor was SHOWN are REQUIRED and travel to the platform, which compares them with the editions it records INSIDE
+    // its transaction (no check-then-write gap on this side, and no consent on an edition the platform merely picked). A mismatch
+    // records nothing and answers 409; a request without them is a 400.
+    const shown = body.documentVersions;
+    const versionsOk =
+      !!shown &&
+      typeof shown === "object" &&
+      !Array.isArray(shown) &&
+      Object.keys(shown).length <= 10 &&
+      Object.entries(shown).every(([k, v]) => CONSENT_KINDS.includes(k) && typeof v === "number" && Number.isInteger(v));
+    if (!versionsOk) return json({ ok: false, error: "bad_request" }, 400);
+    const documentVersions = shown as Record<string, number>;
 
     const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
     const limitKey = `consent:${ip}`;

@@ -207,6 +207,8 @@ console.log("## double tap, changed documents, server-side edition check");
   ok(missing.status === 409, "the server refuses when a shown document is missing from the list");
   const fine = await send(versions);
   ok(fine.status === 200, "the server accepts the editions that are published");
+  const noVersions = await fetch(BASE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `ТЕСТ QR форма без редакций ${run}`, childrenCount: 1, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+  ok(noVersions.status === 400, "a request WITHOUT the editions is refused (400): the platform never records a consent on an edition it picked itself");
   const garbage = await send("x");
   ok(garbage.status === 400, "a malformed edition list is a 400");
 }

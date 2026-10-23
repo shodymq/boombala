@@ -52,10 +52,11 @@ const consentSchema = z.object({
     { error: "Укажите от 1 до 50 детей" },
   ),
   /**
-   * The editions the visitor was shown, kind -> version. When given, they are compared INSIDE the transaction with the editions
-   * that are about to be recorded: a consent is never stored for an edition the visitor did not see.
+   * The editions the visitor was shown, kind -> version. REQUIRED: they are compared INSIDE the transaction with the editions that are
+   * about to be recorded, so a consent is never stored for an edition the visitor did not see and never for an edition the platform
+   * merely picked as "the current one". A request without them is refused; an empty or different list can never match the published set.
    */
-  documentVersions: z.record(z.string(), z.number().int()).optional(),
+  documentVersions: z.record(z.string(), z.number().int(), { error: "Укажите редакции документов, которые вы видели" }),
   acceptRules: z.literal(true, "Необходимо подтвердить ознакомление с правилами"),
   acceptPersonalData: z.literal(true, "Необходимо согласие на обработку данных"),
 });
@@ -174,10 +175,8 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
     docs.push({ kind: "personal_data_consent", id: pd.id, version: pd.version });
     // The check and the writes below are ONE transaction on these very rows: the consent is recorded against exactly the editions compared here,
     // and intake_add_consent re-checks that each is still published at the moment of writing (a publish in between fails the whole submission).
-    if (input.documentVersions) {
-      const shown = input.documentVersions;
-      if (Object.keys(shown).length !== docs.length || docs.some((d) => shown[d.kind] !== d.version)) throw new DocumentsChangedError();
-    }
+    const shown = input.documentVersions;
+    if (Object.keys(shown).length !== docs.length || docs.some((d) => shown[d.kind] !== d.version)) throw new DocumentsChangedError();
 
     const contactId = await upsertContact(tx, name, phone, "qr");
     const created = await tx.query<{ id: string; seq: string }>("SELECT id, seq FROM bb.intake_insert_registration($1, $2, $3::smallint)", [input.idempotencyKey, contactId, input.childrenCount]);

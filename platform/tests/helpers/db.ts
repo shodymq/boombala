@@ -6,6 +6,8 @@ import { createPool, type Pool } from "../../src/core/db.ts";
 import { migrate } from "../../src/core/migrate.ts";
 import { seedCatalog } from "../../src/core/seed.ts";
 import { createUser } from "../../src/core/users.ts";
+import { submitConsent, type ConsentInput, type IntakeMeta } from "../../src/core/intake.ts";
+import type { Queryable } from "../../src/core/db.ts";
 import type { Role } from "../../src/core/rbac.ts";
 import { findFreePort, initCluster, startCluster, stopCluster } from "../../scripts/lib/cluster.mjs";
 import { birthdayPackages } from "../../../src/data/birthdays.ts";
@@ -70,4 +72,17 @@ export const TEST_PASSWORD = "correct horse battery staple";
 
 export async function makeUser(pool: Pool, role: Role, email = `${role}@example.test`) {
   return createUser(pool, null, { email, name: `Test ${role}`, role, password: TEST_PASSWORD });
+}
+
+/** The editions a visitor would be shown right now: what the form reads from the platform and sends back. */
+export async function publishedVersions(db: Queryable): Promise<Record<string, number>> {
+  const r = await db.query<{ kind: string; version: number }>(
+    "SELECT kind::text AS kind, version FROM bb.legal_documents WHERE status = 'published' AND kind IN ('visit_rules', 'companion_duties', 'personal_data_consent')",
+  );
+  return Object.fromEntries(r.rows.map((x) => [x.kind, x.version]));
+}
+
+/** A QR registration as the real form makes it: it names the editions it was shown (documentVersions is mandatory). */
+export async function submitConsentV(pool: Queryable & Parameters<typeof submitConsent>[0], input: Omit<ConsentInput, "documentVersions"> & { documentVersions?: Record<string, number> }, meta?: IntakeMeta) {
+  return submitConsent(pool, { ...input, documentVersions: input.documentVersions ?? (await publishedVersions(pool)) } as ConsentInput, meta);
 }

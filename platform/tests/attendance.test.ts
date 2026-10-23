@@ -14,7 +14,7 @@ import { migrate } from "../src/core/migrate.ts";
 import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeUser, MIGRATIONS_DIR, startTestDb, type TestDb } from "./helpers/db.ts";
+import { makeUser, MIGRATIONS_DIR, publishedVersions, startTestDb, submitConsentV, type TestDb } from "./helpers/db.ts";
 
 const API_PW = "api-role-password-0123456789abc";
 const ADMIN_PW = "admin-role-password-0123456789";
@@ -32,7 +32,7 @@ describe("Attendance: children count in the QR registration and the record of wh
 
   /** A QR registration through the real intake (what the site sends). */
   const register = (name: string, childrenCount: unknown = 1, phone: string | null = null) =>
-    submitConsent(db.pool, { idempotencyKey: randomUUID(), name, phone, childrenCount: childrenCount as number, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.5", ipPepper: "pepper", userAgent: "Test" });
+    submitConsentV(db.pool, { idempotencyKey: randomUUID(), name, phone, childrenCount: childrenCount as number, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.5", ipPepper: "pepper", userAgent: "Test" });
   /** A registration written directly with a chosen creation moment (day-boundary tests). */
   const registrationAt = async (name: string, children: number, at: string) => {
     const c = await q("INSERT INTO bb.contacts (name, name_key, source) VALUES ($1, $2, 'qr') RETURNING id", [name, name.toLowerCase()]);
@@ -65,7 +65,7 @@ describe("Attendance: children count in the QR registration and the record of wh
     });
 
     it("is required and must be a whole number from 1 to 50 (also as the digits a form sends)", async () => {
-      await assert.rejects(() => submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "Без числа", acceptRules: true, acceptPersonalData: true } as never), ValidationError, "the field missing");
+      await assert.rejects(async () => submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "Без числа", documentVersions: await publishedVersions(db.pool), acceptRules: true, acceptPersonalData: true } as never), ValidationError, "the number is missing");
       for (const bad of [null, 0, 51, -1, 2.5, "abc", "", "0", "51", "1e1", NaN, [], {}, true]) {
         await assert.rejects(() => register("Плохое число", bad), ValidationError, `rejected: ${JSON.stringify(bad)}`);
       }
@@ -83,10 +83,10 @@ describe("Attendance: children count in the QR registration and the record of wh
     it("a repeated key keeps the first registration (idempotency), the number of the first request stays", async () => {
       const key = randomUUID();
       const base = { idempotencyKey: key, name: "Повтор", childrenCount: 4, acceptRules: true as const, acceptPersonalData: true as const };
-      const results = await Promise.all(Array.from({ length: 6 }, () => submitConsent(db.pool, base)));
+      const results = await Promise.all(Array.from({ length: 6 }, () => submitConsentV(db.pool, base)));
       assert.equal(new Set(results.map((r) => r.registrationId)).size, 1);
       assert.equal(results.filter((r) => !r.duplicate).length, 1);
-      const again = await submitConsent(db.pool, { ...base, childrenCount: 9 });
+      const again = await submitConsentV(db.pool, { ...base, childrenCount: 9 });
       assert.equal(again.duplicate, true);
       assert.equal(Number(await scalar("SELECT children_count v FROM bb.consent_registrations WHERE idempotency_key = $1", [key])), 4);
       assert.equal(Number(await scalar("SELECT count(*) v FROM bb.consent_registrations WHERE idempotency_key = $1", [key])), 1);
@@ -98,7 +98,7 @@ describe("Attendance: children count in the QR registration and the record of wh
       assert.deepEqual(await cols("attendance_entries"), ["id", "seq", "registration_id", "method", "children_count", "entered_at", "entry_date", "confirmed_by", "idempotency_key", "created_at"]);
       assert.deepEqual(await cols("attendance_corrections"), ["id", "entry_id", "old_count", "new_count", "reason", "corrected_by", "corrected_at"]);
       const input = { idempotencyKey: randomUUID(), name: "Родитель", childrenCount: 2, childrenNames: ["Вася Секретов", "Петя Секретов"], birthDates: ["2019-01-01"], iin: "190101500123", acceptRules: true as const, acceptPersonalData: true as const };
-      await submitConsent(db.pool, input as never);
+      await submitConsentV(db.pool, input as never);
       const dump = JSON.stringify([(await q("SELECT * FROM bb.consent_registrations")).rows, (await q("SELECT * FROM bb.contacts")).rows, (await q("SELECT * FROM bb.consent_events")).rows, (await q("SELECT * FROM bb.audit_log")).rows]);
       assert.ok(!/Секретов|190101500123|2019-01-01/.test(dump), "nothing about the children's names, IIN or birth dates was kept");
     });
@@ -598,7 +598,7 @@ describe("Consent editions are checked inside the platform transaction", () => {
     await publishDocument(db.pool, owner, d.id);
   };
   const submit = (name: string, documentVersions?: Record<string, number>, key = randomUUID()) =>
-    submitConsent(db.pool, { idempotencyKey: key, name, childrenCount: 1, acceptRules: true, acceptPersonalData: true, documentVersions }, { ip: "203.0.113.9", ipPepper: "p", userAgent: "T" });
+    submitConsentV(db.pool, { idempotencyKey: key, name, childrenCount: 1, acceptRules: true, acceptPersonalData: true, documentVersions }, { ip: "203.0.113.9", ipPepper: "p", userAgent: "T" });
 
   before(async () => {
     db = await startTestDb();
@@ -643,11 +643,24 @@ describe("Consent editions are checked inside the platform transaction", () => {
     assert.deepEqual(await counts(), before);
   });
 
+  it("the editions are MANDATORY: a request without them records nothing, and so does an empty or foreign list; the platform never picks 'the current ones' itself", async () => {
+    const before = await counts();
+    const base = { idempotencyKey: randomUUID(), name: "Без редакций", childrenCount: 1, acceptRules: true as const, acceptPersonalData: true as const };
+    await assert.rejects(() => submitConsent(db.pool, base as never), ValidationError, "missing");
+    await assert.rejects(() => submitConsent(db.pool, { ...base, documentVersions: null } as never), ValidationError, "null");
+    await assert.rejects(() => submitConsent(db.pool, { ...base, documentVersions: "x" } as never), ValidationError, "not an object");
+    await assert.rejects(() => submitConsent(db.pool, { ...base, documentVersions: { visit_rules: "1" } } as never), ValidationError, "not numbers");
+    await assert.rejects(() => submitConsent(db.pool, { ...base, documentVersions: {} } as never), DocumentsChangedError, "an empty list can never equal the published set");
+    assert.deepEqual(await counts(), before, "no contact, registration or consent event was written");
+    // the same body WITH the editions is accepted, so the refusals above were about the editions and nothing else
+    assert.equal((await submitConsent(db.pool, { ...base, documentVersions: await publishedVersions(db.pool) })).duplicate, false);
+  });
+
   it("a publication racing with submissions can never put an unseen edition into a consent", async () => {
     const shown = await versions();
     const pools = Array.from({ length: 4 }, () => db.newPool(6));
     const names = Array.from({ length: 24 }, (_, i) => `Гонка редакций ${i}`);
-    const run = names.map((n, i) => submitConsent(pools[i % 4], { idempotencyKey: randomUUID(), name: n, childrenCount: 1, acceptRules: true, acceptPersonalData: true, documentVersions: shown }));
+    const run = names.map((n, i) => submitConsentV(pools[i % 4], { idempotencyKey: randomUUID(), name: n, childrenCount: 1, acceptRules: true, acceptPersonalData: true, documentVersions: shown }));
     const publisher = (async () => {
       await new Promise((r) => setTimeout(r, 5));
       await publishNew("personal_data_consent");

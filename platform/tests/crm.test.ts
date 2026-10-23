@@ -10,12 +10,12 @@ import { getContact, listContacts } from "../src/core/crm.ts";
 import { almatyToday } from "../src/core/dates.ts";
 import { ConsentUnavailableError, ForbiddenError, ValidationError } from "../src/core/errors.ts";
 import { exportContacts, guardCell } from "../src/core/export.ts";
-import { submitConsent, submitLead } from "../src/core/intake.ts";
+import { submitLead } from "../src/core/intake.ts";
 import { approveDocument, createDraft, publishDocument, updateDraft } from "../src/core/legal.ts";
 import { drainOutbox, outboxStats } from "../src/core/outbox.ts";
 import { sendTelegram, telegramConfigFromEnv } from "../src/core/telegram.ts";
 import { setCanExport } from "../src/core/users.ts";
-import { makeUser, seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
+import { makeUser, seedFromSite, startTestDb, submitConsentV, type TestDb } from "./helpers/db.ts";
 
 const FUTURE = (() => {
   const d = new Date(`${almatyToday()}T00:00:00Z`);
@@ -66,7 +66,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
 
   it("refuses to collect personal data while the consent text is not published", async () => {
     await assert.rejects(() => submitLead(db.pool, lead()), ConsentUnavailableError);
-    await assert.rejects(() => submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "А", phone: "+77471112233", childrenCount: 1, acceptRules: true, acceptPersonalData: true }), ConsentUnavailableError);
+    await assert.rejects(() => submitConsentV(db.pool, { idempotencyKey: randomUUID(), name: "А", phone: "+77471112233", childrenCount: 1, acceptRules: true, acceptPersonalData: true }), ConsentUnavailableError);
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n, 0);
   });
 
@@ -153,12 +153,12 @@ describe("CRM: intake, outbox, Telegram, export", () => {
 
   it("QR registration creates a contact and one consent event per document version, and is idempotent", async () => {
     const input = { idempotencyKey: randomUUID(), name: "Сауле Гость", phone: "+7 701 555 44 33", childrenCount: 2, acceptRules: true as const, acceptPersonalData: true as const };
-    const r = await submitConsent(db.pool, input, { ip: "198.51.100.1", ipPepper: "p" });
+    const r = await submitConsentV(db.pool, input, { ip: "198.51.100.1", ipPepper: "p" });
     assert.deepEqual(r.documents.map((d) => d.kind).sort(), ["companion_duties", "personal_data_consent", "visit_rules"]);
     assert.ok(r.documents.every((d) => d.version >= 1));
-    assert.equal((await submitConsent(db.pool, input)).duplicate, true);
+    assert.equal((await submitConsentV(db.pool, input)).duplicate, true);
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.consent_events WHERE registration_id=$1", [r.registrationId])).rows[0].n, 3);
-    await assert.rejects(() => submitConsent(db.pool, { ...input, idempotencyKey: randomUUID(), acceptPersonalData: false as never }), ValidationError);
+    await assert.rejects(() => submitConsentV(db.pool, { ...input, idempotencyKey: randomUUID(), acceptPersonalData: false as never }), ValidationError);
     const c = (await db.pool.query("SELECT source, phone_verification, marketing_opt_in FROM bb.contacts WHERE phone_e164='+77015554433'")).rows[0];
     assert.deepEqual(c, { source: "qr", phone_verification: "unverified", marketing_opt_in: false });
   });
@@ -169,7 +169,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
       (await db.pool.query("SELECT c.id, c.phone_e164, c.source FROM bb.consent_registrations r JOIN bb.contacts c ON c.id = r.contact_id WHERE r.id = $1", [registrationId])).rows;
 
     it("a registration without a phone succeeds, keeps the full consent history and stores no number", async () => {
-      const r = await submitConsent(db.pool, base(), { ip: "198.51.100.7", ipPepper: "p" });
+      const r = await submitConsentV(db.pool, base(), { ip: "198.51.100.7", ipPepper: "p" });
       assert.equal(r.duplicate, false);
       assert.deepEqual(r.documents.map((d) => d.kind).sort(), ["companion_duties", "personal_data_consent", "visit_rules"]);
       const [c] = await contactsOf(r.registrationId);
@@ -180,7 +180,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
 
     it("empty, blank and null phone mean 'no phone'", async () => {
       for (const phone of ["", "   ", null, undefined]) {
-        const r = await submitConsent(db.pool, { ...base(), phone });
+        const r = await submitConsentV(db.pool, { ...base(), phone });
         assert.equal((await contactsOf(r.registrationId))[0].phone_e164, null);
       }
     });
@@ -189,17 +189,17 @@ describe("CRM: intake, outbox, Telegram, export", () => {
       const before = (await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n;
       const regsBefore = (await db.pool.query("SELECT count(*)::int n FROM bb.consent_registrations")).rows[0].n;
       for (const phone of ["12345", "abc", "+7 701 12", "+0000000000"]) {
-        await assert.rejects(() => submitConsent(db.pool, { ...base(), phone }), (e: unknown) => e instanceof ValidationError && "phone" in e.fields);
+        await assert.rejects(() => submitConsentV(db.pool, { ...base(), phone }), (e: unknown) => e instanceof ValidationError && "phone" in e.fields);
       }
       assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n, before);
       assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.consent_registrations")).rows[0].n, regsBefore);
-      const ok = await submitConsent(db.pool, { ...base(), name: "Гость С Номером", phone: "8 (701) 777-88-99" });
+      const ok = await submitConsentV(db.pool, { ...base(), name: "Гость С Номером", phone: "8 (701) 777-88-99" });
       assert.equal((await contactsOf(ok.registrationId))[0].phone_e164, "+77017778899");
     });
 
     it("two different visitors with the same name and no phone are NOT merged, and no placeholder number is invented", async () => {
-      const a = await submitConsent(db.pool, { ...base(), name: "Алия Одноимённая" });
-      const b = await submitConsent(db.pool, { ...base(), name: "алия  одноимённая" });
+      const a = await submitConsentV(db.pool, { ...base(), name: "Алия Одноимённая" });
+      const b = await submitConsentV(db.pool, { ...base(), name: "алия  одноимённая" });
       const [ca] = await contactsOf(a.registrationId);
       const [cb] = await contactsOf(b.registrationId);
       assert.notEqual(ca.id, cb.id);
@@ -210,14 +210,14 @@ describe("CRM: intake, outbox, Telegram, export", () => {
 
     it("a repeated submission with the same key (no phone) returns the first result and creates no new contact or consent", async () => {
       const input = { ...base(), name: "Повторный Гость" };
-      const first = await submitConsent(db.pool, input);
+      const first = await submitConsentV(db.pool, input);
       const contacts = (await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n;
       const events = (await db.pool.query("SELECT count(*)::int n FROM bb.consent_events")).rows[0].n;
-      const again = await submitConsent(db.pool, input);
+      const again = await submitConsentV(db.pool, input);
       assert.equal(again.duplicate, true);
       assert.equal(again.registrationId, first.registrationId);
       // parallel retries too
-      const burst = await Promise.all(Array.from({ length: 5 }, () => submitConsent(db.pool, input)));
+      const burst = await Promise.all(Array.from({ length: 5 }, () => submitConsentV(db.pool, input)));
       assert.ok(burst.every((x) => x.registrationId === first.registrationId && x.duplicate));
       assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n, contacts);
       assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.consent_events")).rows[0].n, events);
@@ -227,7 +227,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
       const input = { ...base(), name: "Гость Гонка" };
       const contacts = (await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n;
       const regs = (await db.pool.query("SELECT count(*)::int n FROM bb.consent_registrations")).rows[0].n;
-      const burst = await Promise.all(Array.from({ length: 8 }, () => submitConsent(db.pool, input)));
+      const burst = await Promise.all(Array.from({ length: 8 }, () => submitConsentV(db.pool, input)));
       assert.equal(new Set(burst.map((x) => x.registrationId)).size, 1);
       assert.equal(burst.filter((x) => !x.duplicate).length, 1);
       assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.contacts")).rows[0].n, contacts + 1);
@@ -236,12 +236,12 @@ describe("CRM: intake, outbox, Telegram, export", () => {
     });
 
     it("the consents are still required without a phone", async () => {
-      await assert.rejects(() => submitConsent(db.pool, { ...base(), acceptPersonalData: false as never }), ValidationError);
-      await assert.rejects(() => submitConsent(db.pool, { ...base(), acceptRules: false as never }), ValidationError);
+      await assert.rejects(() => submitConsentV(db.pool, { ...base(), acceptPersonalData: false as never }), ValidationError);
+      await assert.rejects(() => submitConsentV(db.pool, { ...base(), acceptRules: false as never }), ValidationError);
     });
 
     it("a phoneless contact is shown safely in the CRM, matches no 'same phone' group, and exports an empty phone cell", async () => {
-      const r = await submitConsent(db.pool, { ...base(), name: "Гость Для Списка" });
+      const r = await submitConsentV(db.pool, { ...base(), name: "Гость Для Списка" });
       const [c] = await contactsOf(r.registrationId);
       const card = await getContact(db.pool, owner, c.id);
       assert.equal(card!.contact.phone, null);
@@ -265,7 +265,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
 
   it("same person across QR and lead is one contact with two events; same phone, other name stays separate", async () => {
     const phone = "+77025551100";
-    await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "Марат  Иванов", phone, childrenCount: 1, acceptRules: true, acceptPersonalData: true });
+    await submitConsentV(db.pool, { idempotencyKey: randomUUID(), name: "Марат  Иванов", phone, childrenCount: 1, acceptRules: true, acceptPersonalData: true });
     await submitLead(db.pool, lead({ name: "марат иванов", phone: "8 702 555 11 00" }));
     await submitLead(db.pool, lead({ name: "Ольга Другая", phone }));
     const list = await listContacts(db.pool, owner, { q: "5551100" });
@@ -316,7 +316,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
     });
 
     it("phone numbers keep their +7 and stay TEXT in XLSX (never a number or a formula); CSV keeps the plain value", async () => {
-      await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: "+7 Имя с плюсом", phone: "+7 701 000 00 02", childrenCount: 1, acceptRules: true, acceptPersonalData: true });
+      await submitConsentV(db.pool, { idempotencyKey: randomUUID(), name: "+7 Имя с плюсом", phone: "+7 701 000 00 02", childrenCount: 1, acceptRules: true, acceptPersonalData: true });
       const x = await exportContacts(db.pool, owner, { format: "xlsx", columns: ["name", "phone"], filters: { q: "00 00 02".replace(/ /g, "") } });
       const dir = mkdtempSync(join(tmpdir(), "bbx-"));
       try {
@@ -344,7 +344,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
       assert.equal(guardCell("\t=1"), "'\t=1");
       assert.equal(guardCell("+77471112233"), "+77471112233");
       assert.equal(guardCell("Обычное имя"), "Обычное имя");
-      await submitConsent(db.pool, { idempotencyKey: randomUUID(), name: '=HYPERLINK("http://evil","x")', phone: "+77010000001", childrenCount: 1, acceptRules: true, acceptPersonalData: true });
+      await submitConsentV(db.pool, { idempotencyKey: randomUUID(), name: '=HYPERLINK("http://evil","x")', phone: "+77010000001", childrenCount: 1, acceptRules: true, acceptPersonalData: true });
       const csv = await exportContacts(db.pool, owner, { format: "csv", columns: ["name", "phone"], filters: { q: "HYPERLINK" } });
       const text = csv.body.toString("utf8");
       assert.ok(text.startsWith("﻿"));
