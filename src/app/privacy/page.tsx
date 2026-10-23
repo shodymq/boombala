@@ -32,7 +32,7 @@ function legalOperator() {
   const name = process.env.LEGAL_OPERATOR_NAME?.trim() ?? "";
   const iin = process.env.LEGAL_OPERATOR_IIN?.trim() ?? "";
   const address = process.env.LEGAL_OPERATOR_REG_ADDRESS?.trim() ?? "";
-  if (name.length < 5 || !/^\\d{12}$/.test(iin) || address.length < 10) return null;
+  if (name.length < 5 || !/^\d{12}$/.test(iin) || address.length < 10) return null;
   return { name, iin, address };
 }
 function operator(lang: "ru" | "kk"): string {
