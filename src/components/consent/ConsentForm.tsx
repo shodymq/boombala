@@ -173,12 +173,13 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
           </div>
           <div className="grid gap-2">
             <label htmlFor={`${uid}-phone`} className="font-display text-sm font-extrabold text-grape-800">
-              Телефон <span className="font-normal text-muted">(необязательно)</span>
+              Телефон для связи <span className="font-normal text-muted">(по желанию)</span>
             </label>
             <div className="relative">
               <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-grape-800">+7</span>
-              <input id={`${uid}-phone`} name="phone" type="tel" inputMode="tel" autoComplete="tel-national" placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} {...inv("phone")} />
+              <input id={`${uid}-phone`} name="phone" type="tel" aria-describedby={`${uid}-phone-hint`} inputMode="tel" autoComplete="tel-national" placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} {...inv("phone")} />
             </div>
+            <p id={`${uid}-phone-hint`} className="text-xs text-muted">Поле необязательно: регистрация действует и без телефона. Он нужен только на случай, если администратору понадобится связаться с вами.</p>
             {err("phone")}
           </div>
           <div role="group" aria-labelledby={`${uid}-kids-label`} className="grid gap-2">
