@@ -48,7 +48,7 @@ for (const prof of PROFILES) {
 
   await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
   const main = await page.locator("main").innerText();
-  ok(/Оператор персональных данных: ИП Аманов/.test(main), "the operator is named in one compact line");
+  ok(/Оператор персональных данных: ИП «АМАНОВ»/.test(main), "the operator is named in one compact line");
   ok((await page.locator('[data-testid="consent-operator"]').count()) === 1 && (await page.evaluate(() => { const b = document.querySelector("form button[type=submit]"), o = document.querySelector('[data-testid="consent-operator"]'); return !!b && !!o && b.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING; })), "the operator line sits right under the button");
   const heading = await page.locator("h1").innerText();
   ok(heading.trim() === "Регистрация сопровождающего" && /Заполните форму перед посещением центра\. Это займёт меньше минуты\./.test(main), "compact header: «Регистрация сопровождающего» and the one-line subtitle");
