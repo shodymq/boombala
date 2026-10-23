@@ -166,20 +166,27 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
         <div className="grid gap-5" role="group" aria-label="Данные сопровождающего">
           <div className="grid gap-2">
             <label htmlFor={`${uid}-name`} className="font-display text-sm font-extrabold text-grape-800">
-              Имя сопровождающего
+              Имя сопровождающего <span className="font-normal text-muted">(обязательно)</span>
             </label>
-            <input id={`${uid}-name`} name="name" autoComplete="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} className={field} {...inv("name")} />
+            <input id={`${uid}-name`} name="name" autoComplete="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} aria-describedby={`${uid}-name-hint`} className={field} {...inv("name")} />
+            <p id={`${uid}-name-hint`} className="text-xs leading-relaxed text-muted">
+              Введённое имя само по себе не подтверждает личность или полномочия сопровождающего.
+              <span lang="kk" className="block">Аты (міндетті). Енгізілген ат өздігінен жеке басты немесе ата-аналық өкілеттікті растамайды.</span>
+            </p>
             {err("name")}
           </div>
           <div className="grid gap-2">
             <label htmlFor={`${uid}-phone`} className="font-display text-sm font-extrabold text-grape-800">
-              Телефон <span className="font-normal text-muted">(желательно, для связи)</span>
+              Телефон <span className="font-normal text-muted">(необязательно, но желательно)</span>
             </label>
             <div className="relative">
               <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-grape-800">+7</span>
               <input id={`${uid}-phone`} name="phone" type="tel" aria-describedby={`${uid}-phone-hint`} inputMode="tel" autoComplete="tel-national" placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} {...inv("phone")} />
             </div>
-            <p id={`${uid}-phone-hint`} className="text-xs text-muted">Укажите номер, чтобы администратор мог связаться с вами при непредвиденной ситуации во время посещения. Без телефона тоже можно зарегистрироваться.</p>
+            <p id={`${uid}-phone-hint`} className="text-xs leading-relaxed text-muted">
+              Желательно указать для связи, если ребёнок потеряет сопровождающего, получит травму или возникнет другая экстренная ситуация. Без телефона тоже можно зарегистрироваться.
+              <span lang="kk" className="block">Телефон — міндетті емес. Бала еріп жүрушісінен адасқанда, жарақат алғанда немесе өзге шұғыл жағдай туындағанда хабарласу үшін көрсеткен жөн.</span>
+            </p>
             {err("phone")}
           </div>
           <div role="group" aria-labelledby={`${uid}-kids-label`} className="grid gap-2">
@@ -209,7 +216,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
                 +
               </button>
             </div>
-            <p id={`${uid}-kids-hint`} className="text-xs leading-relaxed text-muted">От 1 до {MAX_KIDS}. Другие данные о детях не нужны.</p>
+            <p id={`${uid}-kids-hint`} className="text-xs leading-relaxed text-muted">От 1 до {MAX_KIDS}. Указывается только количество: имена, возраст и другие данные детей не нужны.</p>
             {err("childrenCount")}
           </div>
           <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
@@ -226,7 +233,10 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
           <div>
             <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
               <input type="checkbox" name="acceptRules" checked={rules} onChange={(e) => setRulesSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptRules")} />
-              <span>Я ознакомился(ась) с правилами посещения{rulesDocs.length > 1 ? " и обязанностями сопровождающего" : ""}.</span>
+              <span>
+                Я ознакомился(-ась) с Правилами посещения Boom Bala{rulesDocs.find((d) => d.kind === "visit_rules") ? ` (редакция ${rulesDocs.find((d) => d.kind === "visit_rules")?.version})` : ""}{rulesDocs.length > 1 ? " и обязанностями сопровождающего" : ""} и обязуюсь соблюдать их.
+                <span lang="kk" className="mt-1 block text-xs leading-relaxed text-muted">Мен Boom Bala келу қағидаларымен таныстым және оларды сақтауға келісемін.</span>
+              </span>
             </label>
             <div className="ml-9 mt-1 grid gap-2">{rulesDocs.map(docCard)}</div>
             {err("acceptRules")}
@@ -234,7 +244,11 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
           <div>
             <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
               <input type="checkbox" name="acceptPersonalData" checked={data} onChange={(e) => setDataSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptPersonalData")} />
-              <span>Я даю согласие на обработку моих персональных данных.</span>
+              <span className="text-sm leading-relaxed">
+                Я даю ИП «АМАНОВ» согласие на обработку введённого мной имени, номера телефона (если указан), количества детей, записи о согласии и необходимых технических данных (хеш IP-адреса, сведения о браузере) в целях оформления посещения и связи при происшествии. Мне доступна{" "}
+                <a href="/privacy" target="_blank" rel="noopener" className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">Политика обработки персональных данных</a>; я понимаю право отзыва в предусмотренных законом пределах.
+                <span lang="kk" className="mt-1 block text-xs leading-relaxed text-muted">Мен «АМАНОВ» ЖК-не өзім енгізген атымды, телефон нөмірімді (егер көрсетсем), балалар санын, келісім жазбасын және қажетті техникалық деректерді (IP-мекенжай хэші, браузер туралы мәлімет) келуді рәсімдеу әрі оқиға кезінде байланысу үшін өңдеуге келісім беремін. Дербес деректерді өңдеу саясаты маған қолжетімді; заңда көзделген шектерде келісімді қайтарып ала алатынымды түсінемін.</span>
+              </span>
             </label>
             {dataDoc ? <div className="ml-9 mt-1 grid gap-2">{docCard(dataDoc)}</div> : null}
             {err("acceptPersonalData")}
@@ -254,7 +268,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
       <button type="submit" disabled={busy} className={buttonClass("primary", "w-full disabled:opacity-60")}>
         {busy ? "Сохраняем…" : status === "error" || status === "rate" ? "Попробовать снова" : "Зарегистрироваться"}
       </button>
-      <p className="text-center text-xs text-muted" data-testid="consent-operator">Оператор персональных данных: ИП Аманов</p>
+      <p className="text-center text-xs text-muted" data-testid="consent-operator">Оператор персональных данных: ИП «АМАНОВ» · Дербес деректер операторы: «АМАНОВ» ЖК</p>
     </form>
   );
 }
