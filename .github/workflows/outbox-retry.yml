@@ -1,0 +1,35 @@
+name: Outbox retry
+
+# Calls the platform's retry worker every 5 minutes: it re-sends Telegram notifications that failed and reports how many are stuck.
+# The secret CRON_SECRET lives only in this repository's encrypted Actions secrets (never in a file, never printed).
+# The run FAILS (and GitHub e-mails the owner) when the worker is unreachable, refuses the secret, or reports undelivered ("dead") messages.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outbox-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Run the outbox worker
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$CRON_SECRET" || { echo "CRON_SECRET is not configured"; exit 1; }
+          out=$(curl -sS --max-time 40 --retry 2 --retry-delay 5 -w '\n%{http_code}' -H "Authorization: Bearer ${CRON_SECRET}" https://boombala-platform.vercel.app/api/cron/outbox)
+          code=$(echo "$out" | tail -1)
+          body=$(echo "$out" | head -n -1)
+          echo "HTTP $code $body"
+          [ "$code" = "200" ]
+          echo "$body" | grep -q '"ok":true'
+          # undelivered messages after all retries: fail loudly
+          echo "$body" | grep -q '"dead":0'
