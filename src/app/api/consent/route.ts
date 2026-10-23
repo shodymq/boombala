@@ -1,5 +1,5 @@
 import { normalizePhone, NAME_MAX } from "@/lib/lead";
-import { fetchPublishedDocuments, PlatformError, sendConsentToPlatform } from "@/lib/platform";
+import { PlatformError, sendConsentToPlatform } from "@/lib/platform";
 import { siteMustRefuse } from "@/lib/site-profile";
 import { rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
 
@@ -49,25 +49,26 @@ export async function POST(request: Request) {
     if (name.length < 2) fieldErrors.name = "Укажите имя";
     else if (name.length > NAME_MAX) fieldErrors.name = "Слишком длинное имя";
     if (rawPhone && !phone) fieldErrors.phone = "Проверьте номер телефона";
+    // Number of children with the adult: an integer 1..50, nothing else is accepted (the browser's counter is only a convenience).
+    const rawCount = body.childrenCount;
+    const childrenCount = typeof rawCount === "number" ? rawCount : typeof rawCount === "string" && /^\d{1,2}$/.test(rawCount.trim()) ? Number(rawCount.trim()) : NaN;
+    if (!Number.isInteger(childrenCount) || childrenCount < 1 || childrenCount > 50) fieldErrors.childrenCount = "Укажите от 1 до 50 детей";
     if (body.acceptRules !== true) fieldErrors.acceptRules = "Подтвердите, что ознакомились с правилами";
     if (body.acceptPersonalData !== true) fieldErrors.acceptPersonalData = "Необходимо согласие на обработку данных";
     if (Object.keys(fieldErrors).length) return json({ ok: false, error: "validation", fieldErrors }, 400);
 
-    // The visitor consents to the editions they were SHOWN. If a different edition has been published since the page was
-    // rendered, nothing is recorded (409) and the page reloads the new texts. Clients that send no versions behave as before.
-    if (body.documentVersions !== undefined) {
-      const shown = body.documentVersions;
-      if (!shown || typeof shown !== "object" || Array.isArray(shown)) return json({ ok: false, error: "bad_request" }, 400);
-      try {
-        const current = (await fetchPublishedDocuments()).filter((d) => CONSENT_KINDS.includes(d.kind));
-        const same =
-          current.length === Object.keys(shown).length &&
-          current.every((d) => (shown as Record<string, unknown>)[d.kind] === d.version);
-        if (!same) return json({ ok: false, error: "documents_changed" }, 409);
-      } catch {
-        return json({ ok: false, error: "unavailable" }, 503);
-      }
-    }
+    // The editions the visitor was SHOWN are REQUIRED and travel to the platform, which compares them with the editions it records INSIDE
+    // its transaction (no check-then-write gap on this side, and no consent on an edition the platform merely picked). A mismatch
+    // records nothing and answers 409; a request without them is a 400.
+    const shown = body.documentVersions;
+    const versionsOk =
+      !!shown &&
+      typeof shown === "object" &&
+      !Array.isArray(shown) &&
+      Object.keys(shown).length <= 10 &&
+      Object.entries(shown).every(([k, v]) => CONSENT_KINDS.includes(k) && typeof v === "number" && Number.isInteger(v));
+    if (!versionsOk) return json({ ok: false, error: "bad_request" }, 400);
+    const documentVersions = shown as Record<string, number>;
 
     const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
     const limitKey = `consent:${ip}`;
@@ -79,6 +80,8 @@ export async function POST(request: Request) {
         idempotencyKey: UUID.test(clip(body.idempotencyKey, 40)) ? clip(body.idempotencyKey, 40) : crypto.randomUUID(),
         name,
         phone,
+        childrenCount,
+        documentVersions,
         acceptRules: true,
         acceptPersonalData: true,
         clientIp: ip,
@@ -87,6 +90,7 @@ export async function POST(request: Request) {
       if (!duplicate) rateLimitRecord(limitKey);
       return json({ ok: true });
     } catch (error) {
+      if (error instanceof PlatformError && error.kind === "documents_changed") return json({ ok: false, error: "documents_changed" }, 409);
       console.warn(`[consent] platform path failed (${error instanceof PlatformError ? error.kind : "unavailable"})`);
       return json({ ok: false, error: "unavailable" }, 503);
     }

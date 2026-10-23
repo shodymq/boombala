@@ -6,7 +6,7 @@ import { getContact, listContacts } from "../src/core/crm.ts";
 import { almatyToday } from "../src/core/dates.ts";
 import { ConflictError, ForbiddenError, NotFoundError, RetentionDisabledError, ValidationError } from "../src/core/errors.ts";
 import { exportContacts } from "../src/core/export.ts";
-import { hashIp, submitConsent, submitLead } from "../src/core/intake.ts";
+import { hashIp, submitLead } from "../src/core/intake.ts";
 import { approveDocument, createDraft, publishDocument } from "../src/core/legal.ts";
 import {
   ANONYMIZED_NAME,
@@ -18,7 +18,7 @@ import {
   runRetention,
   updateRetentionSettings,
 } from "../src/core/privacy.ts";
-import { makeUser, seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
+import { makeUser, seedFromSite, startTestDb, submitConsentV, type TestDb } from "./helpers/db.ts";
 
 const FUTURE = (() => {
   const d = new Date(`${almatyToday()}T00:00:00Z`);
@@ -37,7 +37,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
 
   /** A QR registration with an IP hash and a browser string, as the real route records them. */
   const register = (name: string, phone?: string | null) =>
-    submitConsent(db.pool, { idempotencyKey: randomUUID(), name, phone, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.5", ipPepper: "pepper", userAgent: "Mozilla/5.0 (Test)" });
+    submitConsentV(db.pool, { idempotencyKey: randomUUID(), name, phone, childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.5", ipPepper: "pepper", userAgent: "Mozilla/5.0 (Test)" });
   const contactOf = async (registrationId: string) => String(await scalar("SELECT contact_id v FROM bb.consent_registrations WHERE id = $1", [registrationId]));
   const lead = (name: string, phone: string) => ({ idempotencyKey: randomUUID(), name, phone, date: FUTURE, children: 5, consent: true as const });
   const events = async (contactId: string) => (await q("SELECT event, note, ip_hash, user_agent, document_id FROM bb.consent_events WHERE contact_id = $1 ORDER BY id", [contactId])).rows;
@@ -365,7 +365,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
     it("after anonymisation no table of the schema still holds the name, the phone, the address or the browser of the visitor", async () => {
       const name = "Реидент Проверкин";
       // values that exist nowhere else in this database, so the search below can only find this visitor's traces
-      const reg = await submitConsent(db.pool, { idempotencyKey: randomUUID(), name, phone: "+7 701 909 08 07", acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.77", ipPepper: "pepper-reident", userAgent: "UniqueBrowser/9.99-reident" });
+      const reg = await submitConsentV(db.pool, { idempotencyKey: randomUUID(), name, phone: "+7 701 909 08 07", childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.77", ipPepper: "pepper-reident", userAgent: "UniqueBrowser/9.99-reident" });
       const c = await contactOf(reg.registrationId);
       const ipHash = hashIp("203.0.113.77", "pepper-reident")!;
       assert.ok(JSON.stringify((await q("SELECT ip_hash, user_agent FROM bb.consent_events WHERE contact_id = $1", [c])).rows).includes(ipHash), "before: the hash and the browser string are stored");

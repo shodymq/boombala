@@ -49,7 +49,10 @@ for (const prof of PROFILES) {
   await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
   const main = await page.locator("main").innerText();
   ok(/ИП Аманов/.test(main), "the operator (ИП Аманов) is named on the page");
-  ok(/не означает посещение/.test(main) && !/Количество детей/.test(main), "the page says registration is not a visit and asks no children count");
+  const kidsField = page.locator('input[name="childrenCount"]');
+  ok(/не означает посещение/.test(main), "the page says registration is not a visit");
+  ok((await kidsField.count()) === 1 && (await kidsField.inputValue()) === "1" && /Сколько детей с вами/.test(main), "the page asks ONE thing about the children: how many (input[name=childrenCount], default 1)");
+  ok(!/имена? детей|дат[аы] рождения детей|ИИН/i.test(main.replace(/Нужно только количество[^.]*\./, "")), "no field or label asks for a child's name, birth date or ID number");
   ok((await page.locator("form").count()) === 1 && (await page.locator('input[name="name"]').count()) === 1, "the working form is shown (not the non-collecting preview)");
   const cards = await page.locator("details[data-doc-kind]").evaluateAll((ds) => ds.map((d) => ({ kind: d.dataset.docKind, head: d.querySelector("summary")?.textContent ?? "" })));
   ok(cards.length >= 2 && cards.every((c) => /редакция \d+/.test(c.head)), `every document card shows its title and edition (${cards.map((c) => c.kind).join(", ")})`);
@@ -59,6 +62,19 @@ for (const prof of PROFILES) {
   ok((await page.locator('form input[type="checkbox"]').count()) === 2, "two SEPARATE confirmations: rules and personal-data consent");
   ok(/необязательно/i.test(await page.locator("form").innerText()) && !(await page.locator('input[type="tel"]').evaluate((e) => e.required)), "the phone is optional");
   ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no sideways scroll");
+  const kids = page.locator('input[name="childrenCount"]');
+  const plus = page.getByRole("button", { name: "Увеличить количество детей" });
+  const minus = page.getByRole("button", { name: "Уменьшить количество детей" });
+  ok((await kids.inputValue()) === "1" && (await minus.isDisabled()), "the children counter starts at 1 and − is disabled");
+  const stepBoxes = [await minus.boundingBox(), await plus.boundingBox()];
+  ok(stepBoxes.every((b) => b && b.width >= 44 && b.height >= 44), "− and + are at least 44px");
+  await plus.click();
+  await plus.click();
+  ok((await kids.inputValue()) === "3", "+ twice gives 3");
+  await minus.click();
+  await minus.click();
+  ok((await kids.inputValue()) === "1", "− back to 1");
+  ok(!/имена детей|даты рождения детей/i.test(await page.locator("form label").allInnerTexts().then((t) => t.join(" "))), "no field for the children's names or birth dates");
 
   // the full text of a document opens and is readable
   const first = page.locator("details[data-doc-kind]").first();
@@ -112,11 +128,42 @@ for (const prof of PROFILES) {
   await page.getByText("Регистрация сохранена").waitFor({ timeout: 10000 });
   ok(true, "the retry is accepted");
   ok(posts.length === 2 && posts[0].idempotencyKey === posts[1].idempotencyKey, "the retry carries the same idempotency key (cannot create a second registration)");
+  ok(posts[1].childrenCount === 1 && typeof posts[1].childrenCount === "number", "the request carries the number of children");
   ok(posts[1].documentVersions && Object.keys(versions).every((k) => posts[1].documentVersions[k] === versions[k]), "the request names the editions that were shown");
   const done = await page.locator("main").innerText();
   ok(Object.keys(versions).every((k) => cards.find((c) => c.kind === k) && done.includes(`редакция ${versions[k]}`)) && /не бронирование и не отметка о посещении/.test(done), "the confirmation lists the accepted editions and says it is not a visit");
   ok(errs.length === 0, "no JavaScript errors");
   await ctx.close();
+}
+
+console.log("## 1, 3, 10 and 50 children: field, payload and the server's answer");
+{
+  for (const n of [1, 3, 10, 50]) {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const posts = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST" && r.url().endsWith("/api/consent")) posts.push(JSON.parse(r.postData() || "{}"));
+    });
+    await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
+    const kids = page.locator('input[name="childrenCount"]');
+    if (n === 3) {
+      await page.getByRole("button", { name: "Увеличить количество детей" }).click({ clickCount: 1 });
+      await page.getByRole("button", { name: "Увеличить количество детей" }).click();
+    } else if (n !== 1) {
+      await kids.fill(String(n));
+      await kids.blur();
+    }
+    ok((await kids.inputValue()) === String(n), `${n}: the field shows ${n}`);
+    await page.locator('input[name="name"]').fill(`ТЕСТ QR форма ${n} детей ${run}`);
+    await page.locator('input[name="acceptRules"]').check();
+    await page.locator('input[name="acceptPersonalData"]').check();
+    await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+    await page.getByText("Регистрация сохранена").waitFor({ timeout: 10000 });
+    ok(posts.length === 1 && posts[0].childrenCount === n && typeof posts[0].childrenCount === "number", `${n}: the payload carries childrenCount = ${n} as a number`);
+    ok((await page.locator("main").innerText()).includes(`Детей с вами: ${n}`), `${n}: the confirmation names ${n}`);
+    await ctx.close();
+  }
 }
 
 console.log("## double tap, changed documents, server-side edition check");
@@ -152,7 +199,7 @@ console.log("## double tap, changed documents, server-side edition check");
     fetch(BASE + "/api/consent", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: `ТЕСТ QR форма сервер ${run}`, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID(), documentVersions }),
+      body: JSON.stringify({ name: `ТЕСТ QR форма сервер ${run}`, childrenCount: 1, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID(), documentVersions }),
     });
   const stale = await send({ ...versions, personal_data_consent: 9999 });
   ok(stale.status === 409 && (await stale.json()).error === "documents_changed", "the server refuses a registration for an edition that is no longer published (409)");
@@ -160,6 +207,8 @@ console.log("## double tap, changed documents, server-side edition check");
   ok(missing.status === 409, "the server refuses when a shown document is missing from the list");
   const fine = await send(versions);
   ok(fine.status === 200, "the server accepts the editions that are published");
+  const noVersions = await fetch(BASE + "/api/consent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `ТЕСТ QR форма без редакций ${run}`, childrenCount: 1, acceptRules: true, acceptPersonalData: true, idempotencyKey: crypto.randomUUID() }) });
+  ok(noVersions.status === 400, "a request WITHOUT the editions is refused (400): the platform never records a consent on an edition it picked itself");
   const garbage = await send("x");
   ok(garbage.status === 400, "a malformed edition list is a 400");
 }

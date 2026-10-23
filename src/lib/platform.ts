@@ -16,7 +16,7 @@ export function leadPipeline(env: Record<string, string | undefined> = process.e
   return v === "dual" || v === "strict" ? v : "telegram-only";
 }
 
-export type PlatformFailure = "not_configured" | "unavailable" | "disabled" | "consent_unavailable" | "rejected";
+export type PlatformFailure = "not_configured" | "unavailable" | "disabled" | "consent_unavailable" | "rejected" | "documents_changed";
 
 export class PlatformError extends Error {
   constructor(readonly kind: PlatformFailure) {
@@ -62,6 +62,7 @@ async function call(path: string, init: { method: "GET" | "POST"; body?: unknown
 function fail(status: number, data: Record<string, unknown>): never {
   if (status === 503 && data.error === "intake_disabled") throw new PlatformError("disabled");
   if (status === 503 && data.error === "consent_unavailable") throw new PlatformError("consent_unavailable");
+  if (status === 409 && data.error === "documents_changed") throw new PlatformError("documents_changed");
   if (status >= 500 || status === 401) throw new PlatformError("unavailable");
   throw new PlatformError("rejected");
 }
@@ -109,6 +110,10 @@ export async function sendConsentToPlatform(input: {
   name: string;
   /** Optional: the QR registration may be made without a phone. */
   phone?: string | null;
+  /** Children who come with the adult, 1..50. Only a number is collected. */
+  childrenCount: number;
+  /** The editions the visitor saw (kind -> version); the platform compares them inside its transaction. */
+  documentVersions: Record<string, number>;
   acceptRules: true;
   acceptPersonalData: true;
   clientIp: string;

@@ -44,3 +44,11 @@ export class RetentionDisabledError extends Error {
     this.name = "RetentionDisabledError";
   }
 }
+
+/** The visitor consented to editions of the documents that are no longer the published ones: nothing is recorded. */
+export class DocumentsChangedError extends Error {
+  constructor() {
+    super("documents_changed");
+    this.name = "DocumentsChangedError";
+  }
+}

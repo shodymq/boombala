@@ -25,6 +25,7 @@ const ok = (c, m) => (console.log(c ? "  ok  " : "  FAIL", m), c || fails++);
 const shot = (page, name) => (OUT ? page.screenshot({ path: `${OUT}/${name}.png` }) : Promise.resolve());
 
 // Far-future, per-run dates: reservations are history and can never be deleted.
+const runTag = Date.now().toString(36); // names are unique per run: a lead left over from an earlier (failed) run must never be picked by `.first()`
 const base = 200 + Math.floor(Math.random() * 400);
 const dateAt = (n) => new Date(Date.now() + (base + n) * 864e5).toISOString().slice(0, 10);
 const D1 = dateAt(0);
@@ -129,7 +130,7 @@ console.log("## two managers confirm the same room at the same moment (real brow
     const r = await fetch(`${ADMIN}/api/intake/lead`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${process.env.PLATFORM_INTAKE_TOKEN}` },
-      body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), name: `ТЕСТ Гонка ${n}`, phone: `+7707000${n}${n}${n}${n}`, date: d, consent: true, packageId: "wow-party", slotId: 3, roomId: "ice-room" }),
+      body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), name: `ТЕСТ Гонка ${runTag} ${n}`, phone: `+7707000${n}${n}${n}${n}`, date: d, consent: true, packageId: "wow-party", slotId: 3, roomId: "ice-room" }),
     });
     return (await r.json()).leadId;
   };
@@ -140,9 +141,16 @@ console.log("## two managers confirm the same room at the same moment (real brow
   await Promise.all([login(pa, "owner@qa.test"), login(pb, "manager@qa.test")]);
   for (const p of [pa, pb]) await p.goto(ADMIN + "/requests", { waitUntil: "networkidle" });
   const confirm = (p, name) => p.locator("li", { hasText: name }).first().getByRole("button", { name: "Подтвердить бронь" });
-  await Promise.all([confirm(pa, "ТЕСТ Гонка 1").click(), confirm(pb, "ТЕСТ Гонка 2").click()]);
+  await Promise.all([confirm(pa, `ТЕСТ Гонка ${runTag} 1`).click(), confirm(pb, `ТЕСТ Гонка ${runTag} 2`).click()]);
   await Promise.all([pa.waitForURL(/\/bookings|\/requests/), pb.waitForURL(/\/bookings|\/requests/)]);
-  await pa.waitForTimeout(800);
+  // Both requests must have finished before the database is read: wait (up to 15 s, a loaded machine is slower than 800 ms) until one
+  // enquiry is confirmed and the other has had its answer, instead of a fixed pause.
+  for (let i = 0; i < 60; i++) {
+    const done = (await pool.query("SELECT count(*) FILTER (WHERE status = 'confirmed') AS c FROM bb.lead_requests WHERE id = ANY($1)", [[l1, l2]])).rows[0].c === "1";
+    const texts0 = [await pa.locator("body").innerText(), await pb.locator("body").innerText()];
+    if (done && texts0.some((t) => t.includes("уже занят"))) break;
+    await pa.waitForTimeout(250);
+  }
   const rows = await scalar("SELECT count(*) AS v FROM bb.slot_reservations WHERE slot_date = $1 AND slot_id = 3 AND room_id = 'ice-room' AND released_at IS NULL", [D2]);
   ok(rows === "1", "exactly one booking exists for the contested cell");
   const statuses = (await pool.query("SELECT status FROM bb.lead_requests WHERE id = ANY($1) ORDER BY status", [[l1, l2]])).rows.map((r) => r.status).join(",");

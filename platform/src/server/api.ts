@@ -2,7 +2,7 @@ import "server-only";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { ConsentUnavailableError, ValidationError } from "../core/errors.ts";
+import { ConsentUnavailableError, DocumentsChangedError, ValidationError } from "../core/errors.ts";
 import { telegramConfigFromEnv, sendTelegram } from "../core/telegram.ts";
 import { drainOutbox } from "../core/outbox.ts";
 import { getPool } from "./db.ts";
@@ -35,6 +35,7 @@ export async function readJson(request: Request, maxBytes = 8_000): Promise<unkn
 /** Maps domain errors to HTTP answers. Unknown errors become a bare 500 and are logged without the payload. */
 export function errorResponse(error: unknown): NextResponse {
   if (error instanceof ValidationError) return json({ ok: false, error: "validation", fields: error.fields }, 422);
+  if (error instanceof DocumentsChangedError) return json({ ok: false, error: "documents_changed" }, 409);
   if (error instanceof ConsentUnavailableError) return json({ ok: false, error: "consent_unavailable" }, 503);
   console.error(JSON.stringify({ event: "api.error", name: error instanceof Error ? error.name : "unknown" }));
   return json({ ok: false, error: "server" }, 500);

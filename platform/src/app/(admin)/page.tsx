@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { dayFigures } from "@/core/attendance";
+import { attendanceSchemaReady } from "@/core/preflight";
 import { BUSINESS_TIME_ZONE, catalogSummary } from "@/core/catalog";
+import { almatyToday } from "@/core/dates";
 import { outboxStats } from "@/core/outbox";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
@@ -12,6 +16,7 @@ const kzt = new Intl.NumberFormat("ru-RU");
 const ACCESS: Array<{ permission: Permission; label: string }> = [
   { permission: "requests.manage", label: "Заявки" },
   { permission: "bookings.manage", label: "Бронирования" },
+  { permission: "attendance.manage", label: "Посещаемость" },
   { permission: "contacts.view", label: "Клиенты" },
   { permission: "legal.manage", label: "Документы" },
   { permission: "news.manage", label: "Новости" },
@@ -23,10 +28,15 @@ const ACCESS: Array<{ permission: Permission; label: string }> = [
 export default async function DashboardPage() {
   const { user } = await requirePermission("dashboard.view");
   const pool = getPool();
-  const [migrations, summary, outbox] = await Promise.all([
+  const [migrations, summary, outbox, attendance] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
+    // Preflight: without migration 013 the card is replaced by a clear notice instead of a failing page.
+    can(user.role, "attendance.manage")
+      ? (async (): Promise<Awaited<ReturnType<typeof dayFigures>> | "outdated"> =>
+          (await attendanceSchemaReady(pool)) ? dayFigures(pool, { id: user.id, role: user.role }, almatyToday()) : "outdated")()
+      : Promise.resolve(null),
   ]);
   const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(new Date());
 
@@ -36,6 +46,32 @@ export default async function DashboardPage() {
         <h1 className="text-3xl font-black tracking-tight text-grape-800">Здравствуйте, {user.name}</h1>
         <p className="mt-1 text-sm text-muted">Сейчас {now} (Алматы)</p>
       </header>
+
+      {attendance === "outdated" ? (
+        <section aria-labelledby="att" className="rounded-3xl border border-line bg-sun-100 p-5" data-testid="dash-attendance-outdated">
+          <h2 id="att" className="text-lg font-black text-grape-800">Посещаемость недоступна</h2>
+          <p className="mt-2 text-sm">Схема базы данных устарела (нет миграции 013). Порядок: миграции 001–013, затем <code>npm run db:roles</code>, затем <code>npm run preflight</code>.</p>
+        </section>
+      ) : attendance ? (
+        <section aria-labelledby="att" className="rounded-3xl border border-line bg-white p-5" data-testid="dash-attendance">
+          <h2 id="att" className="text-lg font-black text-grape-800">Посещаемость сегодня</h2>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-muted">Детей фактически вошло</dt>
+              <dd className="text-3xl font-black tabular-nums text-grape-800">{attendance.childrenEntered}</dd>
+            </div>
+            <div>
+              <dt className="text-muted">Взрослых прошло QR-регистрацию</dt>
+              <dd className="text-3xl font-black tabular-nums text-grape-800">{attendance.adultsRegistered}</dd>
+            </div>
+            <div>
+              <dt className="text-muted">Детей ожидается (вход не подтверждён)</dt>
+              <dd className="text-3xl font-black tabular-nums text-grape-800">{attendance.childrenExpected}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-sm"><Link href="/attendance" className="font-extrabold text-grape-700 underline">Открыть «Посещаемость»</Link></p>
+        </section>
+      ) : null}
 
       {outbox ? (
         <section aria-labelledby="ob" className="rounded-3xl border border-line bg-white p-5">

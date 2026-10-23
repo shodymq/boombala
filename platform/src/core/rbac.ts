@@ -13,6 +13,8 @@ export const PERMISSIONS = [
   "bookings.manage",
   "contacts.view",
   "contacts.export",
+  /** Who actually came in: confirming QR registrations, manual entries, corrections and the attendance figures. */
+  "attendance.manage",
   "legal.manage",
   "news.manage",
   /** Withdrawal of consent, anonymisation and the retention settings: the Owner only. */
@@ -23,13 +25,13 @@ export type Permission = (typeof PERMISSIONS)[number];
 /**
  * Role matrix (MVP). Enforced on the server in every query/mutation; hidden buttons are only a convenience.
  *  owner   : everything
- *  manager : requests, bookings, clients (as far as needed to work with them)
+ *  manager : requests, bookings, clients (as far as needed to work with them), attendance
  *  editor  : news only
  */
 const MATRIX: Record<Role, readonly Permission[]> = {
   owner: PERMISSIONS,
   // `contacts.export` is NOT part of the manager role: it is granted per person (users.can_export), see canExport().
-  manager: ["dashboard.view", "catalog.view", "requests.manage", "bookings.manage", "contacts.view"],
+  manager: ["dashboard.view", "catalog.view", "requests.manage", "bookings.manage", "contacts.view", "attendance.manage"],
   editor: ["dashboard.view", "news.manage"],
 };
 
