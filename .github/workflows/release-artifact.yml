@@ -1,0 +1,50 @@
+name: release-artifact
+
+# Builds the deployable archive for the Kazakhstan server on Linux x86_64 (never on the VPS, never on a Mac).
+# Manual only. The archive holds no secrets: the environment files live on the server.
+on:
+  workflow_dispatch:
+    inputs:
+      public_site_url:
+        description: "Public https URL of the site, inlined into the build (e.g. https://boombala.kz)"
+        required: true
+        type: string
+      booking_calendar:
+        description: "NEXT_PUBLIC_BOOKING_CALENDAR (1 only after the real bookings are entered)"
+        required: false
+        default: "0"
+        type: string
+      news:
+        description: "NEXT_PUBLIC_NEWS"
+        required: false
+        default: "0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the archive
+        env:
+          PUBLIC_SITE_URL: ${{ inputs.public_site_url }}
+          BOOKING_CALENDAR: ${{ inputs.booking_calendar }}
+          NEWS: ${{ inputs.news }}
+        run: scripts/build-release.sh
+      - name: Archive facts (no secrets)
+        run: |
+          cat dist/RELEASE.json
+          cat dist/*.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boombala-release-${{ github.sha }}
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
