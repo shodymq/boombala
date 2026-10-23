@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - qa/qr-attendance-smoke
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
