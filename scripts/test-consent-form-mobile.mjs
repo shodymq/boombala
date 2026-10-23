@@ -48,7 +48,13 @@ for (const prof of PROFILES) {
 
   await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
   const main = await page.locator("main").innerText();
-  ok(/ИП Аманов/.test(main), "the operator (ИП Аманов) is named on the page");
+  ok(/Оператор персональных данных: ИП Аманов/.test(main), "the operator is named in one compact line");
+  ok((await page.locator('[data-testid="consent-operator"]').count()) === 1 && (await page.evaluate(() => { const b = document.querySelector("form button[type=submit]"), o = document.querySelector('[data-testid="consent-operator"]'); return !!b && !!o && b.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING; })), "the operator line sits right under the button");
+  const heading = await page.locator("h1").innerText();
+  ok(heading.trim() === "Регистрация сопровождающего" && /Заполните форму перед посещением центра\. Это займёт меньше минуты\./.test(main), "compact header: «Регистрация сопровождающего» and the one-line subtitle");
+  ok((await page.locator("main ol").count()) === 0 && !/\b0[123]\b\s*(Ваши данные|Документы|Согласие)/.test(main), "no 01/02/03 step blocks");
+  ok((await page.locator("main .bg-grape-800").count()) === 0, "no heavy hero block");
+  ok(!/Ознакомление с правилами и согласие/.test(main) && (await page.locator("form h2").count()) === 0, "no big section headings in the form");
   const kidsField = page.locator('input[name="childrenCount"]');
   ok(/не означает посещение/.test(main), "the page says registration is not a visit");
   ok((await kidsField.count()) === 1 && (await kidsField.inputValue()) === "1" && /Сколько детей с вами/.test(main), "the page asks ONE thing about the children: how many (input[name=childrenCount], default 1)");
@@ -57,8 +63,11 @@ for (const prof of PROFILES) {
   const cards = await page.locator("details[data-doc-kind]").evaluateAll((ds) => ds.map((d) => ({ kind: d.dataset.docKind, head: d.querySelector("summary")?.textContent ?? "" })));
   ok(cards.length >= 2 && cards.every((c) => /редакция \d+/.test(c.head)), `every document card shows its title and edition (${cards.map((c) => c.kind).join(", ")})`);
   const versions = Object.fromEntries(cards.map((c) => [c.kind, Number(/редакция (\d+)/.exec(c.head)[1])]));
-  const sectionTitles = await page.locator("form h2").allInnerTexts();
-  ok(sectionTitles.length === 3 && /Ваши данные/.test(sectionTitles[0]) && /Документы/.test(sectionTitles[1]) && /Подтверждения/.test(sectionTitles[2]), "three sections: data, documents, confirmations");
+  const fieldLabels = await page.locator("form label, form [role=group] > span").allInnerTexts();
+  ok(/Имя сопровождающего/.test(fieldLabels.join("|")) && /Телефон/.test(fieldLabels.join("|")) && /Сколько детей с вами/.test(fieldLabels.join("|")), "the main form has the name, the optional phone and the number of children");
+  const docRows = await page.locator("details[data-doc-kind]").evaluateAll((ds) => ds.map((d) => d.querySelector("summary").innerText.replace(/\s+/g, " ").trim()));
+  ok(docRows.some((t) => /^Правила посещения/.test(t)) && docRows.some((t) => /^Согласие на обработку персональных данных/.test(t)), `two compact collapsible documents: ${docRows.join(" | ")}`);
+  ok((await page.locator('details[data-doc-kind] [role="region"]').evaluateAll((rs) => rs.every((r) => getComputedStyle(r).display !== "none" || !r.closest("details").open))), "document texts stay collapsed until opened");
   ok((await page.locator('form input[type="checkbox"]').count()) === 2, "two SEPARATE confirmations: rules and personal-data consent");
   ok(/необязательно/i.test(await page.locator("form").innerText()) && !(await page.locator('input[type="tel"]').evaluate((e) => e.required)), "the phone is optional");
   ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no sideways scroll");
