@@ -1,5 +1,5 @@
 import { normalizePhone, NAME_MAX } from "@/lib/lead";
-import { PlatformError, sendConsentToPlatform } from "@/lib/platform";
+import { fetchPublishedDocuments, PlatformError, sendConsentToPlatform } from "@/lib/platform";
 import { siteMustRefuse } from "@/lib/site-profile";
 import { rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
 
@@ -8,6 +8,8 @@ export const runtime = "nodejs";
 const json = (body: Record<string, unknown>, status = 200, headers?: Record<string, string>) =>
   Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
 const clip = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+/** The documents a QR registration shows and records (same list as the page). */
+const CONSENT_KINDS = ["visit_rules", "companion_duties", "personal_data_consent"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** QR registration. No Telegram, no OTP: the contact and the consent history go to the CRM only. Off unless CONSENT_FORM_ENABLED=1. */
@@ -50,6 +52,22 @@ export async function POST(request: Request) {
     if (body.acceptRules !== true) fieldErrors.acceptRules = "Подтвердите, что ознакомились с правилами";
     if (body.acceptPersonalData !== true) fieldErrors.acceptPersonalData = "Необходимо согласие на обработку данных";
     if (Object.keys(fieldErrors).length) return json({ ok: false, error: "validation", fieldErrors }, 400);
+
+    // The visitor consents to the editions they were SHOWN. If a different edition has been published since the page was
+    // rendered, nothing is recorded (409) and the page reloads the new texts. Clients that send no versions behave as before.
+    if (body.documentVersions !== undefined) {
+      const shown = body.documentVersions;
+      if (!shown || typeof shown !== "object" || Array.isArray(shown)) return json({ ok: false, error: "bad_request" }, 400);
+      try {
+        const current = (await fetchPublishedDocuments()).filter((d) => CONSENT_KINDS.includes(d.kind));
+        const same =
+          current.length === Object.keys(shown).length &&
+          current.every((d) => (shown as Record<string, unknown>)[d.kind] === d.version);
+        if (!same) return json({ ok: false, error: "documents_changed" }, 409);
+      } catch {
+        return json({ ok: false, error: "unavailable" }, 503);
+      }
+    }
 
     const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
     const limitKey = `consent:${ip}`;

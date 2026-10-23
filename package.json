@@ -10,7 +10,8 @@
     "verify:menu": "node --no-warnings scripts/verify-menu.mjs",
     "test:funnel": "node --no-warnings --test scripts/test-funnel.mjs",
     "test:lead-api": "node --no-warnings scripts/test-lead-api.mjs",
-    "test:lead-form": "node --no-warnings scripts/test-lead-form-mobile.mjs"
+    "test:lead-form": "node --no-warnings scripts/test-lead-form-mobile.mjs",
+    "test:consent-form": "node --no-warnings scripts/test-consent-form-mobile.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
