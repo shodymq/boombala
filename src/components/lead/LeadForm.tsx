@@ -450,6 +450,11 @@ export function LeadForm({
               </>
             )}
           </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 pl-8 text-xs leading-relaxed text-muted">
+            <span>Полный текст согласия / Келісімнің толық мәтіні:</span>
+            <a href="/booking-consent#ru" target="_blank" rel="noopener" className="inline-flex min-h-11 min-w-11 items-center justify-center font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">RU</a>
+            <a href="/booking-consent#kk" target="_blank" rel="noopener" className="inline-flex min-h-11 min-w-11 items-center justify-center font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">KK</a>
+          </div>
           {err("consent")}
         </div>
 
