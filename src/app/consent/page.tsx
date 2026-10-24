@@ -30,24 +30,21 @@ export default async function ConsentPage() {
     <section aria-labelledby="consent-title" className="pb-14 pt-6 sm:pt-10">
       <Container>
         <div className="mx-auto max-w-xl">
-          <header>
-            <h1 id="consent-title" className="font-display text-[1.75rem] font-black leading-tight tracking-tight text-grape-800 sm:text-3xl">
-              Регистрация сопровождающего
-            </h1>
-            <p className="mt-2 text-base leading-relaxed text-muted">Заполните форму перед посещением центра. Это займёт меньше минуты.</p>
-          </header>
-
           {shown ? (
-            <div className="mt-5 rounded-3xl border border-grape-100 bg-white p-5 shadow-soft sm:p-7">
-              <ConsentForm documents={shown.map((d) => ({ kind: d.kind, version: d.version, title: d.title, body: d.body }))} />
-            </div>
+            // The working form draws its own heading, language switch and note (RU / KK).
+            <ConsentForm documents={shown.map((d) => ({ kind: d.kind, version: d.version, title: d.title, body: d.body }))} />
           ) : (
-            <ConsentDraftPreview />
+            <>
+              <header>
+                <h1 id="consent-title" className="font-display text-[1.75rem] font-black leading-tight tracking-tight text-grape-800 sm:text-3xl">
+                  Регистрация сопровождающего
+                </h1>
+                <p className="mt-2 text-base leading-relaxed text-muted">Заполните форму перед посещением центра. Это займёт меньше минуты.</p>
+              </header>
+              <ConsentDraftPreview />
+              <p className="mt-5 text-center text-xs leading-relaxed text-muted">Это не бронирование: регистрация не означает посещение. Бұл брондау емес: тіркелу келуді білдірмейді.</p>
+            </>
           )}
-
-          <p className="mt-5 text-center text-xs leading-relaxed text-muted">
-            Это не бронирование: регистрация не означает посещение. Данные детей здесь не запрашиваются, указывается только их количество. Бұл брондау емес: тіркелу келуді білдірмейді.
-          </p>
         </div>
       </Container>
     </section>
