@@ -32,6 +32,7 @@
     "e2e:news": "node --no-warnings e2e/news.e2e.mjs",
     "e2e:release": "node --no-warnings e2e/release.e2e.mjs",
     "e2e:isolation": "node --no-warnings e2e/isolation.e2e.mjs",
+    "e2e:frontdesk": "node --no-warnings e2e/frontdesk.e2e.mjs",
     "e2e:kz-flow": "node --no-warnings e2e/kz-flow.e2e.mjs",
     "e2e:attendance": "node --no-warnings e2e/attendance.e2e.mjs",
     "backup:check": "node --no-warnings scripts/backup-restore-check.mjs"

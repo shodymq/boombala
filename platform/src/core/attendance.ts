@@ -5,6 +5,7 @@ import { almatyToday, isValidDate } from "./dates.ts";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.ts";
 import { assertCan, type Actor } from "./rbac.ts";
 import type { RequestMeta } from "./users.ts";
+import { nameKey } from "./phone.ts";
 
 /**
  * Who actually came in. Rules (enforced by PostgreSQL, see migration 013):
@@ -165,6 +166,94 @@ export async function listRegistrations(db: Queryable, actor: Actor, date: strin
   }));
 }
 
+export type RegistrationFilter = "waiting" | "confirmed" | "all";
+export const REGISTRATION_FILTERS: readonly RegistrationFilter[] = ["waiting", "confirmed", "all"];
+export const SEARCH_PAGE = 50;
+export const SEARCH_MAX = 500;
+
+export interface RegistrationSearch {
+  rows: RegistrationRow[];
+  /** How many registrations match the search and the filter (rows may be fewer: the list is limited). */
+  matched: number;
+  /** The day's registrations by status, whatever the search says. */
+  counts: { waiting: number; confirmed: number; cancelled: number; all: number };
+}
+
+/** Escapes the characters that mean something to LIKE. */
+const likeEscape = (v: string) => v.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/**
+ * The cashier's list: the day's QR registrations, found by the adult's name (any part, any letter case) or by the registration
+ * number, narrowed by status, newest first and LIMITED. Only the matching rows leave the database: a hundred registrations
+ * at the door do not travel to the browser. The phone is never read here.
+ *
+ * Name search uses the normalised key stored with the contact (already lower-cased), so it does not depend on the
+ * database locale; contacts that were anonymised are never matched.
+ */
+export async function searchRegistrations(
+  db: Queryable,
+  actor: Actor,
+  date: string,
+  opts: { q?: string; filter?: RegistrationFilter; limit?: number } = {},
+): Promise<RegistrationSearch> {
+  assertCan(actor, "attendance.manage");
+  if (!isValidDate(date)) throw new ValidationError({ date: "Некорректная дата" });
+  const filter = REGISTRATION_FILTERS.includes(opts.filter as RegistrationFilter) ? (opts.filter as RegistrationFilter) : "waiting";
+  const limit = Math.min(SEARCH_MAX, Math.max(1, Math.trunc(Number(opts.limit)) || SEARCH_PAGE));
+  const q = (opts.q ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").slice(0, 60);
+  const params: unknown[] = [date];
+  let where = "";
+  // "№" becomes "No" under NFKC, so both spellings are accepted
+  const number = /^(?:[#№]|N[oо]\.?)?\s*(\d{1,9})$/i.exec(q);
+  if (number) {
+    params.push(Number(number[1]));
+    where += ` AND r.seq = $${params.length}`;
+  } else if (q) {
+    params.push(`%${likeEscape(nameKey(q))}%`);
+    where += ` AND c.anonymized_at IS NULL AND c.name_key LIKE $${params.length} ESCAPE '\\'`;
+  }
+  if (filter === "waiting") where += " AND e.id IS NULL";
+  if (filter === "confirmed") where += " AND e.id IS NOT NULL AND e.children_count > 0";
+  params.push(limit);
+  const from = `FROM bb.consent_registrations r JOIN bb.contacts c ON c.id = r.contact_id LEFT JOIN bb.attendance_entries e ON e.registration_id = r.id`;
+  const [list, counts] = await Promise.all([
+    db.query<{ id: string; seq: string; name: string; anon: Date | null; declared: number | null; created_at: Date; entry_id: string | null; entered: number | null; entered_at: Date | null; matched: string }>(
+      `SELECT r.id, r.seq, c.name, c.anonymized_at AS anon, r.children_count AS declared, r.created_at,
+              e.id AS entry_id, e.children_count AS entered, e.entered_at, count(*) OVER () AS matched
+         ${from}
+        WHERE ${ALMATY_DAY("r.created_at")} = $1::date${where}
+        ORDER BY r.seq DESC
+        LIMIT $${params.length}`,
+      params,
+    ),
+    db.query<{ waiting: string; confirmed: string; cancelled: string; total: string }>(
+      `SELECT count(*) FILTER (WHERE e.id IS NULL) AS waiting,
+              count(*) FILTER (WHERE e.id IS NOT NULL AND e.children_count > 0) AS confirmed,
+              count(*) FILTER (WHERE e.id IS NOT NULL AND e.children_count = 0) AS cancelled,
+              count(*) AS total
+         ${from}
+        WHERE ${ALMATY_DAY("r.created_at")} = $1::date`,
+      [date],
+    ),
+  ]);
+  const c = counts.rows[0];
+  return {
+    rows: list.rows.map((x) => ({
+      id: x.id,
+      seq: Number(x.seq),
+      name: x.anon ? "—" : x.name,
+      declaredChildren: x.declared,
+      createdAt: x.created_at.toISOString(),
+      status: x.entry_id === null ? "waiting" : x.entered! > 0 ? "confirmed" : "cancelled",
+      entryId: x.entry_id,
+      enteredChildren: x.entered,
+      enteredAt: x.entered_at ? x.entered_at.toISOString() : null,
+    })),
+    matched: list.rows[0] ? Number(list.rows[0].matched) : 0,
+    counts: { waiting: Number(c.waiting), confirmed: Number(c.confirmed), cancelled: Number(c.cancelled), all: Number(c.total) },
+  };
+}
+
 export interface EntryRow {
   id: string;
   method: "qr" | "manual";
@@ -215,6 +304,8 @@ export interface EntryResult {
   /** True when the entry already existed: nothing was added, the figures did not change. */
   duplicate: boolean;
   childrenCount: number;
+  /** The registration's number (for the cashier's confirmation message); absent for entries without a registration. */
+  registrationSeq?: number;
 }
 
 /**
@@ -233,7 +324,7 @@ export async function confirmRegistrationEntry(
   const count = requireCount(input.childrenCount);
   assertToday(input.onDate, input.at, input.allowBackfill);
   return withTx(pool, async (tx) => {
-    const reg = await tx.query<{ today: boolean }>(`SELECT (${ALMATY_DAY("created_at")} = ${ALMATY_DAY("now()")}) AS today FROM bb.consent_registrations WHERE id = $1`, [input.registrationId]);
+    const reg = await tx.query<{ today: boolean; seq: string }>(`SELECT (${ALMATY_DAY("created_at")} = ${ALMATY_DAY("now()")}) AS today, seq FROM bb.consent_registrations WHERE id = $1`, [input.registrationId]);
     if (!reg.rows[0]) throw new NotFoundError("registration");
     // A registration of an earlier day is not confirmed now (the entry would belong to a day the visitor did not register on).
     if (!reg.rows[0].today && !input.allowBackfill) throw new ValidationError({ date: "Вход можно записать только за сегодня" });
@@ -245,10 +336,10 @@ export async function confirmRegistrationEntry(
     );
     if (!ins.rows[0]) {
       const existing = await tx.query<{ id: string; children_count: number }>("SELECT id, children_count FROM bb.attendance_entries WHERE registration_id = $1", [input.registrationId]);
-      return { entryId: existing.rows[0].id, duplicate: true, childrenCount: existing.rows[0].children_count };
+      return { entryId: existing.rows[0].id, duplicate: true, childrenCount: existing.rows[0].children_count, registrationSeq: Number(reg.rows[0].seq) };
     }
     await writeAudit(tx, { actorUserId: actor.id, action: "attendance.confirmed", entityType: "attendance_entry", entityId: ins.rows[0].id, after: { method: "qr", children: count, registrationId: input.registrationId }, ...meta });
-    return { entryId: ins.rows[0].id, duplicate: false, childrenCount: count };
+    return { entryId: ins.rows[0].id, duplicate: false, childrenCount: count, registrationSeq: Number(reg.rows[0].seq) };
   });
 }
 
