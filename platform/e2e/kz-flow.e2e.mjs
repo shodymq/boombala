@@ -260,9 +260,9 @@ try {
   {
     const pr = await raw(SITE.port, "/privacy", { host: SITE.host });
     const t = pr.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-    ok(pr.status === 200 && t.includes("работают на сервере в Республике Казахстан") && t.includes("Қазақстан Республикасындағы серверде жұмыс істейді"), "/privacy describes storage and processing in Kazakhstan, RU and KK");
+    ok(pr.status === 200 && t.includes("функционируют на сервере в Республике Казахстан") && t.includes("Қазақстан Республикасындағы серверде орналасады"), "/privacy describes storage and processing in Kazakhstan, RU and KK");
     ok(!/Vercel|Supabase|Франкфурт/.test(t), "/privacy no longer names the foreign processors");
-    ok(/без имени и телефона/.test(t), "/privacy says Telegram receives no name and no phone");
+    ok(/без имени и номера телефона/.test(t), "/privacy says Telegram receives no name and no phone");
     let chunk = "";
     try { chunk = execFileSync("grep", ["-rl", "уходит только уведомление без имени и телефона", ".next/static"], { cwd: repo, stdio: "pipe" }).toString(); } catch { /* not found */ }
     ok(chunk.length > 0, "the birthday form carries the Kazakhstan notice (Telegram: notification without name and phone)");

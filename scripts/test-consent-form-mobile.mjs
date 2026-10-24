@@ -49,6 +49,13 @@ for (const prof of PROFILES) {
   await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
   const main = await page.locator("main").innerText();
   ok(/Оператор персональных данных: ИП «АМАНОВ»/.test(main), "the operator is named in one compact line");
+  ok(/Альтернативный способ ознакомления/.test(main) && /Баламалы танысу тәртібі/.test(main) && /сообщите сотруднику кассы/.test(main) && /касса қызметкеріне хабарлаңыз/.test(main), "the alternative way to read the Rules without the electronic form (cashier) is shown under the name field, RU and KK");
+  ok((await page.locator('[data-testid="alt-ack"]').evaluate((e) => e.getBoundingClientRect().top < document.querySelector('input[name="phone"]').getBoundingClientRect().top)), "...and it sits under the name field, before the phone");
+  {
+    const r = await fetch(`${BASE}/booking-consent`);
+    const t = (await r.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    ok(r.status === 200 && /Согласие на обработку данных при бронировании/.test(t) && /Брондау кезіндегі дербес деректерге келісім/.test(t) && /ИП «АМАНОВ»/.test(t) && !/0605305|ЕРБОЛҰЛЫ/.test(t), "/booking-consent: the full document 07 in RU and KK, no IIN or full name without the environment");
+  }
   ok((await page.locator('[data-testid="consent-operator"]').count()) === 1 && (await page.evaluate(() => { const b = document.querySelector("form button[type=submit]"), o = document.querySelector('[data-testid="consent-operator"]'); return !!b && !!o && b.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING; })), "the operator line sits right under the button");
   const heading = await page.locator("h1").innerText();
   ok(heading.trim() === "Регистрация сопровождающего" && /Заполните форму перед посещением центра\. Это займёт меньше минуты\./.test(main), "compact header: «Регистрация сопровождающего» and the one-line subtitle");
