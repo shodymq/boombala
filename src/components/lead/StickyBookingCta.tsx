@@ -21,9 +21,9 @@ export function StickyBookingCta() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // The cafe page is informational: no booking bar there.
+  // The cafe page is informational, and the QR consent flow must remain unobstructed on mobile.
   // Hidden while the menu is open: the menu carries its own booking button.
-  const show = visible && !isOpen && !menuOpen && !pathname.startsWith("/menu");
+  const show = visible && !isOpen && !menuOpen && !pathname.startsWith("/menu") && !pathname.startsWith("/consent");
   return (
     <div
       aria-hidden={!show}
