@@ -13,7 +13,10 @@ import {
   revokePasskey,
   revokePasskeysByEmail,
 } from "../src/core/passkeys.ts";
+import { beginEnrollment, confirmEnrollment } from "../src/core/mfa.ts";
 import { createSession, validateSession } from "../src/core/session.ts";
+import { grantStepUp, type StepUpPurpose } from "../src/core/stepup.ts";
+import { totpAt } from "../src/core/totp.ts";
 import { makeUser, startTestDb, type TestDb } from "./helpers/db.ts";
 import { VirtualAuthenticator } from "./helpers/virtual-authenticator.ts";
 
@@ -60,16 +63,40 @@ describe("Passkeys: registration, sign-in, revocation", () => {
   let manager2: Awaited<ReturnType<typeof makeUser>>;
   const A = (u: { id: string; role: "owner" | "manager" | "editor" }) => ({ id: u.id, role: u.role });
   const meta = (ip = "10.77.0.5") => ({ ip, userAgent: "test-agent" });
+  const MFA_KEY = Buffer.alloc(32, 9).toString("base64");
+  /** The authenticator app is the backup that must exist before a passkey can be added. */
+  async function ensureTotp(user: { id: string }) {
+    if ((await db.pool.query("SELECT 1 FROM bb.user_mfa WHERE user_id = $1 AND enrolled_at IS NOT NULL", [user.id])).rowCount) return;
+    const e = await beginEnrollment(db.pool, user.id, MFA_KEY);
+    await confirmEnrollment(db.pool, user.id, totpAt(e.secret, Date.now()), MFA_KEY);
+  }
+  /** A signed-in session of this person, and (optionally) a fresh step-up grant for one purpose. */
+  async function session(user: { id: string }, purpose?: StepUpPurpose) {
+    const { token } = await createSession(db.pool, user.id, { ip: "10.77.0.5" }, "verified", { mfaVerified: true });
+    const v = (await validateSession(db.pool, token))!;
+    if (purpose) await grantStepUp(db.pool, { userId: user.id, sessionId: v.sessionId, purpose, method: "totp" });
+    return { token, sessionId: v.sessionId, ctx: { ...meta(), sessionId: v.sessionId } };
+  }
   const device = (over: { userVerified?: boolean; backedUp?: boolean } = {}) => new VirtualAuthenticator({ rpID: cfg.rpID, origin: cfg.origins[0], ...over });
   const count = async (sql: string, p: unknown[] = []) => Number((await db.pool.query(sql, p)).rows[0].v);
   let ipN = 0;
   const freshIp = () => `10.77.1.${++ipN}`;
 
   async function enroll(user: { id: string; email: string; name: string }, a = device(), label = "iPhone") {
-    const options = await beginRegistration(db.pool, cfg, user, meta());
-    const passkey = await finishRegistration(db.pool, cfg, user, a.register(options), label, meta());
+    await ensureTotp(user);
+    const { ctx } = await session(user, "passkey_register");
+    const options = await beginRegistration(db.pool, cfg, user, ctx);
+    const passkey = await finishRegistration(db.pool, cfg, user, a.register(options), label, ctx);
     return { a, passkey };
   }
+  /** A context for a registration ceremony: the backup factor exists and a fresh step-up grant is in place. */
+  const reg = async (user: { id: string }) => {
+    await ensureTotp(user);
+    return (await session(user, "passkey_register")).ctx;
+  };
+  /** Revokes with a fresh step-up, as the endpoint does. */
+  const revoke = async (actor: { id: string; role: "owner" | "manager" | "editor" }, id: string) => revokePasskey(db.pool, actor, id, (await session(actor, "passkey_revoke")).ctx);
+  const revokeAll = async (actor: { id: string; role: "owner" | "manager" | "editor" }, userId: string) => revokeAllPasskeys(db.pool, actor, userId, (await session(actor, "passkeys_revoke_all")).ctx);
   async function signIn(a: VirtualAuthenticator, extra: { pendingToken?: string; pendingUserId?: string; ip?: string; over?: Parameters<VirtualAuthenticator["assert"]>[1] } = {}) {
     const ip = extra.ip ?? freshIp();
     const options = await beginLogin(db.pool, cfg, { pendingUserId: extra.pendingUserId }, meta(ip));
@@ -85,7 +112,7 @@ describe("Passkeys: registration, sign-in, revocation", () => {
   after(async () => db.stop());
 
   it("is off by default: nothing is issued", async () => {
-    await assert.rejects(() => beginRegistration(db.pool, { ...cfg, enabled: false }, manager), NotFoundError);
+    await assert.rejects(async () => beginRegistration(db.pool, { ...cfg, enabled: false }, manager, await reg(manager)), NotFoundError);
     await assert.rejects(() => beginLogin(db.pool, { ...cfg, enabled: false }, {}, meta()), NotFoundError);
   });
 
@@ -102,28 +129,29 @@ describe("Passkeys: registration, sign-in, revocation", () => {
   });
 
   it("the registration challenge is one-time, short-lived and belongs to the person who asked", async () => {
-    const o = await beginRegistration(db.pool, cfg, manager2, meta());
+    const ctx = await reg(manager2);
+    const o = await beginRegistration(db.pool, cfg, manager2, ctx);
     const a = device();
     const resp = a.register(o);
-    await finishRegistration(db.pool, cfg, manager2, resp, "Mac", meta());
-    await assert.rejects(() => finishRegistration(db.pool, cfg, manager2, resp, "Mac again", meta()), ValidationError, "replay of the same answer");
+    await finishRegistration(db.pool, cfg, manager2, resp, "Mac", ctx);
+    await assert.rejects(async () => finishRegistration(db.pool, cfg, manager2, resp, "Mac again", await reg(manager2)), ValidationError, "replay of the same answer");
     // another person cannot finish a ceremony that was started for someone else
-    const o2 = await beginRegistration(db.pool, cfg, manager2, meta());
-    await assert.rejects(() => finishRegistration(db.pool, cfg, owner, device().register(o2), "stolen", meta()), ValidationError);
+    const o2 = await beginRegistration(db.pool, cfg, manager2, await reg(manager2));
+    await assert.rejects(async () => finishRegistration(db.pool, cfg, owner, device().register(o2), "stolen", await reg(owner)), ValidationError);
     // an expired challenge
-    const o3 = await beginRegistration(db.pool, cfg, manager2, meta());
+    const o3 = await beginRegistration(db.pool, cfg, manager2, await reg(manager2));
     await db.pool.query("UPDATE bb.passkey_challenges SET expires_at = now() - interval '1 second' WHERE challenge = $1", [o3.challenge]);
-    await assert.rejects(() => finishRegistration(db.pool, cfg, manager2, device().register(o3), "late", meta()), ValidationError);
+    await assert.rejects(async () => finishRegistration(db.pool, cfg, manager2, device().register(o3), "late", await reg(manager2)), ValidationError);
     assert.equal(await count("SELECT count(*) v FROM bb.passkeys WHERE user_id = $1", [manager2.id]), 1, "only the honest registration is stored");
   });
 
   it("refuses a registration made on another origin, for another RP ID, or without user verification", async () => {
-    const o = await beginRegistration(db.pool, cfg, owner, meta());
-    await assert.rejects(() => finishRegistration(db.pool, cfg, owner, device().register(o, { origin: "https://evil.example" }), "x", meta()), ValidationError);
-    const o2 = await beginRegistration(db.pool, cfg, owner, meta());
-    await assert.rejects(() => finishRegistration(db.pool, cfg, owner, device().register(o2, { rpID: "evil.example" }), "x", meta()), ValidationError);
-    const o3 = await beginRegistration(db.pool, cfg, owner, meta());
-    await assert.rejects(() => finishRegistration(db.pool, cfg, owner, device({ userVerified: false }).register(o3), "x", meta()), ValidationError, "a key that did not verify the person is refused");
+    const o = await beginRegistration(db.pool, cfg, owner, await reg(owner));
+    await assert.rejects(async () => finishRegistration(db.pool, cfg, owner, device().register(o, { origin: "https://evil.example" }), "x", await reg(owner)), ValidationError);
+    const o2 = await beginRegistration(db.pool, cfg, owner, await reg(owner));
+    await assert.rejects(async () => finishRegistration(db.pool, cfg, owner, device().register(o2, { rpID: "evil.example" }), "x", await reg(owner)), ValidationError);
+    const o3 = await beginRegistration(db.pool, cfg, owner, await reg(owner));
+    await assert.rejects(async () => finishRegistration(db.pool, cfg, owner, device({ userVerified: false }).register(o3), "x", await reg(owner)), ValidationError, "a key that did not verify the person is refused");
     assert.equal(await count("SELECT count(*) v FROM bb.passkeys WHERE user_id = $1", [owner.id]), 0);
     assert.ok((await count("SELECT count(*) v FROM bb.audit_log WHERE action = 'passkey.register_failed'")) >= 3, "failures are audited");
   });
@@ -223,12 +251,12 @@ describe("Passkeys: registration, sign-in, revocation", () => {
     const u = await makeUser(db.pool, "manager", "revoker@example.test");
     const { a, passkey } = await enroll(u, device(), "To revoke");
     assert.equal((await signIn(a)).ok, true);
-    await revokePasskey(db.pool, A(u), passkey.id, meta());
+    await revoke(A(u), passkey.id);
     assert.equal((await signIn(a)).ok, false);
     assert.equal((await listPasskeys(db.pool, u.id)).length, 0);
     assert.equal((await listPasskeys(db.pool, u.id, { includeRevoked: true })).length, 1, "the history stays");
     assert.equal(await count("SELECT count(*) v FROM bb.audit_log WHERE action = 'passkey.revoked' AND entity_id = $1", [passkey.id]), 1);
-    await revokePasskey(db.pool, A(u), passkey.id, meta()); // idempotent
+    await revoke(A(u), passkey.id); // idempotent
     assert.equal(await count("SELECT count(*) v FROM bb.audit_log WHERE action = 'passkey.revoked' AND entity_id = $1", [passkey.id]), 1);
   });
 
@@ -237,20 +265,20 @@ describe("Passkeys: registration, sign-in, revocation", () => {
     const { a, passkey } = await enroll(u, device(), "Lost phone");
     const login = await signIn(a);
     assert.equal(login.ok, true);
-    await assert.rejects(() => revokePasskey(db.pool, A(manager), passkey.id, meta()), ForbiddenError);
-    await assert.rejects(() => revokeAllPasskeys(db.pool, A(manager), u.id, meta()), ForbiddenError);
+    await assert.rejects(() => revoke(A(manager), passkey.id), ForbiddenError);
+    await assert.rejects(() => revokeAll(A(manager), u.id), ForbiddenError);
     assert.equal((await signIn(a)).ok, true, "nothing changed");
-    await revokePasskey(db.pool, A(owner), passkey.id, meta());
+    await revoke(A(owner), passkey.id);
     assert.equal((await signIn(a)).ok, false);
     if (login.ok) assert.equal(await validateSession(db.pool, login.token), null, "the open session of that person ended");
-    await assert.rejects(() => revokePasskey(db.pool, A(owner), "00000000-0000-0000-0000-000000000000", meta()), NotFoundError);
+    await assert.rejects(() => revoke(A(owner), "00000000-0000-0000-0000-000000000000"), NotFoundError);
   });
 
   it("the Owner revokes every key of a person at once; the break-glass by e-mail does the same", async () => {
     const u = await makeUser(db.pool, "manager", "twokeys@example.test");
     const one = (await enroll(u, device(), "Phone")).a;
     const two = (await enroll(u, device(), "Laptop")).a;
-    assert.equal(await revokeAllPasskeys(db.pool, A(owner), u.id, meta()), 2);
+    assert.equal(await revokeAll(A(owner), u.id), 2);
     assert.equal((await signIn(one)).ok || (await signIn(two)).ok, false);
     const v = await makeUser(db.pool, "manager", "console@example.test");
     const k = (await enroll(v, device(), "Phone")).a;
@@ -265,10 +293,10 @@ describe("Passkeys: registration, sign-in, revocation", () => {
     const u = await makeUser(db.pool, "manager", "many@example.test");
     const first = device();
     await enroll(u, first, "k0");
-    const dupOptions = await beginRegistration(db.pool, cfg, u, meta(freshIp()));
-    await assert.rejects(() => finishRegistration(db.pool, cfg, u, first.register(dupOptions), "again", meta()), ConflictError);
+    const dupOptions = await beginRegistration(db.pool, cfg, u, await reg(u));
+    await assert.rejects(async () => finishRegistration(db.pool, cfg, u, first.register(dupOptions), "again", await reg(u)), ConflictError);
     for (let i = 1; i < MAX_ACTIVE_PASSKEYS; i++) await enroll(u, device(), `k${i}`);
-    await assert.rejects(() => beginRegistration(db.pool, cfg, u, meta(freshIp())), ConflictError);
+    await assert.rejects(async () => beginRegistration(db.pool, cfg, u, await reg(u)), ConflictError);
   });
 
   it("the stored data cannot sign in as anyone: no secret in any table", async () => {

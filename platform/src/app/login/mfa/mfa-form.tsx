@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
-import { submitSecondFactor, type MfaState } from "./actions.ts";
+import { redeemEnrollmentAction, submitSecondFactor, type MfaState } from "./actions.ts";
 
 const field = "h-12 rounded-2xl border-2 border-grape-200 bg-white px-4 text-base font-normal text-ink focus:border-grape-600 focus:outline-none";
 
-export function MfaForm({ enrolled, signedIn, secret, otpauth }: { enrolled: boolean; signedIn: boolean; secret?: string; otpauth?: string }) {
-  const [state, action, pending] = useActionState<MfaState | undefined, FormData>(submitSecondFactor, undefined);
+export function MfaForm({ enrolled, signedIn, needsCode, secret, otpauth }: { enrolled: boolean; signedIn: boolean; needsCode?: boolean; secret?: string; otpauth?: string }) {
+  const [state, action, pending] = useActionState<MfaState | undefined, FormData>(needsCode ? redeemEnrollmentAction : submitSecondFactor, undefined);
 
   if (state?.recoveryCodes) {
     return (
@@ -31,6 +31,23 @@ export function MfaForm({ enrolled, signedIn, secret, otpauth }: { enrolled: boo
         <p className="text-sm text-muted">Вы уже вошли.</p>
         <Link href="/" className="inline-flex h-12 items-center justify-center rounded-full bg-grape-700 text-base font-extrabold text-white hover:bg-grape-600">Продолжить</Link>
       </div>
+    );
+  }
+
+  if (needsCode) {
+    return (
+      <form action={action} className="mt-6 grid gap-4" data-testid="enroll-code-form">
+        <div className="grid gap-2 text-sm">
+          <p className="font-bold text-grape-800">Нужен код настройки</p>
+          <p className="text-muted">Для первого входа владелец выдаёт одноразовый код. Пароля недостаточно. Попросите код у владельца лично и введите его здесь.</p>
+        </div>
+        <label className="grid gap-1.5 text-sm font-bold text-grape-800">
+          Код настройки
+          <input name="code" inputMode="text" autoComplete="off" autoCapitalize="characters" required maxLength={24} placeholder="XXXX-XXXX-XXXX" className={field} />
+        </label>
+        {state?.error ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-semibold text-grape-900">{state.error}</p> : null}
+        <button type="submit" disabled={pending} className="h-12 rounded-full bg-grape-700 text-base font-extrabold text-white hover:bg-grape-600 disabled:opacity-60">{pending ? "Проверяем…" : "Продолжить"}</button>
+      </form>
     );
   }
 

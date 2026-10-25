@@ -18,6 +18,26 @@ export async function passkeyRequest(request: Request): Promise<{ body: Record<s
   return { body: body as Record<string, unknown> };
 }
 
+/**
+ * Guard for the endpoints that are not WebAuthn ceremonies themselves (step-up by code, revocation, enrolment codes): a same-origin JSON POST of a
+ * sane size. They work whether or not passkeys are switched on (the enrolment code and the code step-up do not need them).
+ */
+export async function jsonPost(request: Request): Promise<{ body: Record<string, unknown> } | NextResponse> {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  let ok = false;
+  try {
+    ok = !!origin && !!host && new URL(origin).host === host;
+  } catch {
+    ok = false;
+  }
+  if (!ok) return json({ ok: false, error: "origin" }, 403);
+  if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) return json({ ok: false, error: "content_type" }, 415);
+  const body = await readJson(request, 16_000);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return json({ ok: false, error: "bad_request" }, 400);
+  return { body: body as Record<string, unknown> };
+}
+
 export async function sessionCookieValue(): Promise<string | undefined> {
   return (await cookies()).get(SESSION_COOKIE)?.value;
 }
@@ -25,7 +45,7 @@ export async function sessionCookieValue(): Promise<string | undefined> {
 /** Domain errors to answers; no stack, SQL or detail reaches the browser. */
 export function passkeyError(error: unknown): NextResponse {
   if (error instanceof ValidationError) return json({ ok: false, error: "validation", fields: error.fields }, 422);
-  if (error instanceof ForbiddenError) return json({ ok: false, error: "forbidden" }, 403);
+  if (error instanceof ForbiddenError) return json({ ok: false, error: error.message === "step_up_required" ? "step_up_required" : "forbidden" }, error.message === "step_up_required" ? 401 : 403);
   if (error instanceof NotFoundError) return json({ ok: false, error: "not_found" }, 404);
   if (error instanceof ConflictError) {
     const locked = /^locked:(\d+)$/.exec(error.message);

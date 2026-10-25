@@ -16,7 +16,7 @@ import { anonymizeContact, retentionReport, revokeConsent, updateRetentionSettin
 import { totpAt } from "../src/core/totp.ts";
 import { changeRole, createUser, listUsers } from "../src/core/users.ts";
 import { listContacts } from "../src/core/crm.ts";
-import { makeUser, seedFromSite, startTestDb, submitConsentV, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
+import { authorizeEnrollment, makeUser, seedFromSite, startTestDb, submitConsentV, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
 
 const API_PW = "api-role-password-0123456789abc";
 const ADMIN_PW = "admin-role-password-0123456789";
@@ -28,7 +28,7 @@ const FUTURE = (() => {
 const KEY = Buffer.alloc(32, 21).toString("base64");
 
 /** Tables the public API must never reach. Every table of the schema is either in API_GRANTS or here, so a new table forces a decision. */
-const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkeys", "passkey_challenges", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections"];
+const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkeys", "passkey_challenges", "enrollment_codes", "step_up_grants", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections"];
 
 describe("Database roles: one per application, least privilege", () => {
   let db: TestDb;
@@ -100,7 +100,7 @@ describe("Database roles: one per application, least privilege", () => {
     });
 
     it("cannot read staff, sessions, second factors, the export log, retention settings, migrations, the audit log or the notification queue", async () => {
-      for (const t of ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkeys", "passkey_challenges", "export_log", "retention_settings", "schema_migrations", "audit_log", "outbox"]) {
+      for (const t of ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkeys", "passkey_challenges", "enrollment_codes", "step_up_grants", "export_log", "retention_settings", "schema_migrations", "audit_log", "outbox"]) {
         await denied(api, `SELECT * FROM bb.${t}`);
       }
     });
@@ -427,6 +427,7 @@ describe("Database roles: one per application, least privilege", () => {
       assert.ok((await listUsers(admin, owner2())).length >= 2);
       const login = await authenticate(admin, { email: staff.email, password: TEST_PASSWORD, ip: "10.77.0.5", mfaRequired: true });
       assert.ok(login.ok && login.mfa === "enroll");
+      await authorizeEnrollment(admin, staff.email, login.token);
       const e = await beginEnrollment(admin, staff.id, KEY);
       const done = await completeMfaLogin(admin, { pendingToken: login.token, code: totpAt(e.secret, Date.now()), mfaKey: KEY, ip: "10.77.0.5" });
       assert.ok(done.ok);

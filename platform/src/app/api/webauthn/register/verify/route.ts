@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   const { response, label } = checked.body;
   if (!response || typeof response !== "object" || typeof label !== "string") return json({ ok: false, error: "bad_request" }, 400);
   try {
-    const passkey = await finishRegistration(getPool(), passkeys, session.user, response as RegistrationResponseJSON, label, await requestMeta());
+    const passkey = await finishRegistration(getPool(), passkeys, session.user, response as RegistrationResponseJSON, label, { ...(await requestMeta()), sessionId: session.sessionId });
     return json({ ok: true, passkey });
   } catch (error) {
     return passkeyError(error);

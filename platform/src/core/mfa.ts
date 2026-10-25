@@ -128,12 +128,23 @@ export async function resetUserMfa(pool: Pool, actor: Actor, targetUserId: strin
     if (!u.rows[0]) throw new NotFoundError();
     await tx.query("DELETE FROM bb.user_mfa WHERE user_id = $1", [targetUserId]);
     await tx.query("DELETE FROM bb.mfa_recovery_codes WHERE user_id = $1", [targetUserId]);
+    const keys = await revokePasskeysIfAny(tx, targetUserId, actor.id);
     const ended = await revokeUserSessions(tx, targetUserId);
-    await writeAudit(tx, { actorUserId: actor.id, action: "mfa.reset", entityType: "user", entityId: targetUserId, after: { sessionsEnded: ended }, ...meta });
+    await writeAudit(tx, { actorUserId: actor.id, action: "mfa.reset", entityType: "user", entityId: targetUserId, after: { sessionsEnded: ended, passkeysRevoked: keys }, ...meta });
   });
 }
 
 /** Break-glass, run on the server by an administrator (see docs): same effect, actor is the server console. */
+/**
+ * A reset means "I do not trust this person's devices any more": their passkeys go too, so the only way back in is a NEW enrolment code
+ * (a password alone is never enough). Harmless on a database without migration 014.
+ */
+async function revokePasskeysIfAny(tx: Queryable, userId: string, revokedBy: string | null): Promise<number> {
+  if (!(await tx.query<{ t: string | null }>("SELECT to_regclass('bb.passkeys') AS t")).rows[0].t) return 0;
+  const res = await tx.query("UPDATE bb.passkeys SET revoked_at = now(), revoked_by = $2 WHERE user_id = $1 AND revoked_at IS NULL", [userId, revokedBy]);
+  return res.rowCount ?? 0;
+}
+
 export async function resetUserMfaByEmail(pool: Pool, email: string): Promise<boolean> {
   return withTx(pool, async (tx) => {
     const u = await tx.query<{ id: string }>("SELECT id FROM bb.users WHERE email = $1 FOR UPDATE", [email.trim().toLowerCase()]);
@@ -141,8 +152,9 @@ export async function resetUserMfaByEmail(pool: Pool, email: string): Promise<bo
     const id = u.rows[0].id;
     await tx.query("DELETE FROM bb.user_mfa WHERE user_id = $1", [id]);
     await tx.query("DELETE FROM bb.mfa_recovery_codes WHERE user_id = $1", [id]);
+    const keys = await revokePasskeysIfAny(tx, id, null);
     const ended = await revokeUserSessions(tx, id);
-    await writeAudit(tx, { actorUserId: null, action: "mfa.reset", entityType: "user", entityId: id, after: { sessionsEnded: ended, via: "server_console" } });
+    await writeAudit(tx, { actorUserId: null, action: "mfa.reset", entityType: "user", entityId: id, after: { sessionsEnded: ended, passkeysRevoked: keys, via: "server_console" } });
     return true;
   });
 }

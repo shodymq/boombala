@@ -1,3 +1,4 @@
+import { issueEnrollmentCodeByEmail, redeemEnrollmentCode } from "../../src/core/enrollment.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -85,4 +86,12 @@ export async function publishedVersions(db: Queryable): Promise<Record<string, n
 /** A QR registration as the real form makes it: it names the editions it was shown (documentVersions is mandatory). */
 export async function submitConsentV(pool: Queryable & Parameters<typeof submitConsent>[0], input: Omit<ConsentInput, "documentVersions"> & { documentVersions?: Record<string, number> }, meta?: IntakeMeta) {
   return submitConsent(pool, { ...input, documentVersions: input.documentVersions ?? (await publishedVersions(pool)) } as ConsentInput, meta);
+}
+
+/** The Owner's one-time code, issued from the console and redeemed in a pending session: a first factor is never enrolled with a password alone. */
+export async function authorizeEnrollment(pool: Queryable & Parameters<typeof issueEnrollmentCodeByEmail>[0], email: string, pendingToken: string, ip = "10.77.0.5"): Promise<void> {
+  const c = await issueEnrollmentCodeByEmail(pool, email);
+  if (!c) throw new Error("no such user");
+  const r = await redeemEnrollmentCode(pool, { pendingToken, code: c.code, ip });
+  if (!r.ok) throw new Error("the enrolment code was not accepted");
 }

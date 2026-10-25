@@ -4,7 +4,12 @@ import { isRole, type Role } from "./rbac.ts";
 
 /** Absolute lifetime and idle timeout of a staff session. */
 export const SESSION_ABSOLUTE_SECONDS = 7 * 24 * 3600;
-export const SESSION_IDLE_SECONDS = 12 * 3600;
+/**
+ * Idle timeout. 12 hours by default; a shared cash-desk tablet should use a short one (STAFF_SESSION_IDLE_MINUTES=30..60): with a passkey,
+ * signing in again takes two taps. Values outside 5..720 minutes are ignored.
+ */
+const idleMinutes = Number(process.env.STAFF_SESSION_IDLE_MINUTES);
+export const SESSION_IDLE_SECONDS = (Number.isInteger(idleMinutes) && idleMinutes >= 5 && idleMinutes <= 720 ? idleMinutes : 720) * 60;
 /** A session at the "password accepted, second factor pending" step is useless for the admin and short-lived. */
 export const PENDING_SESSION_SECONDS = 10 * 60;
 /** `last_seen_at` is refreshed at most this often (saves a write on every request). */
@@ -21,6 +26,8 @@ export interface SessionUser {
 export interface ValidSession {
   sessionId: string;
   user: SessionUser;
+  /** Only filled when asked for (`withEnroll`): the Owner's one-time code was redeemed in this pending session. */
+  enrollAuthorizedAt?: Date | null;
 }
 
 export function hashToken(token: string): Buffer {
@@ -62,6 +69,8 @@ export interface ValidateOptions {
    * earlier, without the factor, is refused even if its owner has enrolled since. Needs migration 011.
    */
   requireMfa?: boolean;
+  /** Also read `enroll_authorized_at` (migration 014). Only the second-factor page and its actions ask for it. */
+  withEnroll?: boolean;
 }
 
 /** Returns the user behind a token, or null when it is unknown, revoked, expired, idle too long or the user is disabled. */
@@ -76,9 +85,10 @@ export async function validateSession(db: Queryable, token: string | undefined, 
     role: string;
     can_export: boolean;
     stale: boolean;
+    enroll_authorized_at?: Date | null;
   }>(
     `SELECT s.id AS session_id, s.last_seen_at, u.id, u.email, u.name, u.role::text AS role, u.can_export,
-            (s.last_seen_at < now() - make_interval(secs => $3)) AS stale
+            (s.last_seen_at < now() - make_interval(secs => $3)) AS stale${options.withEnroll ? ", s.enroll_authorized_at" : ""}
        FROM bb.sessions s JOIN bb.users u ON u.id = s.user_id
       WHERE s.token_hash = $1
         AND s.revoked_at IS NULL
@@ -91,7 +101,11 @@ export async function validateSession(db: Queryable, token: string | undefined, 
   const row = rows[0];
   if (!row || !isRole(row.role)) return null;
   if (row.stale) await db.query("UPDATE bb.sessions SET last_seen_at = now() WHERE id = $1", [row.session_id]);
-  return { sessionId: row.session_id, user: { id: row.id, email: row.email, name: row.name, role: row.role, canExport: row.can_export } };
+  return {
+    sessionId: row.session_id,
+    user: { id: row.id, email: row.email, name: row.name, role: row.role, canExport: row.can_export },
+    ...(options.withEnroll ? { enrollAuthorizedAt: row.enroll_authorized_at ?? null } : {}),
+  };
 }
 
 export async function revokeSession(db: Queryable, token: string): Promise<void> {

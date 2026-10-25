@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   const session = await getSession();
   if (!session) return json({ ok: false, error: "unauthorized" }, 401);
   try {
-    const options = await beginRegistration(getPool(), passkeys, session.user, await requestMeta());
+    const options = await beginRegistration(getPool(), passkeys, session.user, { ...(await requestMeta()), sessionId: session.sessionId });
     return json({ ok: true, options });
   } catch (error) {
     return passkeyError(error);

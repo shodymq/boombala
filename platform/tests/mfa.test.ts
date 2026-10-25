@@ -7,7 +7,7 @@ import { can } from "../src/core/rbac.ts";
 import { createSession, revokeAllSessions, revokeSessionsWithoutMfa, validateSession } from "../src/core/session.ts";
 import { resetPasswordFromConsole } from "../src/core/users.ts";
 import { totpAt } from "../src/core/totp.ts";
-import { makeUser, startTestDb, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
+import { authorizeEnrollment, makeUser, startTestDb, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
 
 const KEY = Buffer.alloc(32, 11).toString("base64");
 const OTHER_KEY = Buffer.alloc(32, 12).toString("base64");
@@ -28,6 +28,7 @@ describe("Second factor (TOTP) for staff", () => {
     const user = await newStaff(role);
     const login = await passwordStep(user.email);
     assert.ok(login.ok && login.mfa === "enroll");
+    await authorizeEnrollment(db.pool, user.email, login.token);
     const e = await beginEnrollment(db.pool, user.id, KEY);
     const done = await completeMfaLogin(db.pool, { pendingToken: login.token, code: totpAt(e.secret, T0), mfaKey: KEY, ip: "10.77.0.5" }, T0);
     assert.ok(done.ok && done.recoveryCodes?.length === 10);
@@ -73,6 +74,7 @@ describe("Second factor (TOTP) for staff", () => {
       const u = await newStaff("owner");
       const login = await passwordStep(u.email);
       assert.ok(login.ok);
+      await authorizeEnrollment(db.pool, u.email, login.token);
       const e1 = await beginEnrollment(db.pool, u.id, KEY);
       const e2 = await beginEnrollment(db.pool, u.id, KEY);
       assert.equal(e1.secret, e2.secret, "a refresh shows the same secret");

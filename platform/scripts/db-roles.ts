@@ -40,10 +40,10 @@ export const API_GRANTS: Record<string, ApiTable> = {
 export const API_FUNCTION_PREFIX = "intake_";
 
 /** Tables the staff application may delete from (everything else is append-only or never deleted). */
-export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkey_challenges", "news_posts", "news_images"] as const;
+export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkey_challenges", "step_up_grants", "news_posts", "news_images"] as const;
 
 /** Tables introduced by migrations after the first release of this list: allowed to be missing when the roles are applied. */
-const ADMIN_DELETE_LATER = ["passkey_challenges"] as const;
+const ADMIN_DELETE_LATER = ["passkey_challenges", "step_up_grants"] as const;
 
 const ident = (name: string) => `"${name.replace(/"/g, '""')}"`;
 

@@ -13,9 +13,11 @@ import { withTx } from "./db.ts";
 import { writeAudit } from "./audit.ts";
 import { lockedFor } from "./auth.ts";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors.ts";
+import { isEnrolled } from "./mfa.ts";
 import { assertCan, can, type Actor } from "./rbac.ts";
 import type { PasskeyConfig } from "./passkey-config.ts";
 import { createSession, revokeSession, revokeUserSessions, validateSession } from "./session.ts";
+import { consumeStepUp, grantStepUp, hasStepUp, type StepUpPurpose } from "./stepup.ts";
 
 /**
  * Passkeys (WebAuthn) as a way to sign in for staff: Face ID, Touch ID, Windows Hello, a security key.
@@ -38,6 +40,11 @@ export const MAX_OPEN_CHALLENGES_PER_IP = 20;
 export interface PasskeyMeta {
   ip?: string | null;
   userAgent?: string | null;
+}
+
+/** What the sensitive operations need besides the request meta: the session the person is acting in (their step-up grant is bound to it). */
+export interface PasskeyContext extends PasskeyMeta {
+  sessionId: string;
 }
 
 export interface PasskeyRow {
@@ -107,8 +114,12 @@ export async function countActivePasskeys(db: Queryable): Promise<Map<string, nu
 
 // ── registration (a signed-in person adds a device) ─────────────────────────────────────────────────
 
-export async function beginRegistration(pool: Pool, cfg: PasskeyConfig, user: { id: string; email: string; name: string }, meta: PasskeyMeta = {}): Promise<PublicKeyCredentialCreationOptionsJSON> {
+export async function beginRegistration(pool: Pool, cfg: PasskeyConfig, user: { id: string; email: string; name: string }, ctx: PasskeyContext): Promise<PublicKeyCredentialCreationOptionsJSON> {
   requireEnabled(cfg);
+  // A passkey is added on top of the authenticator app, which stays as the backup (and the way back in after a lost device).
+  if (!(await isEnrolled(pool, user.id))) throw new ConflictError("totp_required");
+  // The fresh proof of identity is checked BEFORE anything is issued (and consumed when the key is stored).
+  if (!(await hasStepUp(pool, user.id, ctx.sessionId, "passkey_register"))) throw new ForbiddenError("step_up_required");
   const existing = await listPasskeys(pool, user.id);
   if (existing.length >= MAX_ACTIVE_PASSKEYS) throw new ConflictError("too_many_passkeys");
   const credIds = (await pool.query<{ credential_id: string; transports: string[] }>("SELECT credential_id, transports FROM bb.passkeys WHERE user_id = $1 AND revoked_at IS NULL", [user.id])).rows;
@@ -124,7 +135,7 @@ export async function beginRegistration(pool: Pool, cfg: PasskeyConfig, user: { 
     // a discoverable credential (the sign-in page asks for no e-mail) and mandatory user verification (Face ID / Touch ID / device PIN)
     authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" },
   });
-  await storeChallenge(pool, options.challenge, "register", user.id, meta);
+  await storeChallenge(pool, options.challenge, "register", user.id, ctx);
   return options;
 }
 
@@ -134,11 +145,12 @@ export async function finishRegistration(
   user: { id: string },
   response: RegistrationResponseJSON,
   labelInput: string,
-  meta: PasskeyMeta = {},
+  ctx: PasskeyContext,
 ): Promise<PasskeyRow> {
   requireEnabled(cfg);
   const label = labelInput.normalize("NFKC").trim().replace(/\s+/g, " ").slice(0, 60);
   if (!label) throw new ValidationError({ label: "Назовите устройство" });
+  if (!(await hasStepUp(pool, user.id, ctx.sessionId, "passkey_register"))) throw new ForbiddenError("step_up_required");
   let challengeOwner: string | null | undefined;
   const verification = await verifyRegistrationResponse({
     response,
@@ -152,14 +164,15 @@ export async function finishRegistration(
     requireUserPresence: true,
     requireUserVerification: true,
   }).catch(async () => {
-    await writeAudit(pool, { actorUserId: user.id, action: "passkey.register_failed", entityType: "user", entityId: user.id, ip: meta.ip, userAgent: meta.userAgent });
+    await writeAudit(pool, { actorUserId: user.id, action: "passkey.register_failed", entityType: "user", entityId: user.id, ip: ctx.ip, userAgent: ctx.userAgent });
     throw new ValidationError({ passkey: "Не удалось проверить ключ. Повторите." });
   });
   if (!verification.verified || challengeOwner !== user.id) throw new ValidationError({ passkey: "Не удалось проверить ключ. Повторите." });
   const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
   return withTx(pool, async (tx) => {
-    // serialise the limit check per user
+    // serialise the limit check per user, then spend the step-up grant: two parallel requests cannot both register on one confirmation
     await tx.query("SELECT id FROM bb.users WHERE id = $1 FOR UPDATE", [user.id]);
+    await consumeStepUp(tx, user.id, ctx.sessionId, "passkey_register");
     const active = Number((await tx.query<{ n: string }>("SELECT count(*) AS n FROM bb.passkeys WHERE user_id = $1 AND revoked_at IS NULL", [user.id])).rows[0].n);
     if (active >= MAX_ACTIVE_PASSKEYS) throw new ConflictError("too_many_passkeys");
     const dup = await tx.query("SELECT 1 FROM bb.passkeys WHERE credential_id = $1", [credential.id]);
@@ -169,7 +182,7 @@ export async function finishRegistration(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [user.id, credential.id, Buffer.from(credential.publicKey), credential.counter, credential.transports ?? [], credentialDeviceType, credentialBackedUp, label],
     );
-    await writeAudit(tx, { actorUserId: user.id, action: "passkey.registered", entityType: "passkey", entityId: ins.rows[0].id, after: { label, deviceType: credentialDeviceType, backedUp: credentialBackedUp }, ip: meta.ip, userAgent: meta.userAgent });
+    await writeAudit(tx, { actorUserId: user.id, action: "passkey.registered", entityType: "passkey", entityId: ins.rows[0].id, after: { label, deviceType: credentialDeviceType, backedUp: credentialBackedUp }, ip: ctx.ip, userAgent: ctx.userAgent });
     return (await listPasskeys(tx, user.id)).find((p) => p.id === ins.rows[0].id)!;
   });
 }
@@ -208,44 +221,40 @@ export interface PasskeyLoginInput {
   userAgent?: string | null;
 }
 
-export async function finishLogin(pool: Pool, cfg: PasskeyConfig, input: PasskeyLoginInput): Promise<PasskeyLoginResult> {
-  requireEnabled(cfg);
-  const ip = ipOf(input);
-  const meta = { ip, userAgent: input.userAgent };
-  const wait = await lockedFor(pool, `passkey@${ip}`, ip);
-  if (wait > 0) return { ok: false, reason: "locked", retryAfterSeconds: wait };
+interface KeyRow {
+  id: string;
+  user_id: string;
+  public_key: Buffer;
+  counter: string;
+  transports: string[];
+  is_active: boolean;
+  email: string;
+}
 
-  const fail = async (userId: string | null, why: string): Promise<PasskeyLoginResult> => {
-    await pool.query("INSERT INTO bb.login_attempts (email_norm, ip, success) VALUES ($1, $2, false)", [`passkey@${ip}`, ip]);
-    await writeAudit(pool, { actorUserId: userId, action: "auth.passkey_failed", entityType: "user", entityId: userId ?? undefined, after: { why }, ...meta });
-    return { ok: false, reason: "invalid" };
-  };
+type Assertion = { ok: true; row: KeyRow; newCounter: number } | { ok: false; userId: string | null; why: string };
 
-  const credentialId = typeof input.response?.id === "string" ? input.response.id : "";
+/**
+ * The cryptographic part, shared by the sign-in and the step-up: finds the (active) key, lets the library verify the signature, origin, RP ID,
+ * user verification and the challenge (consumed once), and checks that the key belongs to the person the ceremony was for.
+ * Nothing is written here except the consumed challenge.
+ */
+async function verifyAssertion(pool: Pool, cfg: PasskeyConfig, response: AuthenticationResponseJSON, expectUserId: string | null): Promise<Assertion> {
+  const credentialId = typeof response?.id === "string" ? response.id.slice(0, 1400) : "";
   const row = (
-    await pool.query<{ id: string; user_id: string; public_key: Buffer; counter: string; transports: string[]; is_active: boolean; email: string }>(
+    await pool.query<KeyRow>(
       `SELECT p.id, p.user_id, p.public_key, p.counter, p.transports, u.is_active, u.email
          FROM bb.passkeys p JOIN bb.users u ON u.id = p.user_id
         WHERE p.credential_id = $1 AND p.revoked_at IS NULL`,
-      [credentialId.slice(0, 1400)],
+      [credentialId],
     )
   ).rows[0];
-  if (!row || !row.is_active) return fail(row?.user_id ?? null, row ? "user_disabled" : "unknown_key");
-
-  // The second-factor page: the key must belong to the person whose password was just accepted.
-  let pendingOk = true;
-  if (input.pendingToken) {
-    const pending = await validateSession(pool, input.pendingToken, { state: "pending" });
-    pendingOk = pending !== null && pending.user.id === row.user_id;
-  }
-  if (!pendingOk) return fail(row.user_id, "pending_user_mismatch");
-
+  if (!row || !row.is_active) return { ok: false, userId: row?.user_id ?? null, why: row ? "user_disabled" : "unknown_key" };
+  if (expectUserId !== null && row.user_id !== expectUserId) return { ok: false, userId: row.user_id, why: "user_mismatch" };
   let challengeUser: string | null | undefined;
-  let verified = false;
   let newCounter = Number(row.counter);
   try {
     const v = await verifyAuthenticationResponse({
-      response: input.response,
+      response,
       expectedChallenge: async (challenge) => {
         const c = await consumeChallenge(pool, challenge, "login");
         challengeUser = c ? c.userId : undefined;
@@ -256,52 +265,150 @@ export async function finishLogin(pool: Pool, cfg: PasskeyConfig, input: Passkey
       credential: { id: credentialId, publicKey: new Uint8Array(row.public_key), counter: Number(row.counter), transports: row.transports as never },
       requireUserVerification: true,
     });
-    verified = v.verified;
+    if (!v.verified) return { ok: false, userId: row.user_id, why: "not_verified" };
     newCounter = v.authenticationInfo.newCounter;
   } catch {
-    return fail(row.user_id, "verification_failed");
+    return { ok: false, userId: row.user_id, why: "verification_failed" };
   }
-  // A challenge issued for one person (the second-factor page) cannot be answered with another person's key.
-  if (!verified || challengeUser === undefined || (challengeUser !== null && challengeUser !== row.user_id)) return fail(row.user_id, "challenge_mismatch");
+  // A challenge issued for one person (the second-factor page, a step-up) cannot be answered with another person's key.
+  if (challengeUser === undefined || (challengeUser !== null && challengeUser !== row.user_id)) return { ok: false, userId: row.user_id, why: "challenge_mismatch" };
   // The authenticator's user handle (when it sends one) must be this user's.
-  const handle = input.response.response.userHandle;
-  if (handle && Buffer.from(handle, "base64url").toString("hex") !== row.user_id.replace(/-/g, "")) return fail(row.user_id, "user_handle_mismatch");
+  const handle = response.response.userHandle;
+  if (handle && Buffer.from(handle, "base64url").toString("hex") !== row.user_id.replace(/-/g, "")) return { ok: false, userId: row.user_id, why: "user_handle_mismatch" };
+  return { ok: true, row, newCounter };
+}
+
+/**
+ * Records the use of the key INSIDE the transaction, atomically: the key must still be active (it may have been revoked a moment ago),
+ * the person still enabled, and the counter must move forward (two parallel answers with the same counter: one wins). Returns false when
+ * any of it no longer holds; the caller then fails the sign-in.
+ */
+async function commitAssertion(tx: Queryable, row: KeyRow, newCounter: number): Promise<boolean> {
+  const active = await tx.query("SELECT 1 FROM bb.users WHERE id = $1 AND is_active FOR UPDATE", [row.user_id]);
+  if (!active.rows[0]) return false;
+  const upd = await tx.query(
+    `UPDATE bb.passkeys SET counter = $2, last_used_at = now()
+      WHERE id = $1 AND revoked_at IS NULL AND ((counter = 0 AND $2 = 0) OR counter < $2) RETURNING id`,
+    [row.id, newCounter],
+  );
+  return upd.rows.length === 1;
+}
+
+async function failAssertion(pool: Pool, ip: string, userAgent: string | null | undefined, userId: string | null, why: string): Promise<void> {
+  await pool.query("INSERT INTO bb.login_attempts (email_norm, ip, success) VALUES ($1, $2, false)", [`passkey@${ip}`, ip]);
+  await writeAudit(pool, { actorUserId: userId, action: "auth.passkey_failed", entityType: "user", entityId: userId ?? undefined, after: { why }, ip, userAgent });
+}
+
+export async function finishLogin(pool: Pool, cfg: PasskeyConfig, input: PasskeyLoginInput): Promise<PasskeyLoginResult> {
+  requireEnabled(cfg);
+  const ip = ipOf(input);
+  const wait = await lockedFor(pool, `passkey@${ip}`, ip);
+  if (wait > 0) return { ok: false, reason: "locked", retryAfterSeconds: wait };
+  const fail = async (userId: string | null, why: string): Promise<PasskeyLoginResult> => {
+    await failAssertion(pool, ip, input.userAgent, userId, why);
+    return { ok: false, reason: "invalid" };
+  };
+
+  // The second-factor page: the key must belong to the person whose password was just accepted.
+  let expectUser: string | null = null;
+  if (input.pendingToken) {
+    const pending = await validateSession(pool, input.pendingToken, { state: "pending" });
+    if (!pending) return fail(null, "pending_expired");
+    expectUser = pending.user.id;
+  }
+  const a = await verifyAssertion(pool, cfg, input.response, expectUser);
+  if (!a.ok) return fail(a.userId, a.why);
 
   return withTx(pool, async (tx) => {
+    if (!(await commitAssertion(tx, a.row, a.newCounter))) return { ok: false as const, reason: "invalid" as const, raced: true };
     if (input.pendingToken) await revokeSession(tx, input.pendingToken);
-    await tx.query("UPDATE bb.passkeys SET counter = $2, last_used_at = now() WHERE id = $1", [row.id, newCounter]);
-    const session = await createSession(tx, row.user_id, { ip, userAgent: input.userAgent }, "verified", { mfaVerified: true });
-    await tx.query("UPDATE bb.users SET last_login_at = now() WHERE id = $1", [row.user_id]);
-    await tx.query("DELETE FROM bb.login_attempts WHERE email_norm = $1 AND success = false", [row.email]);
-    await writeAudit(tx, { actorUserId: row.user_id, action: "auth.login", entityType: "user", entityId: row.user_id, after: { passkey: true, passkeyId: row.id }, ...meta });
-    return { ok: true as const, token: session.token, expiresAt: session.expiresAt, userId: row.user_id };
+    // always a NEW session token: nothing the browser held before (a planted cookie included) becomes a signed-in session
+    const session = await createSession(tx, a.row.user_id, { ip, userAgent: input.userAgent }, "verified", { mfaVerified: true });
+    await tx.query("UPDATE bb.users SET last_login_at = now() WHERE id = $1", [a.row.user_id]);
+    await tx.query("DELETE FROM bb.login_attempts WHERE email_norm = $1 AND success = false", [a.row.email]);
+    await writeAudit(tx, { actorUserId: a.row.user_id, action: "auth.login", entityType: "user", entityId: a.row.user_id, after: { passkey: true, passkeyId: a.row.id }, ip, userAgent: input.userAgent });
+    return { ok: true as const, token: session.token, expiresAt: session.expiresAt, userId: a.row.user_id };
+  }).then(async (r) => {
+    if ("raced" in r) return fail(a.row.user_id, "key_state_changed");
+    return r;
   });
+}
+
+// ── step-up with a passkey (a fresh proof before a sensitive action) ───────────────────────────────
+
+export async function beginStepUp(pool: Pool, cfg: PasskeyConfig, user: { id: string }, meta: PasskeyMeta = {}): Promise<PublicKeyCredentialRequestOptionsJSON> {
+  return beginLogin(pool, cfg, { pendingUserId: user.id }, meta);
+}
+
+/** The person (already signed in) answers with a key of THEIRS; on success the grant for `purpose` is issued to this session. */
+export async function finishStepUp(
+  pool: Pool,
+  cfg: PasskeyConfig,
+  input: { response: AuthenticationResponseJSON; sessionToken: string | undefined; purpose: StepUpPurpose; requireMfa: boolean; ip?: string | null; userAgent?: string | null },
+): Promise<{ ok: true } | { ok: false; reason: "invalid" | "expired" | "locked"; retryAfterSeconds?: number }> {
+  requireEnabled(cfg);
+  const session = await validateSession(pool, input.sessionToken, { state: "verified", requireMfa: input.requireMfa });
+  if (!session) return { ok: false, reason: "expired" };
+  const ip = ipOf(input);
+  const wait = await lockedFor(pool, `passkey@${ip}`, ip);
+  if (wait > 0) return { ok: false, reason: "locked", retryAfterSeconds: wait };
+  const a = await verifyAssertion(pool, cfg, input.response, session.user.id);
+  if (!a.ok) {
+    await failAssertion(pool, ip, input.userAgent, a.userId, `stepup_${a.why}`);
+    return { ok: false, reason: "invalid" };
+  }
+  const done = await withTx(pool, async (tx) => {
+    if (!(await commitAssertion(tx, a.row, a.newCounter))) return false;
+    await grantStepUp(tx, { userId: session.user.id, sessionId: session.sessionId, purpose: input.purpose, method: "passkey" });
+    await writeAudit(tx, { actorUserId: session.user.id, action: "auth.stepup", entityType: "user", entityId: session.user.id, after: { purpose: input.purpose, method: "passkey" }, ip, userAgent: input.userAgent });
+    return true;
+  });
+  if (!done) {
+    await failAssertion(pool, ip, input.userAgent, session.user.id, "stepup_key_state_changed");
+    return { ok: false, reason: "invalid" };
+  }
+  return { ok: true };
 }
 
 // ── revocation ─────────────────────────────────────────────────────────────────────────────────
 
-/** A person revokes their own key; the Owner (users.manage) may revoke anyone's (a lost phone). The revoked key can never sign in again. */
-export async function revokePasskey(pool: Pool, actor: Actor, passkeyId: string, meta: PasskeyMeta = {}): Promise<void> {
+async function otherFactorLeft(tx: Queryable, userId: string, excludingPasskey?: string): Promise<boolean> {
+  const totp = await isEnrolled(tx, userId);
+  if (totp) return true;
+  const { rows } = await tx.query<{ n: string }>("SELECT count(*) AS n FROM bb.passkeys WHERE user_id = $1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2::uuid)", [userId, excludingPasskey ?? null]);
+  return Number(rows[0].n) > 0;
+}
+
+/**
+ * A person revokes their own key; the Owner (users.manage) may revoke anyone's (a lost phone). Needs a fresh step-up grant (consumed here).
+ * The revoked key can never sign in again. Revoking one's OWN last way in is refused unless a backup factor (the authenticator app) exists.
+ */
+export async function revokePasskey(pool: Pool, actor: Actor, passkeyId: string, ctx: PasskeyContext): Promise<void> {
   return withTx(pool, async (tx) => {
+    await consumeStepUp(tx, actor.id, ctx.sessionId, "passkey_revoke");
     const row = (await tx.query<{ user_id: string; label: string; revoked_at: Date | null }>("SELECT user_id, label, revoked_at FROM bb.passkeys WHERE id = $1 FOR UPDATE", [passkeyId])).rows[0];
     if (!row) throw new NotFoundError("passkey");
     if (row.user_id !== actor.id && !can(actor.role, "users.manage")) throw new ForbiddenError("passkey of another person");
     if (row.revoked_at) return;
+    if (row.user_id === actor.id && !(await otherFactorLeft(tx, actor.id, passkeyId))) throw new ConflictError("last_factor");
     await tx.query("UPDATE bb.passkeys SET revoked_at = now(), revoked_by = $2 WHERE id = $1", [passkeyId, actor.id]);
     // another person's key was revoked: their open sessions end too (the device may be in someone else's hands)
     if (row.user_id !== actor.id) await revokeUserSessions(tx, row.user_id);
-    await writeAudit(tx, { actorUserId: actor.id, action: "passkey.revoked", entityType: "passkey", entityId: passkeyId, before: { label: row.label, userId: row.user_id }, ip: meta.ip, userAgent: meta.userAgent });
+    await writeAudit(tx, { actorUserId: actor.id, action: "passkey.revoked", entityType: "passkey", entityId: passkeyId, before: { label: row.label, userId: row.user_id }, ip: ctx.ip, userAgent: ctx.userAgent });
   });
 }
 
-/** The Owner revokes every key of one person and ends their sessions (lost access, a leaver). Returns how many keys were revoked. */
-export async function revokeAllPasskeys(pool: Pool, actor: Actor, userId: string, meta: PasskeyMeta = {}): Promise<number> {
+/** The Owner revokes every key of one person and ends their sessions (lost access, a leaver). Needs a step-up grant. Returns how many keys were revoked. */
+export async function revokeAllPasskeys(pool: Pool, actor: Actor, userId: string, ctx: PasskeyContext): Promise<number> {
   assertCan(actor, "users.manage");
   return withTx(pool, async (tx) => {
+    await consumeStepUp(tx, actor.id, ctx.sessionId, "passkeys_revoke_all");
+    // the Owner may not cut their OWN last way in
+    if (userId === actor.id && !(await isEnrolled(tx, actor.id))) throw new ConflictError("last_factor");
     const res = await tx.query("UPDATE bb.passkeys SET revoked_at = now(), revoked_by = $2 WHERE user_id = $1 AND revoked_at IS NULL", [userId, actor.id]);
     const n = res.rowCount ?? 0;
-    if (n > 0) await revokeUserSessions(tx, userId);
-    await writeAudit(tx, { actorUserId: actor.id, action: "passkey.revoked_all", entityType: "user", entityId: userId, after: { count: n }, ip: meta.ip, userAgent: meta.userAgent });
+    if (n > 0 && userId !== actor.id) await revokeUserSessions(tx, userId);
+    await writeAudit(tx, { actorUserId: actor.id, action: "passkey.revoked_all", entityType: "user", entityId: userId, after: { count: n }, ip: ctx.ip, userAgent: ctx.userAgent });
     return n;
   });
 }

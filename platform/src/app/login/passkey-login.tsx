@@ -36,7 +36,9 @@ export function PasskeyLogin({ pending = false }: { pending?: boolean }) {
       const v = await fetch("/api/webauthn/login/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ response }) });
       const result = await v.json().catch(() => ({}));
       if (v.ok && result.ok) {
-        window.location.assign("/");
+        // a full navigation on purpose: the response carried the new session cookie and the whole page must be rendered with it
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = "/";
         return;
       }
       setError(v.status === 429 ? MESSAGES.locked : MESSAGES.invalid);

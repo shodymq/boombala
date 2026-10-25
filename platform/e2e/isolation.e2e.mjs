@@ -16,6 +16,7 @@ import { applyRoles } from "../scripts/db-roles.ts";
 import { createUser } from "../src/core/users.ts";
 import { beginEnrollment, confirmEnrollment } from "../src/core/mfa.ts";
 import { createPool } from "../src/core/db.ts";
+import { issueEnrollmentCodeByEmail } from "../src/core/enrollment.ts";
 import { totpAt } from "../src/core/totp.ts";
 import { createSession, revokeSessionsWithoutMfa } from "../src/core/session.ts";
 
@@ -347,6 +348,12 @@ try {
       ok(/\/login/.test(new URL(page.url()).pathname) && !/Клиенты|Заявки|Сотрудники|Журнал|Выгрузка|Здравствуйте/.test(t.replace("Подтверждение входа", "")), `${p} with only a password is not the admin (${new URL(page.url()).pathname})`);
     }
     await page.goto(A + "/login/mfa");
+    // a first factor is never enrolled with a password alone: the page asks for the one-time code first (here issued from the server console)
+    ok((await page.locator("[data-testid=enroll-code-form]").count()) === 1 && (await page.locator("[data-testid=mfa-secret]").count()) === 0, "a password alone does not show the authenticator secret: the page asks for the Owner's one-time code");
+    const enrolment = await issueEnrollmentCodeByEmail(owner, staff.owner.email);
+    await page.locator("input[name=code]").fill(enrolment.code);
+    await page.getByRole("button", { name: "Продолжить" }).click();
+    await page.locator("[data-testid=mfa-secret]").waitFor();
     ownerSecret = (await page.locator("[data-testid=mfa-secret]").innerText()).trim();
     ok(/^[A-Z2-7]{32}$/.test(ownerSecret), "the enrolment page shows a base32 secret");
     ok((await page.locator("a[href^='otpauth://']").count()) === 1, "and an authenticator link");

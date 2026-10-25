@@ -1,6 +1,5 @@
 "use server";
 
-import { revokeAllPasskeys } from "../../../core/passkeys.ts";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
@@ -98,17 +97,4 @@ export async function resetMfaAction(formData: FormData): Promise<void> {
     return failure(error);
   }
   redirect("/users?notice=mfa");
-}
-
-/** The Owner revokes every Face ID / Touch ID key of a person (lost phone, leaver) and ends their sessions. */
-export async function revokeUserPasskeysAction(formData: FormData): Promise<void> {
-  const { user } = await requirePermission("users.manage");
-  const id = uuid.safeParse(formData.get("id"));
-  if (!id.success) return failure(new ValidationError({ id: "Некорректные данные" }));
-  try {
-    await revokeAllPasskeys(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
-  } catch (error) {
-    return failure(error);
-  }
-  redirect("/users?notice=passkeys");
 }

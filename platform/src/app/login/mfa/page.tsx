@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { mayEnroll } from "@/core/enrollment";
 import { beginEnrollment, isEnrolled } from "@/core/mfa";
 import { getPendingSession, getSession } from "@/server/dal";
 import { getPool } from "@/server/db";
@@ -18,7 +19,10 @@ export default async function MfaPage() {
   if (!signedIn && !pending) redirect("/login");
   const pool = getPool();
   const enrolled = pending ? await isEnrolled(pool, pending.user.id) : true;
-  const enrollment = pending && !enrolled ? await beginEnrollment(pool, pending.user.id, mfaKey) : null;
+  // The first factor is enrolled only after the Owner's one-time code was redeemed in this session (a password alone is not enough).
+  const mayEnrol = pending && !enrolled ? await mayEnroll(pool, pending) : true;
+  const needsCode = pending !== null && !enrolled && !mayEnrol;
+  const enrollment = pending && !enrolled && mayEnrol ? await beginEnrollment(pool, pending.user.id, mfaKey) : null;
   // A person with a registered passkey may finish the sign-in with it instead of typing a code.
   const hasPasskey = passkeysAvailable && pending ? (await activePasskeyCount(pool, pending.user.id)) > 0 : false;
   return (
@@ -26,7 +30,7 @@ export default async function MfaPage() {
       <div className="rounded-[2rem] border border-line bg-white p-6 shadow-sm sm:p-8">
         <p className="text-sm font-extrabold uppercase tracking-[0.14em] text-grape-600">Boom Bala</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight text-grape-800">Подтверждение входа</h1>
-        <MfaForm enrolled={enrolled} signedIn={signedIn} secret={enrollment?.secret} otpauth={enrollment?.otpauth} />
+        <MfaForm enrolled={enrolled} signedIn={signedIn} needsCode={needsCode} secret={enrollment?.secret} otpauth={enrollment?.otpauth} />
         {hasPasskey ? <PasskeyLogin pending /> : null}
       </div>
     </main>
