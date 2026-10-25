@@ -26,7 +26,7 @@ export function proxy(request: NextRequest) {
   // learn that an application lives here by fetching its scripts).
   if (STATIC_ASSET.test(pathname)) return NextResponse.next();
   // Machine endpoints authenticate themselves (Bearer secrets) and must not be redirected to the login page.
-  const isPublic = pathname === "/login" || pathname === "/api/health" || pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/") || pathname.startsWith("/api/cron/");
+  const isPublic = pathname === "/login" || pathname === "/api/health" || pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/") || pathname.startsWith("/api/cron/") || pathname.startsWith("/api/webauthn/login/");
   if (!isPublic && !request.cookies.get(SESSION_COOKIE)) {
     return NextResponse.redirect(new URL("/login", request.url));
   }

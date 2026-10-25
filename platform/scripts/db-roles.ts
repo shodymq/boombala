@@ -40,7 +40,10 @@ export const API_GRANTS: Record<string, ApiTable> = {
 export const API_FUNCTION_PREFIX = "intake_";
 
 /** Tables the staff application may delete from (everything else is append-only or never deleted). */
-export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "news_posts", "news_images"] as const;
+export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkey_challenges", "news_posts", "news_images"] as const;
+
+/** Tables introduced by migrations after the first release of this list: allowed to be missing when the roles are applied. */
+const ADMIN_DELETE_LATER = ["passkey_challenges"] as const;
 
 const ident = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -68,7 +71,8 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
   await ensureRole(pool, admin, opts.adminPassword, 20, "30s");
   const tables = (await pool.query<{ t: string }>("SELECT c.relname AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'bb' AND c.relkind = 'r' ORDER BY 1")).rows.map((r) => r.t);
   for (const t of Object.keys(API_GRANTS)) if (!tables.includes(t)) throw new Error(`API_GRANTS names a table that does not exist: ${t}`);
-  for (const t of ADMIN_DELETE) if (!tables.includes(t)) throw new Error(`ADMIN_DELETE names a table that does not exist: ${t}`);
+  // a table of a LATER migration may not exist yet when the roles are applied early (the documented order is migrations first, then roles)
+  for (const t of ADMIN_DELETE) if (!tables.includes(t) && !(ADMIN_DELETE_LATER as readonly string[]).includes(t)) throw new Error(`ADMIN_DELETE names a table that does not exist: ${t}`);
 
   for (const role of [api, admin]) {
     await pool.query(`REVOKE ALL ON ALL TABLES IN SCHEMA bb FROM ${ident(role)}`);

@@ -12,6 +12,8 @@
  * mistake in the first one does not expose the admin. Unknown paths and wrong hosts answer 404/421, never a login page.
  */
 
+import { passkeyConfigFromEnv, passkeyConfigProblems } from "../core/passkey-config.ts";
+
 export type PlatformRole = "admin" | "api" | "all";
 
 export function parseRole(value: string | undefined): PlatformRole {
@@ -120,7 +122,7 @@ export function exposureFromEnv(env: Record<string, string | undefined> = proces
 // ── The production profile: refuse to run misconfigured ───────────────────────────────────────────────────────
 
 /** Variables that must exist ONLY in one of the deployments (secret separation). */
-const ADMIN_ONLY = ["MFA_ENC_KEY", "CRON_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_NOTIFY_LEVEL", "REVALIDATE_TOKEN", "SITE_REVALIDATE_URL"] as const;
+const ADMIN_ONLY = ["MFA_ENC_KEY", "CRON_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_NOTIFY_LEVEL", "REVALIDATE_TOKEN", "SITE_REVALIDATE_URL", "PASSKEYS_ENABLED", "WEBAUTHN_RP_ID", "WEBAUTHN_RP_NAME", "WEBAUTHN_ORIGINS"] as const;
 const API_ONLY = ["PLATFORM_INTAKE_TOKEN", "PLATFORM_IP_PEPPER"] as const;
 
 /**
@@ -147,6 +149,8 @@ export function profileProblems(env: Record<string, string | undefined> = proces
     // Notifications in production never carry a name or a phone: the message says "new enquiry N", the details are in the CRM.
     if (env.TELEGRAM_NOTIFY_LEVEL !== "minimal") p.push("notify_level_must_be_minimal");
     for (const k of API_ONLY) if (env[k]) p.push(`admin_must_not_have_${k.toLowerCase()}`);
+    // Passkeys (optional): when enabled the RP ID and the origins must be valid, https and consistent, or the staff application refuses to run.
+    for (const code of passkeyConfigProblems(passkeyConfigFromEnv(env), { production: true })) p.push(code);
   }
   if (role === "api") {
     if (!env.PLATFORM_INTAKE_TOKEN || env.PLATFORM_INTAKE_TOKEN.length < 24) p.push("intake_token_required");

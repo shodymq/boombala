@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getPendingSession, getSession } from "@/server/dal";
+import { passkeysAvailable } from "@/server/env";
 import { LoginForm } from "./login-form";
+import { PasskeyLogin } from "./passkey-login";
 
 export const metadata: Metadata = { title: "Вход" };
 
@@ -14,6 +16,7 @@ export default async function LoginPage() {
         <p className="text-sm font-extrabold uppercase tracking-[0.14em] text-grape-600">Boom Bala</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight text-grape-800">Вход для сотрудников</h1>
         <LoginForm />
+        {passkeysAvailable ? <PasskeyLogin /> : null}
       </div>
     </main>
   );

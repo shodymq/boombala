@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { listEnrolledUserIds } from "@/core/mfa";
+import { countActivePasskeys } from "@/core/passkeys";
 import { ROLES } from "@/core/rbac";
 import { listUsers } from "@/core/users";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
-import { changeRoleAction, createUserAction, resetMfaAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
+import { passkeysAvailable } from "@/server/env";
+import { changeRoleAction, createUserAction, resetMfaAction, resetPasswordAction, revokeUserPasskeysAction, setActiveAction, setCanExportAction } from "./actions";
 
 export const metadata: Metadata = { title: "Сотрудники" };
 
@@ -15,6 +17,7 @@ const NOTICES: Record<string, string> = {
   active: "Статус изменён.",
   export: "Право на выгрузку изменено. Сотрудника попросят войти заново.",
   password: "Пароль изменён, все сессии сотрудника завершены.",
+  passkeys: "Ключи Face ID / Touch ID отозваны, сессии сотрудника завершены. Он войдёт по паролю и коду.",
   mfa: "Второй фактор сброшен, сессии сотрудника завершены. При следующем входе он включит его заново.",
 };
 
@@ -40,6 +43,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const actor = { id: user.id, role: user.role };
   const users = await listUsers(getPool(), actor);
   const enrolled = await listEnrolledUserIds(getPool(), actor);
+  const passkeyCounts = passkeysAvailable ? await countActivePasskeys(getPool()) : new Map<string, number>();
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
 
   return (
@@ -107,6 +111,17 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                 </form>
               ) : null}
             </div>
+            {passkeysAvailable ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2" data-testid={`passkeys-${u.id}`}>
+                <span className="text-sm text-muted">Face ID / Touch ID: {passkeyCounts.get(u.id) ? `${passkeyCounts.get(u.id)} устр.` : "не добавлен"}</span>
+                {passkeyCounts.get(u.id) ? (
+                  <form action={revokeUserPasskeysAction}>
+                    <input type="hidden" name="id" value={u.id} />
+                    <button type="submit" className={btnGhost}>Отозвать все ключи</button>
+                  </form>
+                ) : null}
+              </div>
+            ) : null}
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-extrabold text-grape-700">Задать новый пароль</summary>
               <form action={resetPasswordAction} className="mt-2 flex flex-wrap items-center gap-2">

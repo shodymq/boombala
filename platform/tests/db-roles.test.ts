@@ -28,7 +28,7 @@ const FUTURE = (() => {
 const KEY = Buffer.alloc(32, 21).toString("base64");
 
 /** Tables the public API must never reach. Every table of the schema is either in API_GRANTS or here, so a new table forces a decision. */
-const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections"];
+const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkeys", "passkey_challenges", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections"];
 
 describe("Database roles: one per application, least privilege", () => {
   let db: TestDb;
@@ -100,7 +100,7 @@ describe("Database roles: one per application, least privilege", () => {
     });
 
     it("cannot read staff, sessions, second factors, the export log, retention settings, migrations, the audit log or the notification queue", async () => {
-      for (const t of ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "audit_log", "outbox"]) {
+      for (const t of ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "passkeys", "passkey_challenges", "export_log", "retention_settings", "schema_migrations", "audit_log", "outbox"]) {
         await denied(api, `SELECT * FROM bb.${t}`);
       }
     });

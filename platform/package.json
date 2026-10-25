@@ -18,6 +18,7 @@
     "user:create": "node --no-warnings scripts/create-user.ts",
     "user:mfa-reset": "node --no-warnings scripts/mfa-reset.ts",
     "user:set-password": "node --no-warnings scripts/set-password.ts",
+    "passkeys:revoke": "node --no-warnings scripts/passkeys-revoke.ts",
     "sessions:revoke": "node --no-warnings scripts/revoke-sessions.ts",
     "db:roles": "node --no-warnings scripts/db-roles.ts",
     "preflight": "node --no-warnings scripts/preflight.ts",
@@ -33,12 +34,15 @@
     "e2e:release": "node --no-warnings e2e/release.e2e.mjs",
     "e2e:isolation": "node --no-warnings e2e/isolation.e2e.mjs",
     "e2e:frontdesk": "node --no-warnings e2e/frontdesk.e2e.mjs",
+    "e2e:passkeys": "node --no-warnings e2e/passkeys.e2e.mjs",
     "e2e:kz-flow": "node --no-warnings e2e/kz-flow.e2e.mjs",
     "e2e:attendance": "node --no-warnings e2e/attendance.e2e.mjs",
     "backup:check": "node --no-warnings scripts/backup-restore-check.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.3",
     "@vercel/oidc": "4.0.2",
     "next": "16.3.8",
     "pg": "^8.23.1",
