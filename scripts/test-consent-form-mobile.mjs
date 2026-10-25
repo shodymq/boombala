@@ -48,15 +48,15 @@ for (const prof of PROFILES) {
 
   await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
   const main = await page.locator("main").innerText();
-  ok(/Оператор персональных данных: ИП «АМАНОВ»/.test(main), "the operator is named in one compact line");
-  ok(/Альтернативный способ ознакомления/.test(main) && /Баламалы танысу тәртібі/.test(main) && /сообщите сотруднику кассы/.test(main) && /касса қызметкеріне хабарлаңыз/.test(main), "the alternative way to read the Rules without the electronic form (cashier) is shown under the name field, RU and KK");
-  ok((await page.locator('[data-testid="alt-ack"]').evaluate((e) => e.getBoundingClientRect().top < document.querySelector('input[name="phone"]').getBoundingClientRect().top)), "...and it sits under the name field, before the phone");
+  ok(!/АМАНОВ|Аманов/.test(await page.locator("main form").innerText()) && (await page.locator('[data-testid="consent-operator"]').count()) === 0, "the short visible elements do not name the operator (it stays in the full documents)");
+  ok(/Без онлайн-регистрации можно ознакомиться с правилами у кассира/.test(main), "short note under the name: the Rules can be read at the cashier without online registration");
+  ok((await page.locator('[data-testid="alt-ack"]').evaluate((e) => e.getBoundingClientRect().top < document.querySelector('input[name="phone"]').getBoundingClientRect().top)), "...and it sits right under the name field, before the phone");
   {
     const r = await fetch(`${BASE}/booking-consent`);
     const t = (await r.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
     ok(r.status === 200 && /Согласие на обработку данных при бронировании/.test(t) && /Брондау кезіндегі дербес деректерге келісім/.test(t) && /ИП «АМАНОВ»/.test(t) && !/0605305|ЕРБОЛҰЛЫ/.test(t), "/booking-consent: the full document 07 in RU and KK, no IIN or full name without the environment");
   }
-  ok((await page.locator('[data-testid="consent-operator"]').count()) === 1 && (await page.evaluate(() => { const b = document.querySelector("form button[type=submit]"), o = document.querySelector('[data-testid="consent-operator"]'); return !!b && !!o && b.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING; })), "the operator line sits right under the button");
+  ok((await page.locator('[data-testid="consent-operator"]').count()) === 0 && (await page.locator("form").innerText()).trim().endsWith("Зарегистрироваться"), "no operator line under the button: the form ends with the button");
   const heading = await page.locator("h1").innerText();
   ok(heading.trim() === "Регистрация сопровождающего" && /Заполните форму перед посещением центра\. Это займёт меньше минуты\./.test(main), "compact header: «Регистрация сопровождающего» and the one-line subtitle");
   ok((await page.locator("main ol").count()) === 0 && !/\b0[123]\b\s*(Ваши данные|Документы|Согласие)/.test(main), "no 01/02/03 step blocks");
@@ -71,12 +71,12 @@ for (const prof of PROFILES) {
   ok(cards.length >= 2 && cards.every((c) => /редакция \d+/.test(c.head)), `every document card shows its title and edition (${cards.map((c) => c.kind).join(", ")})`);
   const versions = Object.fromEntries(cards.map((c) => [c.kind, Number(/редакция (\d+)/.exec(c.head)[1])]));
   const fieldLabels = await page.locator("form label, form [role=group] > span").allInnerTexts();
-  ok(/Имя сопровождающего/.test(fieldLabels.join("|")) && /Телефон/.test(fieldLabels.join("|")) && /Сколько детей с вами/.test(fieldLabels.join("|")), "the main form has the name, the optional phone and the number of children");
+  ok(/Ваше имя/.test(fieldLabels.join("|")) && /Телефон/.test(fieldLabels.join("|")) && /Сколько детей с вами/.test(fieldLabels.join("|")), "the main form has the name, the optional phone and the number of children (short labels)");
   const docRows = await page.locator("details[data-doc-kind]").evaluateAll((ds) => ds.map((d) => d.querySelector("summary").innerText.replace(/\s+/g, " ").trim()));
-  ok(docRows.some((t) => /^Правила посещения/.test(t)) && docRows.some((t) => /^Согласие на обработку персональных данных/.test(t)), `two compact collapsible documents: ${docRows.join(" | ")}`);
+  ok(docRows.some((t) => /^Читать правила/.test(t)) && docRows.some((t) => /^Читать согласие и Политику ПДн/.test(t)), `two compact collapsible documents: ${docRows.join(" | ")}`);
   ok((await page.locator('details[data-doc-kind] [role="region"]').evaluateAll((rs) => rs.every((r) => getComputedStyle(r).display !== "none" || !r.closest("details").open))), "document texts stay collapsed until opened");
   ok((await page.locator('form input[type="checkbox"]').count()) === 2, "two SEPARATE confirmations: rules and personal-data consent");
-  ok(/необязательно/i.test(await page.locator("form").innerText()) && !(await page.locator('input[type="tel"]').evaluate((e) => e.required)), "the phone is optional");
+  ok(/по желанию/i.test(await page.locator("form").innerText()) && !(await page.locator('input[type="tel"]').evaluate((e) => e.required)), "the phone is optional");
   ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no sideways scroll");
   const kids = page.locator('input[name="childrenCount"]');
   const plus = page.getByRole("button", { name: "Увеличить количество детей" });
@@ -227,6 +227,34 @@ console.log("## double tap, changed documents, server-side edition check");
   ok(noVersions.status === 400, "a request WITHOUT the editions is refused (400): the platform never records a consent on an edition it picked itself");
   const garbage = await send("x");
   ok(garbage.status === 400, "a malformed edition list is a 400");
+}
+
+// ── RU / ҚАЗ switch: labels change, typed data and ticks stay; one language at a time ─────────────────────────────
+{
+  console.log("## language switch");
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
+  const switchBtns = page.locator('[role=group][aria-label="Язык / Тіл"] button');
+  ok((await switchBtns.count()) === 2 && (await switchBtns.nth(0).getAttribute("aria-pressed")) === "true", "a compact RU / ҚАЗ switch, RU selected by default");
+  await page.locator('input[name="name"]').fill("Айгерим тест");
+  await page.locator('input[name="phone"]').fill("7071234567");
+  await page.getByRole("button", { name: "Увеличить количество детей" }).click();
+  await page.locator('input[name="acceptRules"]').check();
+  await switchBtns.nth(1).click();
+  const kk = await page.locator("main").innerText();
+  ok(/Атыңыз/.test(kk) && /Тіркелу/.test(kk) && /Қағидаларды оқу/.test(kk) && /Келісім мен Саясатты оқу/.test(kk) && /Шұғыл байланыс үшін/.test(kk), "ҚАЗ: labels, hints, links and the button are in Kazakh");
+  ok(!/Ваше имя|Зарегистрироваться|Читать правила/.test(kk), "ҚАЗ: no Russian labels next to them (one language at a time)");
+  ok((await page.locator('input[name="name"]').inputValue()) === "Айгерим тест" && (await page.locator('input[name="childrenCount"]').inputValue()) === "2" && (await page.locator('input[name="acceptRules"]').isChecked()) && !(await page.locator('input[name="acceptPersonalData"]').isChecked()), "switching the language keeps the typed name, the number of children and the ticks (the two ticks stay independent)");
+  await page.getByRole("button", { name: "Тіркелу" }).click();
+  ok(/Дербес деректерді өңдеуге келісім қажет/.test(await page.locator("main").innerText()), "ҚАЗ: the validation message is in Kazakh");
+  await switchBtns.nth(0).click();
+  ok(/Необходимо согласие на обработку данных/.test(await page.locator("main").innerText()), "the same message follows the language back to RU");
+  ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no horizontal scroll");
+  const h = await page.evaluate(() => Math.round(document.documentElement.scrollHeight));
+  console.log("   page height at 390px (RU, nothing open):", h, "px");
+  ok(!/АМАНОВ|Аманов/.test(await page.locator("main").innerText()), "the operator's name is not among the short visible texts");
+  await ctx.close();
 }
 
 console.log(fails ? `\nFAILS: ${fails}` : "\nALL OK");

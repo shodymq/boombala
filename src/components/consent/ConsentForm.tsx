@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { formatNationalPhone, phoneDigits } from "@/lib/lead";
 import { buttonClass } from "@/components/ui/buttonStyles";
@@ -12,12 +12,104 @@ interface Doc {
   body: string;
 }
 
+type Lang = "ru" | "kk";
+
 const MAX_KIDS = 50;
 const stepBtn =
   "flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 border-grape-300 bg-white font-display text-3xl font-black leading-none text-grape-800 transition-colors hover:bg-grape-50 active:bg-grape-100 disabled:cursor-not-allowed disabled:opacity-40";
 
 const field =
   "h-12 w-full rounded-2xl border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none disabled:bg-grape-50 aria-[invalid=true]:border-lava-500";
+
+/** Every visible string of the page, in the two languages. The full legal texts come from the platform (one document, both languages). */
+const T = {
+  ru: {
+    title: "Регистрация сопровождающего",
+    subtitle: "Заполните форму перед посещением центра. Это займёт меньше минуты.",
+    group: "Данные сопровождающего",
+    name: "Ваше имя",
+    nameHint: "Без онлайн-регистрации можно ознакомиться с правилами у кассира",
+    phone: "Телефон",
+    phoneOpt: "(по желанию)",
+    phoneHint: "Для экстренной связи",
+    kids: "Сколько детей с вами?",
+    kidsHint: "Укажите только количество детей",
+    less: "Уменьшить количество детей",
+    more: "Увеличить количество детей",
+    docsGroup: "Документы и подтверждения",
+    rules: "С Правилами посещения ознакомлен(а)",
+    readRules: "Читать правила",
+    data: "Даю согласие на обработку персональных данных",
+    readData: "Читать согласие и Политику ПДн",
+    policy: "Политика обработки персональных данных",
+    edition: "редакция",
+    fullText: "полный текст",
+    stale: "Документы были обновлены, ваши подтверждения сняты. Прочитайте новую редакцию и подтвердите заново.",
+    submit: "Зарегистрироваться",
+    busy: "Сохраняем…",
+    retry: "Попробовать снова",
+    error: "Не удалось сохранить регистрацию. Введённое не потеряно: нажмите «Попробовать снова». Повторная отправка не создаст дубль.",
+    rate: "Слишком много попыток. Подождите немного и нажмите «Попробовать снова».",
+    changed: "Документы были обновлены. Обновляем тексты: прочитайте новую редакцию и подтвердите заново.",
+    foot: "Это не бронирование: регистрация не означает посещение.",
+    errs: {
+      name: "Укажите имя",
+      phone: "Введите 10 цифр после +7 или оставьте поле пустым",
+      kids: `Укажите от 1 до ${MAX_KIDS} детей`,
+      rules: "Подтвердите, что ознакомились с правилами",
+      data: "Необходимо согласие на обработку данных",
+    },
+    ok: "Регистрация сохранена",
+    thanks: (n: string) => `Спасибо${n ? `, ${n}` : ""}. Мы записали ваше ознакомление и согласие от вашего имени. Страницу можно закрыть.`,
+    withYou: "Детей с вами:",
+    adminConfirms: "Количество фактически вошедших подтверждает администратор на входе.",
+    notVisit: "Это не бронирование и не отметка о посещении.",
+    docLabel: { visit_rules: "Правила посещения", companion_duties: "Обязанности сопровождающего", personal_data_consent: "Согласие на обработку персональных данных" } as Record<string, string>,
+  },
+  kk: {
+    title: "Еріп жүрушіні тіркеу",
+    subtitle: "Орталыққа келер алдында нысанды толтырыңыз. Бір минуттан аз уақыт алады.",
+    group: "Еріп жүрушінің деректері",
+    name: "Атыңыз",
+    nameHint: "Онлайн-тіркеусіз Қағидалармен касса қызметкерінен танысуға болады",
+    phone: "Телефон",
+    phoneOpt: "(қалауыңызша)",
+    phoneHint: "Шұғыл байланыс үшін",
+    kids: "Сізбен бірге нешеу бала?",
+    kidsHint: "Тек балалар санын көрсетіңіз",
+    less: "Балалар санын азайту",
+    more: "Балалар санын көбейту",
+    docsGroup: "Құжаттар және растаулар",
+    rules: "Келу қағидаларымен таныстым",
+    readRules: "Қағидаларды оқу",
+    data: "Дербес деректерді өңдеуге келісім беремін",
+    readData: "Келісім мен Саясатты оқу",
+    policy: "Дербес деректерді өңдеу саясаты",
+    edition: "нұсқа",
+    fullText: "толық мәтін",
+    stale: "Құжаттар жаңартылды, растауларыңыз алынып тасталды. Жаңа нұсқаны оқып, қайта растаңыз.",
+    submit: "Тіркелу",
+    busy: "Сақталуда…",
+    retry: "Қайталап көру",
+    error: "Тіркеу сақталмады. Енгізгеніңіз жоғалған жоқ: «Қайталап көру» түймесін басыңыз. Қайта жіберу телнұсқа жасамайды.",
+    rate: "Әрекет тым көп. Біраз күтіп, «Қайталап көру» түймесін басыңыз.",
+    changed: "Құжаттар жаңартылды. Мәтіндер жаңартылуда: жаңа нұсқаны оқып, қайта растаңыз.",
+    foot: "Бұл брондау емес: тіркелу келуді білдірмейді.",
+    errs: {
+      name: "Атыңызды көрсетіңіз",
+      phone: "+7-ден кейін 10 сан енгізіңіз немесе өрісті бос қалдырыңыз",
+      kids: `1-ден ${MAX_KIDS}-ге дейін бала санын көрсетіңіз`,
+      rules: "Қағидалармен танысқаныңызды растаңыз",
+      data: "Дербес деректерді өңдеуге келісім қажет",
+    },
+    ok: "Тіркеу сақталды",
+    thanks: (n: string) => `Рақмет${n ? `, ${n}` : ""}. Қағидалармен танысқаныңыз бен келісіміңіз сіздің атыңыздан жазылды. Бетті жабуға болады.`,
+    withYou: "Сізбен бірге балалар:",
+    adminConfirms: "Нақты кірген балалар санын кіреберісте әкімші растайды.",
+    notVisit: "Бұл брондау емес және келуді белгілеу емес.",
+    docLabel: { visit_rules: "Келу қағидалары", companion_duties: "Еріп жүрушінің міндеттері", personal_data_consent: "Дербес деректерді өңдеуге келісім" } as Record<string, string>,
+  },
+} as const;
 
 function newKey(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -31,14 +123,17 @@ function newKey(): string {
 type Status = "idle" | "submitting" | "success" | "error" | "rate" | "changed";
 
 /**
- * Name, optional phone, the full texts of the documents with their editions, an acknowledgement of the rules and a SEPARATE
- * consent to personal data processing. Nothing else. Texts, titles and editions come from the platform: a new approved
- * document needs no change here. The editions the visitor saw are sent along; if another edition has been published since,
- * nothing is recorded, the ticks are removed and the new texts are shown.
+ * Name, optional phone, number of children, an acknowledgement of the rules and a SEPARATE consent to personal data processing.
+ * The short labels are for the main screen; the full texts of the documents with their editions open in place (and stay available
+ * until the visitor confirms). Texts, titles and editions come from the platform: a new approved document needs no change here.
+ * The editions the visitor saw are sent along; if another edition has been published since, nothing is recorded, the ticks are
+ * removed and the new texts are shown. The language switch only changes labels: typed data and ticks are kept.
  */
 export function ConsentForm({ documents }: { documents: Doc[] }) {
   const uid = useId();
   const router = useRouter();
+  const [lang, setLang] = useState<Lang>("ru");
+  const t = T[lang];
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [kids, setKids] = useState("1");
@@ -50,6 +145,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
   const data = dataSig === sig;
   const stale = (rulesSig !== null && rulesSig !== sig) || (dataSig !== null && dataSig !== sig);
   const [honeypot, setHoneypot] = useState("");
+  // Client-side problems are kept as codes (translated when drawn); anything else is a text from the server.
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<Status>("idle");
   const [savedDocs, setSavedDocs] = useState<Doc[]>([]);
@@ -66,12 +162,12 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
     if (inFlight.current || status === "success") return;
     const next: Record<string, string> = {};
     const national = phoneDigits(phone);
-    if (name.trim().length < 2) next.name = "Укажите имя";
-    if (national.length > 0 && national.length !== 10) next.phone = "Введите 10 цифр после +7 или оставьте поле пустым";
+    if (name.trim().length < 2) next.name = "name";
+    if (national.length > 0 && national.length !== 10) next.phone = "phone";
     const kidsNumber = /^\d{1,2}$/.test(kids) ? Number(kids) : NaN;
-    if (!(kidsNumber >= 1 && kidsNumber <= MAX_KIDS)) next.childrenCount = `Укажите от 1 до ${MAX_KIDS} детей`;
-    if (!rules) next.acceptRules = "Подтвердите, что ознакомились с правилами";
-    if (!data) next.acceptPersonalData = "Необходимо согласие на обработку данных";
+    if (!(kidsNumber >= 1 && kidsNumber <= MAX_KIDS)) next.childrenCount = "kids";
+    if (!rules) next.acceptRules = "rules";
+    if (!data) next.acceptPersonalData = "data";
     setErrors(next);
     if (Object.keys(next).length) {
       // Move to the first problem so it is not hidden below the fold on a phone.
@@ -119,160 +215,181 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
     }
   }
 
+  const switcher = (
+    <div role="group" aria-label="Язык / Тіл" className="flex justify-end">
+      <div className="inline-flex rounded-full border-2 border-grape-200 bg-white p-0.5 text-sm font-extrabold">
+        {(["ru", "kk"] as const).map((l) => (
+          <button
+            key={l}
+            type="button"
+            lang={l}
+            aria-pressed={lang === l}
+            onClick={() => setLang(l)}
+            className={`min-h-11 min-w-14 rounded-full px-3 transition-colors ${lang === l ? "bg-grape-700 text-white" : "text-grape-800 hover:bg-grape-50"}`}
+          >
+            {l === "ru" ? "RU" : "ҚАЗ"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const header = (
+    <header lang={lang}>
+      <h1 id="consent-title" className="font-display text-[1.75rem] font-black leading-tight tracking-tight text-grape-800 sm:text-3xl">
+        {t.title}
+      </h1>
+      <p className="mt-2 text-base leading-relaxed text-muted">{t.subtitle}</p>
+    </header>
+  );
+
   if (status === "success") {
     return (
-      <div role="status" className="mt-6 grid gap-3 text-grape-900">
-        <p className="font-display text-2xl font-black text-grape-800">Регистрация сохранена</p>
-        <p className="text-base leading-relaxed">
-          Спасибо{name.trim() ? `, ${name.trim()}` : ""}. Мы записали ваше ознакомление и согласие от вашего имени. Страницу можно закрыть.
-        </p>
-        <ul className="grid gap-1 rounded-2xl bg-grape-50 px-4 py-3 text-sm">
-          {savedDocs.map((d) => (
-            <li key={d.kind}>
-              {d.title} <span className="text-muted">(редакция {d.version})</span>
-            </li>
-          ))}
-        </ul>
-        <p className="text-sm">Детей с вами: <b>{savedKids}</b>. Количество фактически вошедших подтверждает администратор на входе.</p>
-        <p className="text-sm text-muted">Это не бронирование и не отметка о посещении.</p>
+      <div lang={lang}>
+        {switcher}
+        <div role="status" className="mt-2 grid gap-3 rounded-3xl border border-grape-100 bg-white p-5 text-grape-900 shadow-soft sm:p-7">
+          <p className="font-display text-2xl font-black text-grape-800">{t.ok}</p>
+          <p className="text-base leading-relaxed">{t.thanks(name.trim())}</p>
+          <ul className="grid gap-1 rounded-2xl bg-grape-50 px-4 py-3 text-sm">
+            {savedDocs.map((d) => (
+              <li key={d.kind}>
+                {t.docLabel[d.kind] ?? d.title} <span className="text-muted">({t.edition} {d.version})</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm">{t.withYou} <b>{savedKids}</b>. {t.adminConfirms}</p>
+          <p className="text-sm text-muted">{t.notVisit}</p>
+        </div>
       </div>
     );
   }
 
-  const err = (k: string) => (errors[k] ? <p id={`${uid}-${k}-err`} className="mt-1.5 text-sm font-semibold text-[#b3261e]">{errors[k]}</p> : null);
-  const inv = (k: string) => (errors[k] ? { "aria-invalid": true as const, "aria-describedby": `${uid}-${k}-err`, "data-consent-invalid": true } : {});
-  const DOC_LABEL: Record<string, string> = {
-    visit_rules: "Правила посещения",
-    companion_duties: "Обязанности сопровождающего",
-    personal_data_consent: "Согласие на обработку персональных данных",
+  const errText = (k: string) => {
+    const v = errors[k];
+    if (!v) return "";
+    return (t.errs as Record<string, string>)[v] ?? v;
   };
-  const docLabel = (d: Doc) => DOC_LABEL[d.kind] ?? d.title;
+  const err = (k: string) => (errors[k] ? <p id={`${uid}-${k}-err`} className="mt-1.5 text-sm font-semibold text-[#b3261e]">{errText(k)}</p> : null);
+  const inv = (k: string) => (errors[k] ? { "aria-invalid": true as const, "aria-describedby": `${uid}-${k}-err`, "data-consent-invalid": true } : {});
+  const docLabel = (d: Doc) => t.docLabel[d.kind] ?? d.title;
   // A compact, collapsible row: the full text of the edition the visitor sees (and consents to) opens in place.
-  const docCard = (d: Doc) => (
+  const docCard = (d: Doc, summary: string, extra?: ReactNode) => (
     <details key={d.kind} className="rounded-xl border border-grape-200 bg-white" data-doc-kind={d.kind}>
       <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-sm">
-        <span className="font-bold text-grape-800 underline decoration-grape-300 underline-offset-4">{docLabel(d)}</span>
-        <span className="shrink-0 rounded-full bg-grape-50 px-2.5 py-0.5 text-xs font-bold text-grape-700">редакция {d.version}</span>
+        <span className="font-bold text-grape-800 underline decoration-grape-300 underline-offset-4">{summary}</span>
+        <span className="shrink-0 rounded-full bg-grape-50 px-2.5 py-0.5 text-xs font-bold text-grape-700">{t.edition} {d.version}</span>
       </summary>
-      <div tabIndex={0} role="region" aria-label={`${docLabel(d)}, полный текст`} className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-grape-100 px-3 py-3 text-sm leading-relaxed text-grape-900">
+      <div tabIndex={0} role="region" aria-label={`${docLabel(d)}, ${t.fullText}`} className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-grape-100 px-3 py-3 text-sm leading-relaxed text-grape-900">
         {d.body}
       </div>
+      {extra}
     </details>
   );
 
   return (
-    <form onSubmit={onSubmit} noValidate aria-busy={busy} className="grid gap-5">
-      <fieldset disabled={busy} className="grid gap-5 border-0 p-0">
-        <div className="grid gap-5" role="group" aria-label="Данные сопровождающего">
-          <div className="grid gap-2">
-            <label htmlFor={`${uid}-name`} className="font-display text-sm font-extrabold text-grape-800">
-              Имя сопровождающего <span className="font-normal text-muted">(обязательно)</span>
-            </label>
-            <input id={`${uid}-name`} name="name" autoComplete="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} aria-describedby={`${uid}-name-hint`} className={field} {...inv("name")} />
-            <p id={`${uid}-name-hint`} className="text-xs leading-relaxed text-muted">
-              Введённое имя само по себе не подтверждает личность или полномочия сопровождающего.
-              <span lang="kk" className="block">Аты (міндетті). Енгізілген ат өздігінен жеке басты немесе ата-аналық өкілеттікті растамайды.</span>
-            </p>
-            <div className="rounded-xl bg-grape-50 px-3 py-2 text-xs leading-relaxed text-grape-900" data-testid="alt-ack">
-              <p><b>Альтернативный способ ознакомления.</b> Если вы не желаете вводить имя в электронной форме, сообщите сотруднику кассы: он предоставит Правила для ознакомления и возможность подтвердить их без онлайн-регистрации. Отказ предоставить телефон не ограничивает вход.</p>
-              <p lang="kk" className="mt-1"><b>Баламалы танысу тәртібі.</b> Егер өз атыңызды электрондық нысанға енгізгіңіз келмесе, касса қызметкеріне хабарлаңыз. Ол Қағидалармен танысуға және онлайн-тіркеусіз танысқаныңызды растауға мүмкіндік береді. Телефон нөмірін көрсетпеу кіруге кедергі болмайды.</p>
+    <div lang={lang}>
+      {switcher}
+      <div className="mt-1">{header}</div>
+      <div className="mt-5 rounded-3xl border border-grape-100 bg-white p-5 shadow-soft sm:p-7">
+        <form onSubmit={onSubmit} noValidate aria-busy={busy} className="grid gap-5">
+          <fieldset disabled={busy} className="grid gap-5 border-0 p-0">
+            <div className="grid gap-5" role="group" aria-label={t.group}>
+              <div className="grid gap-1.5">
+                <label htmlFor={`${uid}-name`} className="font-display text-sm font-extrabold text-grape-800">
+                  {t.name} <span aria-hidden="true">*</span>
+                </label>
+                <input id={`${uid}-name`} name="name" autoComplete="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} aria-describedby={`${uid}-name-hint`} className={field} {...inv("name")} />
+                <p id={`${uid}-name-hint`} className="text-xs leading-relaxed text-muted" data-testid="alt-ack">{t.nameHint}</p>
+                {err("name")}
+              </div>
+              <div className="grid gap-1.5">
+                <label htmlFor={`${uid}-phone`} className="font-display text-sm font-extrabold text-grape-800">
+                  {t.phone} <span className="font-normal text-muted">{t.phoneOpt}</span>
+                </label>
+                <div className="relative">
+                  <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-grape-800">+7</span>
+                  <input id={`${uid}-phone`} name="phone" type="tel" aria-describedby={`${uid}-phone-hint`} inputMode="tel" autoComplete="tel-national" placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} {...inv("phone")} />
+                </div>
+                <p id={`${uid}-phone-hint`} className="text-xs leading-relaxed text-muted">{t.phoneHint}</p>
+                {err("phone")}
+              </div>
+              <div role="group" aria-labelledby={`${uid}-kids-label`} className="grid gap-1.5">
+                <span id={`${uid}-kids-label`} className="font-display text-sm font-extrabold text-grape-800">{t.kids}</span>
+                <div className="flex items-center gap-3">
+                  <button type="button" aria-label={t.less} disabled={!(Number(kids) > 1)} onClick={() => setKids(String(Math.max(1, (Number(kids) || 1) - 1)))} className={stepBtn}>
+                    −
+                  </button>
+                  <input
+                    name="childrenCount"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
+                    maxLength={2}
+                    aria-labelledby={`${uid}-kids-label`}
+                    aria-describedby={`${uid}-kids-hint`}
+                    value={kids}
+                    onChange={(e) => setKids(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                    onBlur={() => setKids(String(Math.min(MAX_KIDS, Math.max(1, Number(kids) || 1))))}
+                    className="h-14 w-20 rounded-2xl border-2 border-grape-200 bg-white text-center font-display text-2xl font-black text-grape-800 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500"
+                    {...inv("childrenCount")}
+                  />
+                  <button type="button" aria-label={t.more} disabled={!(Number(kids) < MAX_KIDS)} onClick={() => setKids(String(Math.min(MAX_KIDS, (Number(kids) || 0) + 1)))} className={stepBtn}>
+                    +
+                  </button>
+                </div>
+                <p id={`${uid}-kids-hint`} className="text-xs leading-relaxed text-muted">{t.kidsHint}</p>
+                {err("childrenCount")}
+              </div>
+              <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+                <input tabIndex={-1} autoComplete="off" name="website" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
+              </div>
             </div>
-            {err("name")}
-          </div>
-          <div className="grid gap-2">
-            <label htmlFor={`${uid}-phone`} className="font-display text-sm font-extrabold text-grape-800">
-              Телефон <span className="font-normal text-muted">(необязательно, но желательно)</span>
-            </label>
-            <div className="relative">
-              <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-grape-800">+7</span>
-              <input id={`${uid}-phone`} name="phone" type="tel" aria-describedby={`${uid}-phone-hint`} inputMode="tel" autoComplete="tel-national" placeholder="707 123 45 67" value={phone} onChange={(e) => setPhone(formatNationalPhone(phoneDigits(e.target.value, true)))} className={`${field} pl-11`} {...inv("phone")} />
-            </div>
-            <p id={`${uid}-phone-hint`} className="text-xs leading-relaxed text-muted">
-              Желательно указать для связи, если ребёнок потеряет сопровождающего, получит травму или возникнет другая экстренная ситуация. Без телефона тоже можно зарегистрироваться.
-              <span lang="kk" className="block">Телефон — міндетті емес. Бала еріп жүрушісінен адасқанда, жарақат алғанда немесе өзге шұғыл жағдай туындағанда хабарласу үшін көрсеткен жөн.</span>
-            </p>
-            {err("phone")}
-          </div>
-          <div role="group" aria-labelledby={`${uid}-kids-label`} className="grid gap-2">
-            <span id={`${uid}-kids-label`} className="font-display text-sm font-extrabold text-grape-800">
-              Сколько детей с вами? <span className="font-normal text-muted">(обязательно)</span>
-            </span>
-            <div className="flex items-center gap-3">
-              <button type="button" aria-label="Уменьшить количество детей" disabled={!(Number(kids) > 1)} onClick={() => setKids(String(Math.max(1, (Number(kids) || 1) - 1)))} className={stepBtn}>
-                −
-              </button>
-              <input
-                name="childrenCount"
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                autoComplete="off"
-                maxLength={2}
-                aria-labelledby={`${uid}-kids-label`}
-                aria-describedby={`${uid}-kids-hint`}
-                value={kids}
-                onChange={(e) => setKids(e.target.value.replace(/\D/g, "").slice(0, 2))}
-                onBlur={() => setKids(String(Math.min(MAX_KIDS, Math.max(1, Number(kids) || 1))))}
-                className="h-14 w-20 rounded-2xl border-2 border-grape-200 bg-white text-center font-display text-2xl font-black text-grape-800 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500"
-                {...inv("childrenCount")}
-              />
-              <button type="button" aria-label="Увеличить количество детей" disabled={!(Number(kids) < MAX_KIDS)} onClick={() => setKids(String(Math.min(MAX_KIDS, (Number(kids) || 0) + 1)))} className={stepBtn}>
-                +
-              </button>
-            </div>
-            <p id={`${uid}-kids-hint`} className="text-xs leading-relaxed text-muted">От 1 до {MAX_KIDS}. Указывается только количество: имена, возраст и другие данные детей не нужны.</p>
-            {err("childrenCount")}
-          </div>
-          <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
-            <input tabIndex={-1} autoComplete="off" name="website" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
-          </div>
-        </div>
 
-        <div className="grid gap-4 border-t border-grape-100 pt-5" role="group" aria-label="Документы и подтверждения">
-          {stale ? (
-            <p role="alert" className="rounded-2xl border border-sun-300 bg-sun-100 px-4 py-3 text-sm font-semibold text-grape-900">
-              Документы были обновлены, ваши подтверждения сняты. Прочитайте новую редакцию и подтвердите заново.
-            </p>
-          ) : null}
-          <div>
-            <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
-              <input type="checkbox" name="acceptRules" checked={rules} onChange={(e) => setRulesSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptRules")} />
-              <span>
-                Я ознакомился(-ась) с Правилами посещения Boom Bala{rulesDocs.find((d) => d.kind === "visit_rules") ? ` (редакция ${rulesDocs.find((d) => d.kind === "visit_rules")?.version})` : ""}{rulesDocs.length > 1 ? " и обязанностями сопровождающего" : ""} и обязуюсь соблюдать их.
-                <span lang="kk" className="mt-1 block text-xs leading-relaxed text-muted">Мен Boom Bala келу қағидаларымен таныстым және оларды сақтауға келісемін.</span>
-              </span>
-            </label>
-            <div className="ml-9 mt-1 grid gap-2">{rulesDocs.map(docCard)}</div>
-            {err("acceptRules")}
-          </div>
-          <div>
-            <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
-              <input type="checkbox" name="acceptPersonalData" checked={data} onChange={(e) => setDataSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptPersonalData")} />
-              <span className="text-sm leading-relaxed">
-                Я даю ИП «АМАНОВ» согласие на обработку моего имени, номера телефона (если указан), количества сопровождаемых детей (без их имён и других данных), записи о согласии, хеша IP-адреса и необходимых технических сведений о браузере для оформления посещения и связи при происшествии. Мне доступна{" "}
-                <a href="/privacy" target="_blank" rel="noopener" className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">Политика обработки персональных данных</a>; я понимаю право отзыва в предусмотренных законом пределах.
-                <span lang="kk" className="mt-1 block text-xs leading-relaxed text-muted">Мен «АМАНОВ» ЖК-не өз атымды, телефон нөмірімді (егер көрсетсем), ертіп келген балалар санын (олардың аты-жөнін және өзге деректерінсіз), келісім жазбасын, IP-мекенжайдың хэшін және браузер туралы қажетті техникалық мәліметтерді келуді рәсімдеу әрі оқиға кезінде байланысу мақсатында өңдеуге келісім беремін. Дербес деректерді өңдеу саясаты маған қолжетімді, заңда көзделген шектерде келісімді қайтара алатынымды түсінемін.</span>
-              </span>
-            </label>
-            {dataDoc ? <div className="ml-9 mt-1 grid gap-2">{docCard(dataDoc)}</div> : null}
-            {err("acceptPersonalData")}
-          </div>
-        </div>
-      </fieldset>
+            <div className="grid gap-3 border-t border-grape-100 pt-4" role="group" aria-label={t.docsGroup}>
+              {stale ? (
+                <p role="alert" className="rounded-2xl border border-sun-300 bg-sun-100 px-4 py-3 text-sm font-semibold text-grape-900">{t.stale}</p>
+              ) : null}
+              <div>
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-base text-grape-900">
+                  <input type="checkbox" name="acceptRules" checked={rules} onChange={(e) => setRulesSig(e.target.checked ? sig : null)} className="h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptRules")} />
+                  <span>{t.rules}</span>
+                </label>
+                <div className="ml-9 grid gap-2">{rulesDocs.map((d) => docCard(d, rulesDocs.length > 1 ? docLabel(d) : t.readRules))}</div>
+                {err("acceptRules")}
+              </div>
+              <div>
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-base text-grape-900">
+                  <input type="checkbox" name="acceptPersonalData" checked={data} onChange={(e) => setDataSig(e.target.checked ? sig : null)} className="h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptPersonalData")} />
+                  <span>{t.data}</span>
+                </label>
+                {dataDoc ? (
+                  <div className="ml-9 grid gap-2">
+                    {docCard(
+                      dataDoc,
+                      t.readData,
+                      <p className="border-t border-grape-100 px-3 py-2 text-sm">
+                        <a href="/privacy" target="_blank" rel="noopener" className="inline-flex min-h-11 items-center font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">{t.policy}</a>
+                      </p>,
+                    )}
+                  </div>
+                ) : null}
+                {err("acceptPersonalData")}
+              </div>
+            </div>
+          </fieldset>
 
-      <div aria-live="polite" className="grid gap-2">
-        {status === "error" ? (
-          <p role="alert" className="text-sm font-semibold text-[#b3261e]">
-            Не удалось сохранить регистрацию. Введённое не потеряно: нажмите «Попробовать снова». Повторная отправка не создаст дубль.
-          </p>
-        ) : null}
-        {status === "rate" ? <p role="alert" className="text-sm font-semibold text-[#b3261e]">Слишком много попыток. Подождите немного и нажмите «Попробовать снова».</p> : null}
-        {status === "changed" ? <p role="alert" className="text-sm font-semibold text-grape-900">Документы были обновлены. Обновляем тексты: прочитайте новую редакцию и подтвердите заново.</p> : null}
+          <div aria-live="polite" className="grid gap-2">
+            {status === "error" ? <p role="alert" className="text-sm font-semibold text-[#b3261e]">{t.error}</p> : null}
+            {status === "rate" ? <p role="alert" className="text-sm font-semibold text-[#b3261e]">{t.rate}</p> : null}
+            {status === "changed" ? <p role="alert" className="text-sm font-semibold text-grape-900">{t.changed}</p> : null}
+          </div>
+          <button type="submit" disabled={busy} className={buttonClass("primary", "w-full disabled:opacity-60")}>
+            {busy ? t.busy : status === "error" || status === "rate" ? t.retry : t.submit}
+          </button>
+        </form>
       </div>
-      <button type="submit" disabled={busy} className={buttonClass("primary", "w-full disabled:opacity-60")}>
-        {busy ? "Сохраняем…" : status === "error" || status === "rate" ? "Попробовать снова" : "Зарегистрироваться"}
-      </button>
-      <p className="text-center text-xs text-muted" data-testid="consent-operator">Оператор персональных данных: ИП «АМАНОВ» · Дербес деректер операторы: «АМАНОВ» ЖК</p>
-    </form>
+      <p className="mt-4 text-center text-xs leading-relaxed text-muted">{t.foot}</p>
+    </div>
   );
 }
