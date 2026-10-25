@@ -17,7 +17,7 @@ function failure(error: unknown): never {
   let code = "failed";
   if (error instanceof ValidationError) code = `invalid_${Object.keys(error.fields)[0] ?? "form"}`.replace(/[^a-z_]/gi, "");
   else if (error instanceof ConflictError) code = error.message === "last_owner" ? "last_owner" : "email_taken";
-  else if (error instanceof ForbiddenError) code = "forbidden";
+  else if (error instanceof ForbiddenError) code = error.message === "step_up_required" ? "step_up_required" : "forbidden";
   redirect(`/users?error=${encodeURIComponent(code)}`);
 }
 
@@ -87,12 +87,14 @@ export async function setCanExportAction(formData: FormData): Promise<void> {
   redirect("/users?notice=export");
 }
 
+/** The Owner's step-up grant (purpose `mfa_reset`, this session) is checked and consumed by resetUserMfa, in the reset's own transaction. */
 export async function resetMfaAction(formData: FormData): Promise<void> {
-  const { user } = await requirePermission("users.manage");
+  const session = await requirePermission("users.manage");
+  const { user } = session;
   const id = uuid.safeParse(formData.get("id"));
   if (!id.success) return failure(new ValidationError({ id: "Некорректные данные" }));
   try {
-    await resetUserMfa(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
+    await resetUserMfa(getPool(), { id: user.id, role: user.role }, id.data, { ...(await requestMeta()), sessionId: session.sessionId });
   } catch (error) {
     return failure(error);
   }

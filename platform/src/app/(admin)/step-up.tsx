@@ -3,13 +3,14 @@
 import { startAuthentication } from "@simplewebauthn/browser";
 import { useRef, useState, type ReactNode } from "react";
 
-export type StepUpPurpose = "passkey_register" | "passkey_revoke" | "passkeys_revoke_all" | "enrollment_code";
+export type StepUpPurpose = "passkey_register" | "passkey_revoke" | "passkeys_revoke_all" | "enrollment_code" | "mfa_reset";
 
 const TITLES: Record<StepUpPurpose, string> = {
   passkey_register: "Чтобы добавить устройство, подтвердите, что это вы.",
   passkey_revoke: "Чтобы отозвать ключ, подтвердите, что это вы.",
   passkeys_revoke_all: "Чтобы отозвать все ключи сотрудника, подтвердите, что это вы.",
   enrollment_code: "Чтобы выдать код настройки, подтвердите, что это вы.",
+  mfa_reset: "Чтобы сбросить второй фактор сотрудника, подтвердите, что это вы.",
 };
 
 const field = "h-12 min-w-0 flex-1 rounded-2xl border-2 border-grape-200 bg-white px-4 text-base text-ink focus:border-grape-600 focus:outline-none";

@@ -8,7 +8,8 @@ import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { passkeysAvailable } from "@/server/env";
 import { OwnerTools } from "./owner-tools";
-import { changeRoleAction, createUserAction, resetMfaAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
+import { MfaResetButton } from "./reset-mfa";
+import { changeRoleAction, createUserAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
 
 export const metadata: Metadata = { title: "Сотрудники" };
 
@@ -26,6 +27,7 @@ function errorText(code: string): string {
   if (code === "last_owner") return "Нельзя оставить систему без активного владельца.";
   if (code === "email_taken") return "Сотрудник с таким e-mail уже есть.";
   if (code === "forbidden") return "Недостаточно прав.";
+  if (code === "step_up_required") return "Подтвердите, что это вы (код или Face ID / Touch ID), и повторите сброс.";
   // Only fixed texts are ever shown: the code comes from the URL and must not be echoed back.
   if (code === "invalid_password") return "Пароль должен быть не короче 12 символов.";
   if (code === "invalid_email") return "Проверьте e-mail.";
@@ -109,10 +111,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="text-sm text-muted">Второй фактор: {enrolled.has(u.id) ? "включён" : "не включён"}</span>
               {enrolled.has(u.id) && u.id !== user.id ? (
-                <form action={resetMfaAction}>
-                  <input type="hidden" name="id" value={u.id} />
-                  <button type="submit" className={btnGhost}>Сбросить второй фактор</button>
-                </form>
+                <MfaResetButton userId={u.id} hasTotp={ownHasTotp} ownHasPasskey={ownHasPasskey} />
               ) : null}
             </div>
             {gate ? (

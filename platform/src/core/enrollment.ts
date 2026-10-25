@@ -4,6 +4,7 @@ import { withTx } from "./db.ts";
 import { writeAudit } from "./audit.ts";
 import { lockedFor } from "./auth.ts";
 import { ConflictError, NotFoundError } from "./errors.ts";
+import { beginEnrollment } from "./mfa.ts";
 import { assertCan, type Actor } from "./rbac.ts";
 import { validateSession } from "./session.ts";
 
@@ -15,7 +16,8 @@ import { validateSession } from "./session.ts";
  * the code; only then does the pending session get the right to enrol. The code is 60 random bits, stored only as a hash, valid for two
  * hours, burned after five wrong tries, and replaced whenever a new one is issued.
  *
- * The rule is active as soon as migration 014 is applied (a database without it behaves as before, so the new build can be deployed first).
+ * FAIL-CLOSED: without migration 014 nobody can enrol a first factor (no secret is shown, no code is accepted), whatever PASSKEYS_ENABLED says.
+ * Deploy order: apply 014 to the running database first (the old build does not read its tables), then the new build. See PASSKEYS-ROLLOUT.md.
  */
 
 export const ENROLLMENT_CODE_MINUTES = 120;
@@ -29,13 +31,17 @@ export function generateEnrollmentCode(): string {
 export const normalizeEnrollmentCode = (input: string) => input.toUpperCase().replace(/[^A-Z2-9]/g, "");
 const hashCode = (normalized: string) => createHash("sha256").update(`bb-enroll:${normalized}`).digest();
 
-let gate = false;
-/** True once migration 014 exists in this database (cached; a database cannot lose it). */
+/** True once migration 014 (its tables) exists in this database. Not cached: a restored or older database must answer correctly. */
 export async function enrollmentGateActive(db: Queryable): Promise<boolean> {
-  if (gate) return true;
-  const { rows } = await db.query<{ t: string | null }>("SELECT to_regclass('bb.enrollment_codes') AS t");
-  gate = rows[0].t !== null;
-  return gate;
+  const { rows } = await db.query<{ ok: boolean }>(
+    "SELECT to_regclass('bb.enrollment_codes') IS NOT NULL AND to_regclass('bb.step_up_grants') IS NOT NULL AND to_regclass('bb.passkeys') IS NOT NULL AS ok",
+  );
+  return rows[0].ok === true;
+}
+
+/** Refuses every enrolment-code operation on a database that does not have migration 014 yet (never a raw SQL error to the caller). */
+async function requireGate(db: Queryable): Promise<void> {
+  if (!(await enrollmentGateActive(db))) throw new ConflictError("migration_014_missing");
 }
 
 /** Has the person got a factor already (TOTP or an active passkey)? Then a code is not for them: a reset comes first. */
@@ -65,12 +71,16 @@ async function issue(tx: Queryable, userId: string, createdBy: string | null, me
 /** The Owner issues a code for a person who has no factor yet. The caller has already consumed the Owner's step-up. The code is returned ONCE. */
 export async function issueEnrollmentCode(pool: Pool, actor: Actor, userId: string, meta: { ip?: string | null; userAgent?: string | null } = {}): Promise<{ code: string; expiresAt: Date }> {
   assertCan(actor, "users.manage");
-  return withTx(pool, (tx) => issue(tx, userId, actor.id, meta));
+  return withTx(pool, async (tx) => {
+    await requireGate(tx);
+    return issue(tx, userId, actor.id, meta);
+  });
 }
 
 /** Break-glass: the same from the server console (root on the server is the stronger authority). Audited with actor NULL. */
 export async function issueEnrollmentCodeByEmail(pool: Pool, email: string): Promise<{ code: string; expiresAt: Date } | null> {
   return withTx(pool, async (tx) => {
+    await requireGate(tx);
     const u = await tx.query<{ id: string }>("SELECT id FROM bb.users WHERE email = $1", [email.trim().toLowerCase()]);
     if (!u.rows[0]) return null;
     return issue(tx, u.rows[0].id, null, {});
@@ -81,6 +91,7 @@ export type RedeemResult = { ok: true } | { ok: false; reason: "invalid" | "expi
 
 /** The person (password accepted, session still pending) types the code. Success marks THAT session as allowed to enrol a first factor. */
 export async function redeemEnrollmentCode(pool: Pool, input: { pendingToken: string | undefined; code: string; ip?: string | null; userAgent?: string | null }): Promise<RedeemResult> {
+  if (!(await enrollmentGateActive(pool))) return { ok: false, reason: "invalid" };
   const pending = await validateSession(pool, input.pendingToken, { state: "pending" });
   if (!pending) return { ok: false, reason: "expired" };
   const ip = (input.ip ?? "unknown").slice(0, 64);
@@ -113,10 +124,19 @@ export async function redeemEnrollmentCode(pool: Pool, input: { pendingToken: st
   return { ok: false, reason: "invalid" };
 }
 
-/** May this pending session enrol a first factor? Always yes while the gate is not active (a database without migration 014). */
+/** May this pending session enrol a first factor? Fail-closed: no while migration 014 is missing, otherwise only after the code was redeemed here. */
 export async function mayEnroll(db: Queryable, session: { sessionId: string; enrollAuthorizedAt?: Date | null }): Promise<boolean> {
-  if (!(await enrollmentGateActive(db))) return true;
+  if (!(await enrollmentGateActive(db))) return false;
   if (session.enrollAuthorizedAt !== undefined) return session.enrollAuthorizedAt !== null;
   const { rows } = await db.query("SELECT 1 FROM bb.sessions WHERE id = $1 AND enroll_authorized_at IS NOT NULL AND revoked_at IS NULL", [session.sessionId]);
   return rows.length > 0;
+}
+
+/**
+ * The TOTP secret for a pending session, or null. The ONLY way the login page gets a secret: a database without migration 014, or a session
+ * that did not redeem a code, gets nothing (no secret is created, none is shown).
+ */
+export async function offerEnrollment(db: Pool, session: { sessionId: string; enrollAuthorizedAt?: Date | null; user: { id: string } }, key: string | undefined) {
+  if (!(await mayEnroll(db, session))) return null;
+  return beginEnrollment(db, session.user.id, key);
 }

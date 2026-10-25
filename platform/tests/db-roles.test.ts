@@ -16,7 +16,7 @@ import { anonymizeContact, retentionReport, revokeConsent, updateRetentionSettin
 import { totpAt } from "../src/core/totp.ts";
 import { changeRole, createUser, listUsers } from "../src/core/users.ts";
 import { listContacts } from "../src/core/crm.ts";
-import { authorizeEnrollment, makeUser, seedFromSite, startTestDb, submitConsentV, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
+import { authorizeEnrollment, makeUser, seedFromSite, startTestDb, stepUpProof, submitConsentV, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
 
 const API_PW = "api-role-password-0123456789abc";
 const ADMIN_PW = "admin-role-password-0123456789";
@@ -431,7 +431,7 @@ describe("Database roles: one per application, least privilege", () => {
       const e = await beginEnrollment(admin, staff.id, KEY);
       const done = await completeMfaLogin(admin, { pendingToken: login.token, code: totpAt(e.secret, Date.now()), mfaKey: KEY, ip: "10.77.0.5" });
       assert.ok(done.ok);
-      await resetUserMfa(admin, owner2(), staff.id);
+      await resetUserMfa(admin, owner2(), staff.id, await stepUpProof(admin, owner));
 
       // CRM, privacy
       const q = await submitConsentV(api, { idempotencyKey: randomUUID(), name: "Для Роли Админ", childrenCount: 1, acceptRules: true, acceptPersonalData: true });

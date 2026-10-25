@@ -1,4 +1,6 @@
 import { issueEnrollmentCodeByEmail, redeemEnrollmentCode } from "../../src/core/enrollment.ts";
+import { createSession, validateSession } from "../../src/core/session.ts";
+import { grantStepUp, type StepUpPurpose } from "../../src/core/stepup.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -94,4 +96,16 @@ export async function authorizeEnrollment(pool: Queryable & Parameters<typeof is
   if (!c) throw new Error("no such user");
   const r = await redeemEnrollmentCode(pool, { pendingToken, code: c.code, ip });
   if (!r.ok) throw new Error("the enrolment code was not accepted");
+}
+
+/**
+ * A FRESH step-up for `purpose`, recorded for a new verified session of this person: what the step-up route leaves behind after a correct code.
+ * Returns the session id the action needs (the grant works once).
+ */
+export async function stepUpProof(pool: Pool, user: { id: string }, purpose: StepUpPurpose = "mfa_reset"): Promise<{ sessionId: string }> {
+  const { token } = await createSession(pool, user.id, { ip: "10.77.0.5" }, "verified", { mfaVerified: true });
+  const v = await validateSession(pool, token);
+  if (!v) throw new Error("no session");
+  await grantStepUp(pool, { userId: user.id, sessionId: v.sessionId, purpose, method: "totp" });
+  return { sessionId: v.sessionId };
 }

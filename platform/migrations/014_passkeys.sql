@@ -60,7 +60,7 @@ CREATE TABLE step_up_grants (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  purpose    text NOT NULL CHECK (purpose IN ('passkey_register', 'passkey_revoke', 'passkeys_revoke_all', 'enrollment_code')),
+  purpose    text NOT NULL CHECK (purpose IN ('passkey_register', 'passkey_revoke', 'passkeys_revoke_all', 'enrollment_code', 'mfa_reset')),
   method     text NOT NULL CHECK (method IN ('totp', 'recovery', 'passkey')),
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL

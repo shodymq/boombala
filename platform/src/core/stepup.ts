@@ -6,7 +6,8 @@ import { verifySecondFactor } from "./mfa.ts";
 import { validateSession } from "./session.ts";
 
 /**
- * Step-up authentication. A sensitive action (add or revoke a passkey, revoke all of a person's keys, issue an enrolment code) needs a FRESH
+ * Step-up authentication. A sensitive action (add or revoke a passkey, revoke all of a person's keys, issue an enrolment code, reset another
+ * person's second factor) needs a FRESH
  * proof of identity: a current authenticator code / recovery code, or a passkey assertion made now. An active cookie is not enough, so a
  * hijacked session cannot enrol an attacker's device.
  *
@@ -15,7 +16,7 @@ import { validateSession } from "./session.ts";
  */
 
 export const STEPUP_SECONDS = 5 * 60;
-export const STEPUP_PURPOSES = ["passkey_register", "passkey_revoke", "passkeys_revoke_all", "enrollment_code"] as const;
+export const STEPUP_PURPOSES = ["passkey_register", "passkey_revoke", "passkeys_revoke_all", "enrollment_code", "mfa_reset"] as const;
 export type StepUpPurpose = (typeof STEPUP_PURPOSES)[number];
 export const isStepUpPurpose = (v: unknown): v is StepUpPurpose => typeof v === "string" && (STEPUP_PURPOSES as readonly string[]).includes(v);
 

@@ -4,7 +4,7 @@ import { createPool } from "../src/core/db.ts";
 import { passkeyConfigFromEnv, passkeyConfigProblems } from "../src/core/passkey-config.ts";
 import { preflight } from "../src/core/preflight.ts";
 
-// Verification step of the deployment: migrations 001..013 -> db:roles -> THIS -> start the applications.
+// Verification step of the deployment: migrations 001..014 -> db:roles -> THIS -> start the applications.
 // Prints codes only (never a connection string or a value). Exit code 1 means: do not start.
 const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!url) {
@@ -17,9 +17,9 @@ try {
   // A catalog that was never seeded makes every birthday enquiry fail with "rejected" although everything else is green.
   const seeded = (await pool.query<{ p: number; r: number }>("SELECT (SELECT count(*) FROM bb.packages)::int AS p, (SELECT count(*) FROM bb.rooms)::int AS r")).rows[0];
   if (seeded.p === 0 || seeded.r === 0) r.problems.push("catalog_not_seeded: run npm run db:seed");
-  // Passkeys are optional; when they are switched on, their migration and their configuration must be in place.
+  // Migration 014 is required by this version whatever PASSKEYS_ENABLED says (checked in preflight()). Passkeys are optional: when they are
+  // switched on, their configuration must be in place too.
   if (process.env.PASSKEYS_ENABLED === "1") {
-    if (!(await pool.query<{ t: string | null }>("SELECT to_regclass('bb.passkeys') AS t")).rows[0].t) r.problems.push("passkeys_enabled_but_migration_014_missing");
     for (const code of passkeyConfigProblems(passkeyConfigFromEnv(), { production: process.env.PLATFORM_PROFILE === "kz-production" })) r.problems.push(code);
   }
   r.ok = r.problems.length === 0;

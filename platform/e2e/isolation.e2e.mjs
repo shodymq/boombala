@@ -414,8 +414,13 @@ try {
     await page.goto(A + "/users");
     const card = page.locator("article", { hasText: staff.manager.email });
     await card.getByRole("button", { name: "Сбросить второй фактор" }).click();
+    // the reset needs the Owner's fresh step-up (their own authenticator code): nothing is sent before it
+    await page.locator("[data-testid=stepup]").waitFor();
+    ok(!/notice=mfa/.test(page.url()), "resetting a second factor first asks the Owner to confirm (step-up); nothing is sent yet");
+    await page.locator("[data-testid=stepup-code]").fill(totpAt(ownerSecret, Date.now() + 30_000));
+    await page.locator("[data-testid=stepup-submit]").click();
     await page.waitForURL(/notice=mfa/);
-    ok(true, "the Owner resets the Manager's second factor");
+    ok(true, "the Owner resets the Manager's second factor after the step-up");
     await mgr.goto(A + "/contacts");
     ok(new URL(mgr.url()).pathname.startsWith("/login"), "the Manager's open session ended at once");
     await mgrCtx.close();

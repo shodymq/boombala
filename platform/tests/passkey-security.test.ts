@@ -9,7 +9,7 @@ import { beginLogin, beginRegistration, beginStepUp, finishLogin, finishRegistra
 import { createSession, validateSession } from "../src/core/session.ts";
 import { STEPUP_SECONDS, consumeStepUp, grantStepUp, hasStepUp, stepUpWithCode, type StepUpPurpose } from "../src/core/stepup.ts";
 import { totpAt } from "../src/core/totp.ts";
-import { TEST_PASSWORD, makeUser, startTestDb, type TestDb } from "./helpers/db.ts";
+import { TEST_PASSWORD, makeUser, startTestDb, stepUpProof, type TestDb } from "./helpers/db.ts";
 import { VirtualAuthenticator } from "./helpers/virtual-authenticator.ts";
 
 const cfg: PasskeyConfig = { enabled: true, rpID: "admin.example.kz", rpName: "Boom Bala", origins: ["https://admin.example.kz"] };
@@ -149,7 +149,7 @@ describe("Passkeys: the security fixes (first enrolment, step-up, lockout, concu
       await totp(u);
       const { a } = await addKey(u);
       assert.equal((await signIn(a)).ok, true);
-      await resetUserMfa(db.pool, A(owner), u.id);
+      await resetUserMfa(db.pool, A(owner), u.id, await stepUpProof(db.pool, owner));
       assert.equal((await listPasskeys(db.pool, u.id)).length, 0);
       assert.equal((await signIn(a)).ok, false, "the old key does not sign in");
       const login = await authenticate(db.pool, { email: u.email, password: TEST_PASSWORD, mfaRequired: true, ip: ip() });

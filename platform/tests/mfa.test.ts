@@ -7,7 +7,7 @@ import { can } from "../src/core/rbac.ts";
 import { createSession, revokeAllSessions, revokeSessionsWithoutMfa, validateSession } from "../src/core/session.ts";
 import { resetPasswordFromConsole } from "../src/core/users.ts";
 import { totpAt } from "../src/core/totp.ts";
-import { authorizeEnrollment, makeUser, startTestDb, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
+import { authorizeEnrollment, makeUser, startTestDb, stepUpProof, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
 
 const KEY = Buffer.alloc(32, 11).toString("base64");
 const OTHER_KEY = Buffer.alloc(32, 12).toString("base64");
@@ -235,7 +235,7 @@ describe("Second factor (TOTP) for staff", () => {
     it("the Owner removes another person's factor: sessions end, codes die, it is audited, and they enrol again", async () => {
       const owner = await newStaff("owner");
       const x = await enrolled("manager");
-      await resetUserMfa(db.pool, { id: owner.id, role: "owner" }, x.user.id, { ip: "10.77.0.1" });
+      await resetUserMfa(db.pool, { id: owner.id, role: "owner" }, x.user.id, { ip: "10.77.0.1", ...(await stepUpProof(db.pool, owner)) });
       assert.equal(await isEnrolled(db.pool, x.user.id), false);
       assert.equal(await validateSession(db.pool, x.token), null, "their session ended");
       assert.equal(await recoveryCodesLeft(db.pool, x.user.id), 0);
@@ -247,10 +247,13 @@ describe("Second factor (TOTP) for staff", () => {
     it("nobody else may reset, and the Owner cannot reset their own factor", async () => {
       const owner = await newStaff("owner");
       const x = await enrolled("editor");
-      for (const role of ["manager", "editor"] as const) await assert.rejects(() => resetUserMfa(db.pool, { id: x.user.id, role }, owner.id), ForbiddenError);
-      await assert.rejects(() => resetUserMfa(db.pool, { id: owner.id, role: "owner" }, owner.id), ValidationError);
-      await assert.rejects(() => resetUserMfa(db.pool, { id: owner.id, role: "owner" }, "00000000-0000-0000-0000-000000000000"), NotFoundError);
-      await assert.rejects(() => resetUserMfa(db.pool, { id: owner.id, role: "owner" }, "not-an-id"), NotFoundError);
+      const proof = { sessionId: "00000000-0000-0000-0000-000000000001" };
+      for (const role of ["manager", "editor"] as const) await assert.rejects(() => resetUserMfa(db.pool, { id: x.user.id, role }, owner.id, proof), ForbiddenError);
+      await assert.rejects(() => resetUserMfa(db.pool, { id: owner.id, role: "owner" }, owner.id, proof), ValidationError);
+      // Without a grant an unknown target is refused as step_up_required too: the check does not reveal who exists.
+      await assert.rejects(() => resetUserMfa(db.pool, { id: owner.id, role: "owner" }, "00000000-0000-0000-0000-000000000000", proof), ForbiddenError);
+      await assert.rejects(async () => resetUserMfa(db.pool, { id: owner.id, role: "owner" }, "00000000-0000-0000-0000-000000000000", await stepUpProof(db.pool, owner)), NotFoundError);
+      await assert.rejects(async () => resetUserMfa(db.pool, { id: owner.id, role: "owner" }, "not-an-id", await stepUpProof(db.pool, owner)), NotFoundError);
       assert.equal(await isEnrolled(db.pool, x.user.id), true);
     });
 
