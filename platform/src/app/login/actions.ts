@@ -7,7 +7,7 @@ import { authenticate } from "../../core/auth.ts";
 import { MAX_PASSWORD_LENGTH } from "../../core/password.ts";
 import { revokeSession } from "../../core/session.ts";
 import { getPool } from "../../server/db.ts";
-import { SESSION_COOKIE, isHttps, mfaRequired } from "../../server/env.ts";
+import { SESSION_COOKIE, isHttps, mfaRequired, passkeyRequired } from "../../server/env.ts";
 import { requestMeta } from "../../server/request.ts";
 
 export interface LoginState {
@@ -23,7 +23,7 @@ export async function login(_prev: LoginState | undefined, formData: FormData): 
   const parsed = schema.safeParse({ email: formData.get("email"), password: formData.get("password") });
   if (!parsed.success) return { error: "Введите e-mail и пароль." };
   const meta = await requestMeta();
-  const result = await authenticate(getPool(), { ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired });
+  const result = await authenticate(getPool(), { ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired: !passkeyRequired && mfaRequired, passkeyRequired });
   if (!result.ok) {
     if (result.reason === "locked") {
       return { error: `Слишком много неудачных попыток. Повторите через ${Math.max(1, Math.ceil(result.retryAfterSeconds / 60))} мин.` };
@@ -37,7 +37,7 @@ export async function login(_prev: LoginState | undefined, formData: FormData): 
     path: "/",
     expires: result.expiresAt,
   });
-  redirect(result.mfa === "none" ? "/" : "/login/mfa");
+  redirect(result.mfa === "none" ? "/" : result.mfa === "passkey" ? "/login/passkey" : "/login/mfa");
 }
 
 export async function logout(): Promise<void> {

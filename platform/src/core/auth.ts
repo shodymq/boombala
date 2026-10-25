@@ -11,15 +11,17 @@ export const MAX_FAILURES_PER_IP = 30;
 
 export type LoginResult =
   /** `mfa`: "none" the session is complete; "verify" or "enroll" the session is PENDING and needs the second factor (see completeMfaLogin). */
-  | { ok: true; token: string; expiresAt: Date; userId: string; mfa: "none" | "verify" | "enroll" }
+  | { ok: true; token: string; expiresAt: Date; userId: string; mfa: "none" | "verify" | "enroll" | "passkey" }
   | { ok: false; reason: "invalid" }
   | { ok: false; reason: "locked"; retryAfterSeconds: number };
 
 export interface LoginInput {
   email: string;
   password: string;
-  /** The second factor is mandatory (MFA_MODE=required): the password alone never yields a usable session. */
+  /** Legacy TOTP policy; passkeyRequired takes precedence for the normal login flow. */
   mfaRequired?: boolean;
+  /** WebAuthn is the normal second factor when PASSKEY_MODE=required. */
+  passkeyRequired?: boolean;
   ip?: string | null;
   userAgent?: string | null;
 }
@@ -78,12 +80,18 @@ export async function authenticate(pool: Pool, input: LoginInput): Promise<Login
     return { ok: false, reason: "invalid" };
   }
 
-  if (input.mfaRequired) {
+  if (input.passkeyRequired || input.mfaRequired) {
     // Password accepted, second factor still missing: a short-lived PENDING session that the admin refuses everywhere.
     const enrolled = await isEnrolled(pool, user.id);
     const pending = await createSession(pool, user.id, { ip, userAgent: input.userAgent }, "pending");
     await writeAudit(pool, { actorUserId: user.id, action: "auth.password_verified", entityType: "user", entityId: user.id, ip, userAgent: input.userAgent });
-    return { ok: true as const, token: pending.token, expiresAt: pending.expiresAt, userId: user.id, mfa: enrolled ? ("verify" as const) : ("enroll" as const) };
+    return {
+      ok: true as const,
+      token: pending.token,
+      expiresAt: pending.expiresAt,
+      userId: user.id,
+      mfa: input.passkeyRequired ? ("passkey" as const) : enrolled ? ("verify" as const) : ("enroll" as const),
+    };
   }
 
   return withTx(pool, async (tx) => {

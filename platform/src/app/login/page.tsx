@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getPendingSession, getSession } from "@/server/dal";
+import { mfaRequired, passkeyRequired } from "@/server/env";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Вход" };
 
 export default async function LoginPage() {
   if (await getSession()) redirect("/");
-  if (await getPendingSession()) redirect("/login/mfa");
+  if (passkeyRequired && (await getPendingSession())) redirect("/login/passkey");
+  if (mfaRequired && (await getPendingSession())) redirect("/login/mfa");
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
       <div className="rounded-[2rem] border border-line bg-white p-6 shadow-sm sm:p-8">

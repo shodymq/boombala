@@ -111,7 +111,7 @@ describe("Exposure: what each deployment shows", () => {
     const key = Buffer.alloc(32, 3).toString("base64");
     const goodAdmin = {
       PLATFORM_PROFILE: "kz-production", PLATFORM_ROLE: "admin", PLATFORM_HTTPS: "1", ALLOWED_HOSTS: "panel.example.test", DATABASE_URL: "postgres://bb_admin@127.0.0.1/db",
-      MFA_MODE: "required", MFA_ENC_KEY: key, ADMIN_ALLOWED_CIDRS: "10.77.0.0/24,127.0.0.1/32", CRON_SECRET: "c".repeat(32), REVALIDATE_TOKEN: "r".repeat(32), TELEGRAM_BOT_TOKEN: "x:y", TELEGRAM_CHAT_ID: "1", TELEGRAM_NOTIFY_LEVEL: "minimal", SITE_REVALIDATE_URL: "https://site.example.test",
+      MFA_MODE: "required", PASSKEY_MODE: "required", WEBAUTHN_RP_ID: "panel.example.test", WEBAUTHN_ORIGIN: "https://panel.example.test", MFA_ENC_KEY: key, ADMIN_ALLOWED_CIDRS: "10.77.0.0/24,127.0.0.1/32", CRON_SECRET: "c".repeat(32), REVALIDATE_TOKEN: "r".repeat(32), TELEGRAM_BOT_TOKEN: "x:y", TELEGRAM_CHAT_ID: "1", TELEGRAM_NOTIFY_LEVEL: "minimal", SITE_REVALIDATE_URL: "https://site.example.test",
     };
     const goodApi = { PLATFORM_PROFILE: "kz-production", PLATFORM_ROLE: "api", PLATFORM_HTTPS: "1", ALLOWED_HOSTS: "api.example.test", DATABASE_URL: "postgres://bb_api@127.0.0.1/db", PLATFORM_INTAKE_TOKEN: "t".repeat(32), PLATFORM_IP_PEPPER: "p".repeat(24) };
 
@@ -122,6 +122,8 @@ describe("Exposure: what each deployment shows", () => {
     });
     it("the admin is refused without the second factor, without a valid key, without a network allowlist, over plain HTTP, without a host list", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, MFA_MODE: "off" }), ["mfa_required"]);
+      assert.deepEqual(profileProblems({ ...goodAdmin, PASSKEY_MODE: "off" }), ["passkey_required"]);
+      assert.deepEqual(profileProblems({ ...goodAdmin, WEBAUTHN_ORIGIN: "http://panel.example.test" }), ["webauthn_origin_invalid"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, MFA_MODE: undefined }), ["mfa_required"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, MFA_ENC_KEY: "short" }), ["mfa_key_invalid"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, ADMIN_ALLOWED_CIDRS: "" }), ["admin_cidrs_required"]);

@@ -138,6 +138,9 @@ export function profileProblems(env: Record<string, string | undefined> = proces
   if (!env.DATABASE_URL) p.push("database_url_required");
   if (role === "admin") {
     if (env.MFA_MODE !== "required") p.push("mfa_required");
+    if (env.PASSKEY_MODE !== "required") p.push("passkey_required");
+    if (!env.WEBAUTHN_RP_ID) p.push("webauthn_rp_id_required");
+    if (!env.WEBAUTHN_ORIGIN || !/^https:\/\//i.test(env.WEBAUTHN_ORIGIN)) p.push("webauthn_origin_invalid");
     if (Buffer.from(env.MFA_ENC_KEY ?? "", "base64").length !== 32) p.push("mfa_key_invalid");
     const cidrs = (env.ADMIN_ALLOWED_CIDRS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     if (cidrs.length === 0) p.push("admin_cidrs_required");

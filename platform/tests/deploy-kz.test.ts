@@ -206,6 +206,8 @@ describe("Kazakhstan deployment files", () => {
       assert.deepEqual(profileProblems(admin), []);
       assert.deepEqual(profileProblems(api), []);
       assert.equal(admin.MFA_MODE, "required");
+      assert.equal(admin.PASSKEY_MODE, "required");
+      assert.equal(admin.WEBAUTHN_ORIGIN, "https://crm.boombala.kz");
       assert.equal(admin.TELEGRAM_NOTIFY_LEVEL, "minimal");
       assert.equal(api.PII_INTAKE_ENABLED, "0", "personal data stays off in the example");
     });
