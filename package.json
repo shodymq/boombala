@@ -9,6 +9,7 @@
     "lint": "eslint",
     "verify:menu": "node --no-warnings scripts/verify-menu.mjs",
     "test:funnel": "node --no-warnings --test scripts/test-funnel.mjs",
+    "test": "npm run test:fastapi",
     "test:fastapi": "node --no-warnings --test scripts/fastapi-core.test.ts",
     "test:lead-api": "node --no-warnings scripts/test-lead-api.mjs",
     "test:lead-form": "node --no-warnings scripts/test-lead-form-mobile.mjs",

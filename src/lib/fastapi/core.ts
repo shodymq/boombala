@@ -47,7 +47,7 @@ export function parseFastapiConfig(env: Record<string, string | undefined>): Fas
   if (features.size === 0) return null;
 
   const baseUrl = (env.FASTAPI_BASE_URL ?? "").trim().replace(/\/+$/, "");
-  const secureUrl = /^https:\/\/[^/\s]+(\/[^\s?#]*)?$/.test(baseUrl);
+  const secureUrl = /^https:\/\/[^/\s@]+(\/[^\s?#]*)?$/.test(baseUrl); // no user:pass@ in the URL
   const localUrl = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/[^\s?#]*)?$/.test(baseUrl);
   if (!secureUrl && !localUrl) throw new FastapiError("not_configured");
 

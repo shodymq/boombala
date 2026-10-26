@@ -81,6 +81,13 @@ test("enabled feature with plain http to a public host is refused", () => {
   );
 });
 
+test("a URL with embedded credentials is refused", () => {
+  assert.throws(
+    () => parseFastapiConfig({ FASTAPI_FEATURES: "otp", FASTAPI_BASE_URL: "https://user:secret@api.example.kz/api/v1" }),
+    (e: unknown) => e instanceof FastapiError && e.kind === "not_configured",
+  );
+});
+
 test("https and localhost are accepted; trailing slash removed; timeout clamped", () => {
   const c = parseFastapiConfig({ FASTAPI_FEATURES: "otp", FASTAPI_BASE_URL: `${BASE}/`, FASTAPI_TIMEOUT_MS: "999999" });
   assert.equal(c?.baseUrl, BASE);
