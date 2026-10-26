@@ -1,0 +1,29 @@
+{
+  "status": 200,
+  "body": {
+    "id": "lead-new",
+    "type": "birthday_request",
+    "summary": "Заявка на день рождения · Main · Spark Party · 18.04.2026 · 12 гостей",
+    "status": "contacted",
+    "source": "mobile_app",
+    "customerName": "Amina",
+    "phone": "+77070000000",
+    "guestCount": 12,
+    "requestedDate": "2026-04-18",
+    "createdAt": "2026-04-01T09:00:00Z",
+    "waitingForContactMinutes": null,
+    "firstContactMinutes": 299968,
+    "branch": {
+      "id": "branch-main",
+      "name": "Star Kids Main",
+      "shortLabel": "Main"
+    },
+    "package": {
+      "id": "package-main",
+      "name": "Spark Party"
+    },
+    "email": null,
+    "notes": "Позвонить после 15:00",
+    "contactMethod": "phone"
+  }
+}
