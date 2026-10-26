@@ -485,7 +485,7 @@ describe("Attendance and the database roles", () => {
     assert.equal((await call(1)).rows.length, 1);
     await assert.rejects(() => api.query("SELECT id FROM bb.intake_insert_registration($1, $2)", [randomUUID(), c]), /does not exist|function/i, "no way to create a registration without the number");
     const fns = (await api.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname LIKE 'intake\\_%'")).rows;
-    assert.equal(fns.length, 9);
+    assert.equal(fns.length, 12);
   });
 
   it("the staff role works with attendance but cannot delete, truncate or alter it", async () => {

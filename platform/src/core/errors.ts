@@ -22,6 +22,14 @@ export class ConflictError extends Error {
   }
 }
 
+/** A required server secret for intake is missing or too weak: the request is refused, nothing is stored. */
+export class IntakeMisconfiguredError extends Error {
+  constructor(message = "intake_misconfigured") {
+    super(message);
+    this.name = "IntakeMisconfiguredError";
+  }
+}
+
 /** The documents a visitor must accept are not published yet, so no personal data may be collected. */
 export class ConsentUnavailableError extends Error {
   constructor() {

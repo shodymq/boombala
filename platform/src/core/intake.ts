@@ -1,9 +1,10 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { Client, Pool } from "./db.ts";
 import { withTx } from "./db.ts";
 import { almatyToday, isValidDate } from "./dates.ts";
-import { ConsentUnavailableError, DocumentsChangedError, ValidationError } from "./errors.ts";
+import { ConflictError, ConsentUnavailableError, DocumentsChangedError, IntakeMisconfiguredError, ValidationError } from "./errors.ts";
+import type { LeadStatus } from "./lead-status.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
 
 export interface IntakeMeta {
@@ -11,6 +12,8 @@ export interface IntakeMeta {
   userAgent?: string | null;
   /** Server secret for hashing the IP; the raw IP is never stored with a consent. */
   ipPepper?: string;
+  /** Server secret for the request fingerprint of mobile enquiries (see requestFingerprint). At least 24 characters. */
+  fingerprintSecret?: string;
 }
 
 /** HMAC of the address: lets us see "same device" in an audit without keeping the address itself. */
@@ -197,4 +200,123 @@ export async function submitConsent(pool: Pool, raw: ConsentInput, meta: IntakeM
     await tx.query("SELECT bb.intake_audit('consent.registered', 'consent_registration', $1)", [registrationId]);
     return { registrationId, seq: Number(created.rows[0].seq), duplicate: false, documents: await docsFor(registrationId) };
   });
+}
+
+// ── Mobile app enquiries: idempotent by (source, external_request_id) ─────────────────────────────────────────────
+
+export type IntakeSource = "birthday_form" | "mobile_app";
+
+const externalLeadSchema = leadSchema.omit({ idempotencyKey: true }).extend({
+  external_request_id: z.string().trim().uuid("Некорректный идентификатор заявки"),
+});
+
+/**
+ * HMAC over the business fields of an enquiry, in a fixed (sorted) order. The same request gives the same value, a different
+ * one does not. Keyed with a server secret: a leaked table cannot be checked against guessed phone numbers.
+ */
+export function requestFingerprint(fields: Record<string, string | number | null>, secret: string): string {
+  const canonical = Object.keys(fields)
+    .sort()
+    .map((key) => `${key}=${JSON.stringify(fields[key])}`)
+    .join("\n");
+  return createHmac("sha256", secret).update(`lead-fingerprint-v1\n${canonical}`).digest("hex");
+}
+
+interface ExternalLeadRow {
+  id: string;
+  seq: string;
+  fingerprint: string | null;
+}
+
+async function findExternalLead(tx: Client, externalRequestId: string): Promise<ExternalLeadRow | undefined> {
+  const { rows } = await tx.query<ExternalLeadRow>("SELECT id, seq, fingerprint FROM bb.intake_find_external_lead($1, $2)", ["mobile_app", externalRequestId]);
+  return rows[0];
+}
+
+/** The same id with the same business fields is the same request (first result); with different fields it is a conflict. */
+function resolveExistingLead(row: ExternalLeadRow, fingerprint: string): LeadResult {
+  const stored = Buffer.from(row.fingerprint ?? "", "hex");
+  const given = Buffer.from(fingerprint, "hex");
+  if (stored.length !== given.length || !timingSafeEqual(stored, given)) throw new ConflictError("idempotency_conflict");
+  return { leadId: row.id, seq: Number(row.seq), duplicate: true };
+}
+
+/**
+ * Saves an enquiry from the mobile app, in ONE transaction: contact, enquiry, consent event and the Telegram task, as for the
+ * site form. Idempotent by the client's `external_request_id`: the same business request returns the first result with
+ * `duplicate: true` and creates nothing; a different request under the same id throws ConflictError("idempotency_conflict").
+ */
+export async function submitExternalLead(pool: Pool, raw: unknown, meta: IntakeMeta = {}): Promise<LeadResult> {
+  const secret = meta.fingerprintSecret;
+  if (!secret || secret.length < 24) throw new IntakeMisconfiguredError();
+  const parsed = externalLeadSchema.safeParse(raw);
+  const errors: Record<string, string> = parsed.success ? {} : fieldErrors(parsed.error);
+  const input = parsed.success ? parsed.data : null;
+  const phone = input ? normalizePhone(input.phone) : null;
+  if (input && !phone) errors.phone = "Проверьте номер телефона";
+  if (input && !(isValidDate(input.date) && input.date >= almatyToday())) errors.date = "Выберите дату не раньше сегодняшней";
+  if (Object.keys(errors).length || !input || !phone) throw new ValidationError(errors);
+
+  const name = cleanName(input.name);
+  const packageId = input.packageId && input.packageId !== "undecided" ? input.packageId : null;
+  const roomId = input.roomId || null;
+  const fingerprint = requestFingerprint(
+    {
+      name,
+      phone,
+      date: input.date,
+      children: input.children ?? null,
+      packageId,
+      roomId,
+      slotId: input.slotId ?? null,
+      page: input.page,
+      referrer: input.referrer,
+      utmSource: input.utmSource,
+      utmMedium: input.utmMedium,
+      utmCampaign: input.utmCampaign,
+    },
+    secret,
+  );
+
+  return withTx(pool, async (tx) => {
+    const existing = await findExternalLead(tx, input.external_request_id);
+    if (existing) return resolveExistingLead(existing, fingerprint);
+
+    const consentDoc = await publishedDoc(tx, "personal_data_consent");
+    if (!consentDoc) throw new ConsentUnavailableError();
+    if (packageId && !(await tx.query("SELECT 1 FROM bb.packages WHERE id = $1 AND is_active", [packageId])).rowCount) throw new ValidationError({ packageId: "Неизвестный пакет" });
+    if (roomId && !(await tx.query("SELECT 1 FROM bb.rooms WHERE id = $1 AND is_active", [roomId])).rowCount) throw new ValidationError({ roomId: "Неизвестная комната" });
+
+    const contactId = await upsertContact(tx, name, phone, "birthday_form");
+    const created = await tx.query<{ id: string; seq: string }>(
+      "SELECT id, seq FROM bb.intake_insert_external_lead($1, $2, $3, $4, $5, $6, $7::date, $8::smallint, $9, $10, $11, $12, $13, $14::smallint)",
+      ["mobile_app", input.external_request_id, fingerprint, contactId, packageId, roomId, input.date, input.children ?? null, input.page, input.referrer, input.utmSource, input.utmMedium, input.utmCampaign, input.slotId ?? null],
+    );
+    if (!created.rows[0]) {
+      // A parallel request with the same id committed first: compare with it, create nothing.
+      const winner = await findExternalLead(tx, input.external_request_id);
+      if (!winner) throw new Error("external lead missing after insert conflict");
+      return resolveExistingLead(winner, fingerprint);
+    }
+    const leadId = created.rows[0].id;
+    await tx.query("SELECT bb.intake_add_consent($1, $2, $3, $4, $5, NULL)", [contactId, consentDoc.id, hashIp(meta.ip, meta.ipPepper), meta.userAgent ? meta.userAgent.slice(0, 400) : null, leadId]);
+    await tx.query("SELECT bb.intake_queue_notification($1)", [leadId]);
+    await tx.query("SELECT bb.intake_audit('lead.created', 'lead_request', $1)", [leadId]);
+    return { leadId, seq: Number(created.rows[0].seq), duplicate: false };
+  });
+}
+
+export interface ExternalLeadStatus {
+  status: LeadStatus;
+  statusChangedAt: Date;
+}
+
+/**
+ * Read-only status of an enquiry, found only by its source and client request id. Null when this source has no such enquiry:
+ * an unknown id and a foreign source look the same to the caller.
+ */
+export async function externalLeadStatus(pool: Pool, source: IntakeSource, externalRequestId: string): Promise<ExternalLeadStatus | null> {
+  const { rows } = await pool.query<{ status: LeadStatus; status_changed_at: Date }>("SELECT status, status_changed_at FROM bb.intake_lead_status($1, $2)", [source, externalRequestId]);
+  const row = rows[0];
+  return row ? { status: row.status, statusChangedAt: row.status_changed_at } : null;
 }

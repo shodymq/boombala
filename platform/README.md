@@ -41,6 +41,10 @@ E2E_PASSWORD=... DATABASE_URL=... npm run e2e    # браузерный сцен
 включения: [`../docs/platform/LEAD-PIPELINE-MIGRATION.md`](../docs/platform/LEAD-PIPELINE-MIGRATION.md). Черновики юридических
 текстов: [`../docs/platform/legal/`](../docs/platform/legal/README.md).
 
+Заявки из мобильного приложения (`POST /api/intake/lead` с `external_request_id`, `GET /api/intake/lead/{external_request_id}/status`)
+требуют отдельных секретов: `PLATFORM_MOBILE_INTAKE_TOKEN` (другой, чем у сайта) и `PLATFORM_INTAKE_FINGERPRINT_SECRET`.
+Источник заявки задаёт bearer-токен, а не тело запроса.
+
 Для e2e-сценария CRM нужны `PLATFORM_INTAKE_TOKEN`, `CRON_SECRET` и сервер, запущенный с `PII_INTAKE_ENABLED=1`,
 `TELEGRAM_API_BASE=http://127.0.0.1:3199` (заглушка: `node scripts/mock-telegram.mjs 3199`), с тем же токеном и секретом.
 Реальный Telegram в тестах не используется.
