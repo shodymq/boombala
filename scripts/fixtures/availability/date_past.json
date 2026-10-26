@@ -1,0 +1,10 @@
+{
+  "status": 422,
+  "body": {
+    "error": {
+      "code": "validation_error",
+      "message": "Date must be today or later.",
+      "details": []
+    }
+  }
+}

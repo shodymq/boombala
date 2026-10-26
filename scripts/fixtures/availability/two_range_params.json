@@ -1,0 +1,10 @@
+{
+  "status": 422,
+  "body": {
+    "error": {
+      "code": "validation_error",
+      "message": "Provide exactly one of date or month.",
+      "details": []
+    }
+  }
+}
