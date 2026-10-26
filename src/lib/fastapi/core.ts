@@ -11,7 +11,7 @@
 // ── Feature flags ───────────────────────────────────────────────────────────────────────────────
 
 /** Each capability is switched on separately. Default is nothing: the site keeps its current routes. */
-export const FASTAPI_FEATURES = ["leads", "otp"] as const;
+export const FASTAPI_FEATURES = ["leads", "otp", "account"] as const;
 export type FastapiFeature = (typeof FASTAPI_FEATURES)[number];
 
 /**
@@ -260,6 +260,8 @@ export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 export interface CallOptions {
   method: "GET" | "POST";
   route: string;
+  /** Access token of the parent, sent as Bearer. Only the server-side BFF ever passes it. */
+  bearer?: string;
   body?: unknown;
   feature: FastapiFeature;
   requestId?: string;
@@ -311,6 +313,7 @@ export function createFastapiClient(deps: FastapiClientDeps): FastapiClient {
           headers: {
             accept: "application/json",
             "x-request-id": requestId,
+            ...(options.bearer ? { authorization: `Bearer ${options.bearer}` } : {}),
             ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
           },
           body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -375,4 +378,117 @@ export function requestOtp(client: FastapiClient, body: OtpRequest, requestId?: 
 
 export function verifyOtp(client: FastapiClient, body: OtpVerifyRequest, requestId?: string) {
   return client.call({ method: "POST", route: ENDPOINTS.verifyOtp, body, feature: "otp", requestId }, parseMobileAuth);
+}
+
+// ── Parent account (feature "account"): all calls carry the parent's own Bearer token ────────────
+
+export interface ParentProfile {
+  id: string;
+  phone: string | null;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  onboardingCompleted: boolean;
+}
+
+export type ChildGenderValue = "male" | "female" | "unspecified";
+
+export interface ParentChild {
+  id: string;
+  name: string;
+  birthDate: string;
+  gender: ChildGenderValue;
+}
+
+/** One request of the parent. `notes` is deliberately not part of the contract used by the site (staff-facing text). */
+export interface ParentRequest {
+  id: string;
+  type: string;
+  status: string;
+  createdAt: string;
+  requestedDate: string | null;
+  guestCount: number | null;
+  branchName: string | null;
+  packageName: string | null;
+  childName: string | null;
+}
+
+const optString = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const optNumber = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+export function parseProfile(v: unknown): ParentProfile {
+  if (!isObject(v) || !isString(v.id)) throw new FastapiError("invalid_response");
+  return {
+    id: v.id,
+    phone: optString(v.phone),
+    email: optString(v.email),
+    firstName: optString(v.firstName),
+    lastName: optString(v.lastName),
+    onboardingCompleted: v.onboardingCompleted === true,
+  };
+}
+
+export function parseChildren(v: unknown): ParentChild[] {
+  if (!isObject(v) || !Array.isArray(v.items)) throw new FastapiError("invalid_response");
+  return v.items.map((c) => {
+    if (!isObject(c) || !isString(c.id) || !isString(c.name) || !isString(c.birthDate)) throw new FastapiError("invalid_response");
+    const gender: ChildGenderValue = c.gender === "male" || c.gender === "female" ? c.gender : "unspecified";
+    return { id: c.id, name: c.name, birthDate: c.birthDate, gender };
+  });
+}
+
+export function parseRequests(v: unknown): ParentRequest[] {
+  if (!isObject(v) || !Array.isArray(v.items)) throw new FastapiError("invalid_response");
+  return v.items.map((r) => {
+    if (!isObject(r) || !isString(r.id) || !isString(r.type) || !isString(r.status) || !isString(r.createdAt)) {
+      throw new FastapiError("invalid_response");
+    }
+    const branch = isObject(r.branch) ? optString(r.branch.name) : null;
+    const pkg = isObject(r.package) ? optString(r.package.name) : null;
+    return {
+      id: r.id,
+      type: r.type,
+      status: r.status,
+      createdAt: r.createdAt,
+      requestedDate: optString(r.requestedDate),
+      guestCount: optNumber(r.guestCount),
+      branchName: branch,
+      packageName: pkg,
+      childName: optString(r.childName),
+    };
+  });
+}
+
+export const ACCOUNT_ENDPOINTS = {
+  refresh: "/mobile/auth/refresh",
+  logout: "/mobile/auth/logout",
+  profile: "/mobile/me",
+  children: "/mobile/me/children",
+  requests: "/mobile/me/requests",
+} as const;
+
+export function refreshTokens(client: FastapiClient, refreshToken: string, requestId?: string) {
+  return client.call(
+    { method: "POST", route: ACCOUNT_ENDPOINTS.refresh, body: { refresh_token: refreshToken }, feature: "account", requestId },
+    parseMobileAuth,
+  );
+}
+
+export function logoutTokens(client: FastapiClient, accessToken: string, requestId?: string) {
+  return client.call(
+    { method: "POST", route: ACCOUNT_ENDPOINTS.logout, feature: "account", bearer: accessToken, requestId },
+    () => undefined,
+  );
+}
+
+export function getProfile(client: FastapiClient, accessToken: string, requestId?: string) {
+  return client.call({ method: "GET", route: ACCOUNT_ENDPOINTS.profile, feature: "account", bearer: accessToken, requestId }, parseProfile);
+}
+
+export function getChildren(client: FastapiClient, accessToken: string, requestId?: string) {
+  return client.call({ method: "GET", route: ACCOUNT_ENDPOINTS.children, feature: "account", bearer: accessToken, requestId }, parseChildren);
+}
+
+export function getRequests(client: FastapiClient, accessToken: string, requestId?: string) {
+  return client.call({ method: "GET", route: ACCOUNT_ENDPOINTS.requests, feature: "account", bearer: accessToken, requestId }, parseRequests);
 }
