@@ -19,7 +19,8 @@ const navLink =
 /** Active page: bolder text and a yellow underline. Anchors never look "active". */
 const activeMark = (active: boolean) => (active ? " font-extrabold after:absolute after:inset-x-2 after:-bottom-0.5 after:h-[3px] after:rounded-full after:bg-sun-400" : "");
 
-export function Header() {
+/** `showParentLogin` is decided on the server (PARENT_LOGIN flag). When false the header is exactly as before. */
+export function Header({ showParentLogin = false }: { showParentLogin?: boolean }) {
   const { menuOpen: open, setMenuOpen: setOpen } = useMenuState();
   const pathname = usePathname();
   const { open: openLead } = useLeadForm();
@@ -142,6 +143,11 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-2">
+          {showParentLogin ? (
+            <Link href="/account" className={`${navLink} max-[1079px]:hidden`}>
+              Войти
+            </Link>
+          ) : null}
           <button type="button" className={`${cta} max-[1079px]:hidden`} onClick={() => book("header")}>
             Забронировать праздник
           </button>
@@ -201,6 +207,17 @@ export function Header() {
 
             <p className="mx-3.5 mb-2 mt-3 font-display text-xs font-extrabold uppercase tracking-[0.14em] text-grape-600">Быстро найти</p>
             <ul className="grid grid-cols-2 gap-2 px-1.5">
+              {showParentLogin ? (
+                <li>
+                  <Link
+                    href="/account"
+                    onClick={() => closeMenu(false)}
+                    className="flex min-h-12 items-center rounded-full border border-line bg-grape-50 px-4 font-display text-base font-extrabold leading-tight text-grape-800 transition-colors hover:bg-grape-100"
+                  >
+                    Войти
+                  </Link>
+                </li>
+              ) : null}
               {infoLinks.map((item) => (
                 <li key={item.href}>
                   <Link

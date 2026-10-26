@@ -11,6 +11,7 @@ import { SelectedPackageProvider } from "@/components/lead/SelectedPackage";
 import { Analytics } from "@/components/analytics/Analytics";
 import { getSiteUrl } from "@/lib/site-url";
 import { siteConfig } from "@/services/config";
+import { parentState } from "@/lib/parent/server";
 
 const nunito = Nunito({
   subsets: ["latin", "cyrillic"],
@@ -96,7 +97,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <MenuStateProvider>
         <LeadFormProvider>
           <HashScroll />
-          <Header />
+          <Header showParentLogin={parentState().enabled} />
           <main id="main">{children}</main>
           <Footer />
           <StickyBookingCta />
