@@ -14,17 +14,21 @@ export type ParentLoginOffReason =
   | "rollback_profile"
   | "feature_off"
   | "fastapi_not_configured"
-  | "production_not_approved"
-  | "shared_session_store_not_implemented";
+  | "session_store_not_configured"
+  | "production_otp_not_ready";
 
 export type ParentLoginState = { enabled: true } | { enabled: false; reason: ParentLoginOffReason };
 
 const off = (reason: ParentLoginOffReason): ParentLoginState => ({ enabled: false, reason });
 
+const LOOPBACK_OR_HTTPS = /^(https:\/\/[^/\s@]+|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?)(\/[^\s?#]*)?$/;
+
 /**
- * PARENT_LOGIN=on is required AND the FastAPI features `otp` and `account` must be on. Production is closed twice:
- * it needs PARENT_LOGIN_PRODUCTION_APPROVED=1 and a SHARED session store, which this PR does not implement. So the
- * code cannot enable parent login in production yet, whatever the env says.
+ * Parent login needs every piece below, and is closed in production regardless:
+ *  - PARENT_LOGIN=on, the FastAPI features `otp` and `account`, and a valid FastAPI URL;
+ *  - a shared session store: the platform's internal API (PLATFORM_URL, PARENT_SESSION_SERVICE_TOKEN) and the key that seals
+ *    the pending phone login (PARENT_PENDING_KEY). Without the store nothing can be created, so nothing is enabled;
+ *  - production: OFF. There is no real SMS provider yet (backend OTP is mock by default), so the site must not offer login.
  */
 export function parentLoginState(env: Record<string, string | undefined>): ParentLoginState {
   if ((env.PARENT_LOGIN ?? "").trim() !== "on") return off("flag_off");
@@ -36,10 +40,12 @@ export function parentLoginState(env: Record<string, string | undefined>): Paren
   } catch {
     return off("fastapi_not_configured");
   }
-  if (env.NODE_ENV === "production") {
-    if (env.PARENT_LOGIN_PRODUCTION_APPROVED !== "1") return off("production_not_approved");
-    return off("shared_session_store_not_implemented");
-  }
+  const platformUrl = (env.PLATFORM_URL ?? "").trim();
+  const token = (env.PARENT_SESSION_SERVICE_TOKEN ?? "").trim();
+  const pending = (env.PARENT_PENDING_KEY ?? "").trim();
+  const pendingOk = /^[A-Za-z0-9+/]+={0,2}$/.test(pending) && Buffer.from(pending, "base64").length === 32;
+  if (!LOOPBACK_OR_HTTPS.test(platformUrl) || token.length < 24 || !pendingOk) return off("session_store_not_configured");
+  if (env.NODE_ENV === "production") return off("production_otp_not_ready");
   return { enabled: true };
 }
 
@@ -139,13 +145,40 @@ export class ExpiringStore<T> {
 
 // ── Session record and calls on behalf of the parent ────────────────────────────────────────────
 
-export interface ParentSession {
-  csrfToken: string;
-  accessToken: string;
-  refreshToken: string;
+/** One parent session as the store keeps it (tokens included; they never leave the server). */
+export interface SessionRecord {
+  userId: string;
+  csrf: string;
+  access: string;
+  refresh: string;
   /** Epoch ms after which the access token must be refreshed before use (with a safety margin). */
   accessExpiresAt: number;
-  userId: string;
+}
+
+export type ParentSession = SessionRecord;
+
+export interface TokenUpdate {
+  access: string;
+  refresh: string;
+  accessExpiresAt: number;
+}
+
+/**
+ * Shared, server-side session storage (see session-store.ts). Every method may throw SessionStoreUnavailable: the caller
+ * fails closed and never assumes a session is valid or invalid when the store cannot answer.
+ */
+export interface SessionStore {
+  create(sid: string, record: SessionRecord, ttlSeconds: number): Promise<void>;
+  lookup(sid: string): Promise<SessionRecord | null>;
+  rotate(sid: string, update: TokenUpdate): Promise<boolean>;
+  revoke(sid: string): Promise<void>;
+}
+
+export class SessionStoreUnavailable extends Error {
+  constructor() {
+    super("parent_session_store_unavailable");
+    this.name = "SessionStoreUnavailable";
+  }
 }
 
 export interface PendingLogin {
@@ -165,52 +198,51 @@ export class ParentSessionEnded extends Error {
 
 export interface ParentCallDeps {
   client: FastapiClient;
-  sessions: ExpiringStore<ParentSession>;
+  store: SessionStore;
   now?: () => number;
   refresh: (client: FastapiClient, refreshToken: string) => Promise<{ access_token: string; refresh_token: string; expires_in_seconds: number }>;
 }
 
 /**
  * Runs `fn` with a valid access token of the session:
- *  - refreshes first when the access token is close to expiry;
+ *  - refreshes first when the access token is at or past its (margin-adjusted) deadline;
  *  - on 401 refreshes once and retries once;
- *  - if the refresh token itself is rejected, the session is deleted and ParentSessionEnded is thrown;
- *  - if FastAPI is down, the session is KEPT (it may still be valid) and the FastapiError is rethrown.
+ *  - a rejected refresh token revokes the session and throws ParentSessionEnded;
+ *  - FastAPI down keeps the session and rethrows the FastapiError;
+ *  - the store down throws SessionStoreUnavailable (fail closed).
  */
 export async function callAsParent<T>(deps: ParentCallDeps, sessionId: string, fn: (accessToken: string) => Promise<T>): Promise<T> {
   const now = deps.now ?? (() => Date.now());
-  const session = deps.sessions.get(sessionId);
-  if (!session) throw new ParentSessionEnded();
+  let current = await deps.store.lookup(sessionId);
+  if (!current) throw new ParentSessionEnded();
 
-  const rotate = async (current: ParentSession) => {
+  const rotate = async (session: SessionRecord): Promise<SessionRecord> => {
+    let fresh: { access_token: string; refresh_token: string; expires_in_seconds: number };
     try {
-      const fresh = await deps.refresh(deps.client, current.refreshToken);
-      const next: ParentSession = {
-        ...current,
-        accessToken: fresh.access_token,
-        refreshToken: fresh.refresh_token,
-        accessExpiresAt: now() + fresh.expires_in_seconds * 1000 - ACCESS_MARGIN_MS,
-      };
-      deps.sessions.set(sessionId, next);
-      return next;
+      fresh = await deps.refresh(deps.client, session.refresh);
     } catch (error) {
       if (error instanceof FastapiError && error.kind === "rejected") {
-        deps.sessions.delete(sessionId);
+        await deps.store.revoke(sessionId);
         throw new ParentSessionEnded();
       }
       throw error; // unavailable / timeout / invalid_response: keep the session, report the failure
     }
+    const update: TokenUpdate = {
+      access: fresh.access_token,
+      refresh: fresh.refresh_token,
+      accessExpiresAt: now() + fresh.expires_in_seconds * 1000 - ACCESS_MARGIN_MS,
+    };
+    if (!(await deps.store.rotate(sessionId, update))) throw new ParentSessionEnded();
+    return { ...session, ...update };
   };
 
-  let current: ParentSession = session;
   if (now() >= current.accessExpiresAt) current = await rotate(current);
-
   try {
-    return await fn(current.accessToken);
+    return await fn(current.access);
   } catch (error) {
     if (!(error instanceof FastapiError) || error.status !== 401) throw error;
     current = await rotate(current);
-    return fn(current.accessToken);
+    return fn(current.access);
   }
 }
 

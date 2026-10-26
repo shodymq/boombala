@@ -1,4 +1,4 @@
-import { guardPost } from "@/lib/parent/core";
+import { guardPost, SessionStoreUnavailable } from "@/lib/parent/core";
 import { guardResponse, hostOf, json, notFoundJson } from "@/lib/parent/http";
 import { currentSession, logoutEverywhere, parentState } from "@/lib/parent/server";
 
@@ -9,7 +9,13 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   if (!parentState().enabled) return notFoundJson();
 
-  const current = await currentSession();
+  let current: Awaited<ReturnType<typeof currentSession>>;
+  try {
+    current = await currentSession();
+  } catch (error) {
+    if (error instanceof SessionStoreUnavailable) return json({ ok: false, error: "unavailable" }, 503);
+    throw error;
+  }
   if (!current) return json({ ok: false, error: "no_session" }, 401);
 
   const guard = guardPost({
@@ -17,10 +23,15 @@ export async function POST(request: Request) {
     host: hostOf(request.headers),
     contentType: request.headers.get("content-type"),
     csrfHeader: request.headers.get("x-csrf-token"),
-    expectedCsrf: current.session.csrfToken,
+    expectedCsrf: current.session.csrf,
   });
   if (guard) return guardResponse(guard);
 
-  await logoutEverywhere(current.sid);
+  try {
+    await logoutEverywhere(current.sid);
+  } catch (error) {
+    if (error instanceof SessionStoreUnavailable) return json({ ok: false, error: "unavailable" }, 503);
+    throw error;
+  }
   return json({ ok: true });
 }

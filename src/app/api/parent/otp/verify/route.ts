@@ -1,6 +1,6 @@
 import { fastapiClient } from "@/lib/fastapi";
 import { FastapiError, verifyOtp } from "@/lib/fastapi/core.ts";
-import { guardPost } from "@/lib/parent/core";
+import { guardPost, SessionStoreUnavailable } from "@/lib/parent/core";
 import { failureResponse, guardResponse, hostOf, json, notFoundJson, readJsonBody } from "@/lib/parent/http";
 import { clearPendingLogin, currentPendingLogin, establishSession, parentState } from "@/lib/parent/server";
 import { rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
@@ -28,20 +28,17 @@ export async function POST(request: Request) {
   const pending = await currentPendingLogin();
   if (!pending) return json({ ok: false, error: "login_expired" }, 400);
 
-  const key = `parent-verify:${pending.login.phone}`;
+  const key = `parent-verify:${pending.phone}`;
   if (!rateLimitCheck(key, CODE_LIMIT).ok) return json({ ok: false, error: "rate_limited" }, 429);
   rateLimitRecord(key);
 
   try {
-    const auth = await verifyOtp(fastapiClient(), {
-      phone: pending.login.phone,
-      code,
-      verification_id: pending.login.verificationId,
-    });
-    await clearPendingLogin(pending.pid);
+    const auth = await verifyOtp(fastapiClient(), { phone: pending.phone, code, verification_id: pending.verificationId });
     const { csrfToken } = await establishSession(auth);
+    await clearPendingLogin();
     return json({ ok: true, csrfToken });
   } catch (error) {
+    if (error instanceof SessionStoreUnavailable) return json({ ok: false, error: "unavailable" }, 503);
     if (error instanceof FastapiError && error.kind === "rejected" && (error.status === 400 || error.status === 401 || error.status === 422)) {
       return json({ ok: false, error: "invalid_code" }, 401);
     }

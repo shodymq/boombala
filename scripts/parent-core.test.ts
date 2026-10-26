@@ -18,14 +18,18 @@ import {
   ParentSessionEnded,
   randomToken,
   sameSecret,
-  type ParentSession,
 } from "../src/lib/parent/core.ts";
+import { MemorySessionStore } from "../src/lib/parent/session-store.ts";
+import type { SessionRecord } from "../src/lib/parent/core.ts";
 import { FastapiError, createFastapiClient, type ParentChild, type ParentRequest } from "../src/lib/fastapi/core.ts";
 
 const ON = {
   PARENT_LOGIN: "on",
   FASTAPI_FEATURES: "otp,account",
   FASTAPI_BASE_URL: "https://api-staging.example.kz/api/v1",
+  PLATFORM_URL: "http://127.0.0.1:3100",
+  PARENT_SESSION_SERVICE_TOKEN: "service-token-0123456789abcdef",
+  PARENT_PENDING_KEY: Buffer.alloc(32, 7).toString("base64"),
 };
 
 // ── Feature gate ────────────────────────────────────────────────────────────────────────────────
@@ -51,13 +55,19 @@ test("unsafe FastAPI URL turns parent login off instead of sending data", () => 
   });
 });
 
-test("production is closed even when everything else is set", () => {
-  const prod = { ...ON, NODE_ENV: "production" };
-  assert.deepEqual(parentLoginState(prod), { enabled: false, reason: "production_not_approved" });
-  assert.deepEqual(parentLoginState({ ...prod, PARENT_LOGIN_PRODUCTION_APPROVED: "1" }), {
+test("production is closed even when everything else is configured (no real SMS provider yet)", () => {
+  assert.deepEqual(parentLoginState({ ...ON, NODE_ENV: "production" }), { enabled: false, reason: "production_otp_not_ready" });
+  assert.deepEqual(parentLoginState({ ...ON, NODE_ENV: "production", PARENT_LOGIN_PRODUCTION_APPROVED: "1" }), {
     enabled: false,
-    reason: "shared_session_store_not_implemented",
+    reason: "production_otp_not_ready",
   });
+});
+
+test("the shared session store must be configured, or login stays off", () => {
+  assert.deepEqual(parentLoginState({ ...ON, PLATFORM_URL: undefined }), { enabled: false, reason: "session_store_not_configured" });
+  assert.deepEqual(parentLoginState({ ...ON, PLATFORM_URL: "http://10.0.0.5:3100" }), { enabled: false, reason: "session_store_not_configured" });
+  assert.deepEqual(parentLoginState({ ...ON, PARENT_SESSION_SERVICE_TOKEN: "short" }), { enabled: false, reason: "session_store_not_configured" });
+  assert.deepEqual(parentLoginState({ ...ON, PARENT_PENDING_KEY: Buffer.alloc(8).toString("base64") }), { enabled: false, reason: "session_store_not_configured" });
 });
 
 test("with the flag on in development, login is enabled", () => {
@@ -129,38 +139,32 @@ test("store expires entries and never grows past its bound", () => {
   assert.equal(store.size, 0);
 });
 
-// ── Calls on behalf of the parent: refresh rules ───────────────────────────────────────────────
+// ── Calls on behalf of the parent: refresh rules (the shared store, async) ──────────────────────────
 
-function session(over: Partial<ParentSession> = {}): ParentSession {
-  return {
-    csrfToken: "csrf-token-123",
-    accessToken: "access-old",
-    refreshToken: "refresh-old",
-    accessExpiresAt: 10 * 60_000,
-    userId: "u-1",
-    ...over,
-  };
+function session(over: Partial<SessionRecord> = {}): SessionRecord {
+  return { csrf: "csrf-token-123", access: "access-old", refresh: "refresh-old", accessExpiresAt: 10 * 60_000, userId: "u-1", ...over };
 }
 
-function setup(now: number, rejectsRefresh = false) {
-  const sessions = new ExpiringStore<ParentSession>({ ttlMs: 60_000, maxEntries: 10, now: () => now });
-  sessions.set("sid", session());
+async function setup(now: number, rejectsRefresh = false, unavailable = false) {
+  const store = new MemorySessionStore(() => now);
+  await store.create("sid", session(), 3600);
   const refreshCalls: string[] = [];
   const deps = {
     client: createFastapiClient({ config: null }),
-    sessions,
+    store,
     now: () => now,
     refresh: async (_client: unknown, refreshToken: string) => {
       refreshCalls.push(refreshToken);
+      if (unavailable) throw new FastapiError("unavailable", 503);
       if (rejectsRefresh) throw new FastapiError("rejected", 401, "invalid_token");
       return { access_token: "access-new", refresh_token: "refresh-new", expires_in_seconds: 900 };
     },
   };
-  return { deps, sessions, refreshCalls };
+  return { deps, store, refreshCalls };
 }
 
 test("a fresh access token is used without refreshing", async () => {
-  const { deps, refreshCalls } = setup(0);
+  const { deps, refreshCalls } = await setup(0);
   const seen: string[] = [];
   await callAsParent(deps, "sid", async (token) => {
     seen.push(token);
@@ -171,17 +175,16 @@ test("a fresh access token is used without refreshing", async () => {
 });
 
 test("a token at its margin-adjusted deadline is refreshed first and the rotated refresh token is stored", async () => {
-  // accessExpiresAt already has the safety margin removed, so reaching it means "refresh now".
-  const { deps, sessions, refreshCalls } = setup(10 * 60_000);
+  const { deps, store, refreshCalls } = await setup(10 * 60_000);
   await callAsParent(deps, "sid", async (token) => token);
   assert.deepEqual(refreshCalls, ["refresh-old"]);
-  const stored = sessions.get("sid");
-  assert.equal(stored?.refreshToken, "refresh-new");
-  assert.equal(stored?.accessToken, "access-new");
+  const stored = await store.lookup("sid");
+  assert.equal(stored?.refresh, "refresh-new");
+  assert.equal(stored?.access, "access-new");
 });
 
 test("401 from FastAPI triggers one refresh and one retry", async () => {
-  const { deps, refreshCalls } = setup(0);
+  const { deps, refreshCalls } = await setup(0);
   let attempts = 0;
   const out = await callAsParent(deps, "sid", async (token) => {
     attempts += 1;
@@ -193,30 +196,30 @@ test("401 from FastAPI triggers one refresh and one retry", async () => {
   assert.equal(refreshCalls.length, 1);
 });
 
-test("a rejected refresh token ends the session", async () => {
-  const { deps, sessions } = setup(0, true);
+test("a rejected refresh token revokes the session", async () => {
+  const { deps, store } = await setup(0, true);
   await assert.rejects(
     callAsParent(deps, "sid", async () => {
       throw new FastapiError("rejected", 401, "expired");
     }),
     ParentSessionEnded,
   );
-  assert.equal(sessions.get("sid"), undefined);
+  assert.equal(await store.lookup("sid"), null);
 });
 
 test("FastAPI outage keeps the session and reports the failure", async () => {
-  const { deps, sessions } = setup(0);
+  const { deps, store } = await setup(0, false, true);
   await assert.rejects(
     callAsParent(deps, "sid", async () => {
       throw new FastapiError("unavailable", 503);
     }),
     (e: unknown) => e instanceof FastapiError && e.kind === "unavailable",
   );
-  assert.ok(sessions.get("sid"), "session must survive an outage");
+  assert.ok(await store.lookup("sid"), "session must survive an outage");
 });
 
 test("unknown session is reported as ended without any call", async () => {
-  const { deps, refreshCalls } = setup(0);
+  const { deps, refreshCalls } = await setup(0);
   await assert.rejects(callAsParent(deps, "missing", async () => 1), ParentSessionEnded);
   assert.equal(refreshCalls.length, 0);
 });

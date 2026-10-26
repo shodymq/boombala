@@ -2,129 +2,123 @@ import "server-only";
 import { cookies } from "next/headers";
 import { fastapiClient } from "../fastapi";
 import { getChildren, getProfile, getRequests, logoutTokens, refreshTokens, type MobileAuthResponse } from "../fastapi/core.ts";
-import {
-  buildCabinet,
-  callAsParent,
-  ExpiringStore,
-  parentLoginState,
-  randomToken,
-  type ParentCabinet,
-  type ParentCallDeps,
-  type ParentLoginState,
-  type ParentSession,
-  type PendingLogin,
-} from "./core.ts";
+import { buildCabinet, callAsParent, parentLoginState, randomToken, type ParentCabinet, type ParentCallDeps, type ParentLoginState, type SessionRecord, type SessionStore, type PendingLogin } from "./core.ts";
+import { pendingSealerFromEnv, type PendingSealer } from "./pending.ts";
+import { platformSessionStore } from "./session-store.ts";
 
 /**
- * Server side of the parent account: cookies, the process-wide stores and the cabinet loader.
- * The browser holds only two opaque, HttpOnly ids. FastAPI tokens and the phone number never leave the server.
- *
- * Production note: the stores below are in process memory. That is correct for development and for one
- * server process, but NOT for several instances. parentLoginState() keeps production closed until a shared
- * store exists (see core.ts).
+ * Server side of the parent account. The browser holds two opaque, HttpOnly cookies:
+ *  - the session id (bb_parent_session) → the server looks it up in the SHARED store (the platform's database);
+ *  - the sealed pending login (bb_parent_pending) → phone + verification id, encrypted, expires by itself.
+ * FastAPI tokens and the phone never leave the server. Nothing here keeps state in process memory.
  */
 
 export const PARENT_SESSION_COOKIE = "bb_parent_session";
 export const PARENT_PENDING_COOKIE = "bb_parent_pending";
 
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const PENDING_TTL_MS = 10 * 60 * 1000;
-
-/**
- * One pair of stores per Node process. Next compiles each route handler into its own bundle, and each bundle would
- * otherwise get its own module-level Map: a login started in one route could not be finished in another.
- */
-type ParentStores = { sessions: ExpiringStore<ParentSession>; pendings: ExpiringStore<PendingLogin> };
-const globalForParent = globalThis as typeof globalThis & { __bbParentStores?: ParentStores };
-const stores: ParentStores = (globalForParent.__bbParentStores ??= {
-  sessions: new ExpiringStore<ParentSession>({ ttlMs: SESSION_TTL_MS, maxEntries: 5000 }),
-  pendings: new ExpiringStore<PendingLogin>({ ttlMs: PENDING_TTL_MS, maxEntries: 5000 }),
-});
-const sessions = stores.sessions;
-const pendings = stores.pendings;
+const SESSION_TTL_SECONDS = 12 * 60 * 60;
+const PENDING_TTL_SECONDS = 10 * 60;
 
 export function parentState(): ParentLoginState {
   return parentLoginState(process.env);
+}
+
+let cachedStore: SessionStore | undefined;
+let cachedSealer: PendingSealer | undefined;
+
+/** The shared store (platform internal API). Built once per process from its environment. */
+export function sessionStore(): SessionStore {
+  cachedStore ??= platformSessionStore({
+    baseUrl: process.env.PLATFORM_URL ?? "",
+    token: process.env.PARENT_SESSION_SERVICE_TOKEN ?? "",
+  });
+  return cachedStore;
+}
+
+function pendingSealer(): PendingSealer {
+  cachedSealer ??= pendingSealerFromEnv(process.env);
+  return cachedSealer;
 }
 
 function cookieBase(path: string, sameSite: "lax" | "strict") {
   return { httpOnly: true, secure: true, sameSite, path } as const;
 }
 
-/** Reads the session for this request, or null. Does not check the feature flag: callers do. */
-export async function currentSession(): Promise<{ sid: string; session: ParentSession } | null> {
+/** Reads the session for this request, or null. Throws SessionStoreUnavailable when the store cannot answer. */
+export async function currentSession(): Promise<{ sid: string; session: SessionRecord } | null> {
   const sid = (await cookies()).get(PARENT_SESSION_COOKIE)?.value;
   if (!sid) return null;
-  const session = sessions.get(sid);
+  const session = await sessionStore().lookup(sid);
   return session ? { sid, session } : null;
 }
 
-/** Route handlers only: stores the pending OTP (phone + verification id) server-side and sets a pointer cookie. */
+/** Route handlers: seals the pending phone login into a cookie (no server state). */
 export async function startPendingLogin(login: PendingLogin): Promise<void> {
-  const pid = randomToken();
-  pendings.set(pid, login, PENDING_TTL_MS);
-  (await cookies()).set(PARENT_PENDING_COOKIE, pid, { ...cookieBase("/api/parent", "strict"), maxAge: PENDING_TTL_MS / 1000 });
+  const sealed = pendingSealer().seal({ phone: login.phone, verificationId: login.verificationId, expiresAt: Date.now() + PENDING_TTL_SECONDS * 1000 });
+  (await cookies()).set(PARENT_PENDING_COOKIE, sealed, { ...cookieBase("/api/parent", "strict"), maxAge: PENDING_TTL_SECONDS });
 }
 
-export async function currentPendingLogin(): Promise<{ pid: string; login: PendingLogin } | null> {
-  const pid = (await cookies()).get(PARENT_PENDING_COOKIE)?.value;
-  if (!pid) return null;
-  const login = pendings.get(pid);
-  return login ? { pid, login } : null;
+/** Route handlers: the pending login from the cookie, or null when missing, forged, or expired. */
+export async function currentPendingLogin(): Promise<PendingLogin | null> {
+  const value = (await cookies()).get(PARENT_PENDING_COOKIE)?.value;
+  const p = pendingSealer().open(value);
+  return p ? { phone: p.phone, verificationId: p.verificationId } : null;
 }
 
-export async function clearPendingLogin(pid?: string): Promise<void> {
-  if (pid) pendings.delete(pid);
+export async function clearPendingLogin(): Promise<void> {
   (await cookies()).set(PARENT_PENDING_COOKIE, "", { ...cookieBase("/api/parent", "strict"), maxAge: 0 });
 }
 
-/** Route handlers only: after a verified OTP, keep the FastAPI tokens server-side and return the CSRF token. */
+/**
+ * Route handlers, after a verified OTP. A NEW opaque session id is always issued (no session fixation): if the browser
+ * already held a session, that one is revoked first.
+ */
 export async function establishSession(auth: MobileAuthResponse): Promise<{ csrfToken: string }> {
+  const store = sessionStore();
+  const previous = (await cookies()).get(PARENT_SESSION_COOKIE)?.value;
+  if (previous) await store.revoke(previous);
+
   const sid = randomToken();
   const csrfToken = randomToken();
-  sessions.set(
+  await store.create(
     sid,
     {
-      csrfToken,
-      accessToken: auth.access_token,
-      refreshToken: auth.refresh_token,
-      accessExpiresAt: Date.now() + auth.expires_in_seconds * 1000 - 30_000,
       userId: auth.user.id,
+      csrf: csrfToken,
+      access: auth.access_token,
+      refresh: auth.refresh_token,
+      accessExpiresAt: Date.now() + auth.expires_in_seconds * 1000 - 30_000,
     },
-    SESSION_TTL_MS,
+    SESSION_TTL_SECONDS,
   );
-  (await cookies()).set(PARENT_SESSION_COOKIE, sid, { ...cookieBase("/", "lax"), maxAge: SESSION_TTL_MS / 1000 });
+  (await cookies()).set(PARENT_SESSION_COOKIE, sid, { ...cookieBase("/", "lax"), maxAge: SESSION_TTL_SECONDS });
   return { csrfToken };
-}
-
-/** Route handlers only: forget the session on this server and clear the cookie. */
-export async function endSession(sid: string): Promise<void> {
-  sessions.delete(sid);
-  (await cookies()).set(PARENT_SESSION_COOKIE, "", { ...cookieBase("/", "lax"), maxAge: 0 });
 }
 
 function deps(): ParentCallDeps {
   return {
     client: fastapiClient(),
-    sessions,
+    store: sessionStore(),
     refresh: (client, refreshToken) => refreshTokens(client, refreshToken),
   };
 }
 
-/** Logs out at FastAPI (best effort) and ends the session here. The local session always ends. */
+/** Logs out at FastAPI (best effort), revokes the session in the shared store, and clears the cookie. */
 export async function logoutEverywhere(sid: string): Promise<void> {
-  const session = sessions.get(sid);
+  const store = sessionStore();
+  const session = await store.lookup(sid);
   if (session) {
     try {
-      await logoutTokens(fastapiClient(), session.accessToken);
+      await logoutTokens(fastapiClient(), session.access);
     } catch {
-      /* FastAPI unavailable: the local session still ends; the access token expires on its own */
+      /* FastAPI unavailable: the local session is still revoked; the access token expires on its own */
     }
   }
-  await endSession(sid);
+  await store.revoke(sid);
+  (await cookies()).set(PARENT_SESSION_COOKIE, "", { ...cookieBase("/", "lax"), maxAge: 0 });
 }
 
-/** Loads the cabinet for a session through FastAPI. Throws ParentSessionEnded or FastapiError. */
+/** Loads the cabinet through FastAPI. Throws ParentSessionEnded, SessionStoreUnavailable or FastapiError. */
 export async function loadCabinet(sid: string): Promise<ParentCabinet> {
   return callAsParent(deps(), sid, async (accessToken) => {
     const client = fastapiClient();
