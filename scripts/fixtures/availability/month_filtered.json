@@ -1,0 +1,218 @@
+{
+  "status": 200,
+  "body": {
+    "branchId": "branch-main",
+    "date": null,
+    "month": "2099-05",
+    "rooms": [
+      {
+        "id": "room-main-a",
+        "name": "Room A"
+      }
+    ],
+    "slots": [
+      {
+        "id": "slot-morning",
+        "code": "morning",
+        "startsAt": "10:00",
+        "endsAt": "14:00"
+      }
+    ],
+    "availability": [
+      {
+        "date": "2099-05-01",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-02",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-03",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-04",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-05",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-06",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-07",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-08",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-09",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-10",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-11",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-12",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-13",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-14",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-15",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "busy"
+      },
+      {
+        "date": "2099-05-16",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-17",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-18",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-19",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-20",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-21",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-22",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-23",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-24",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-25",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-26",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-27",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-28",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-29",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-30",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      },
+      {
+        "date": "2099-05-31",
+        "roomId": "room-main-a",
+        "slotId": "slot-morning",
+        "status": "free"
+      }
+    ],
+    "packages": [
+      {
+        "id": "package-main",
+        "name": "Party",
+        "priceKzt": 55000,
+        "priceSource": "catalog_base"
+      }
+    ]
+  }
+}

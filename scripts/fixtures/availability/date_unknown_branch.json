@@ -1,0 +1,10 @@
+{
+  "status": 404,
+  "body": {
+    "error": {
+      "code": "branch_not_found",
+      "message": "Branch was not found.",
+      "details": []
+    }
+  }
+}

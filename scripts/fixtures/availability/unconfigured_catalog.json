@@ -1,0 +1,10 @@
+{
+  "status": 503,
+  "body": {
+    "error": {
+      "code": "availability_unavailable",
+      "message": "Availability is not configured for this branch.",
+      "details": []
+    }
+  }
+}

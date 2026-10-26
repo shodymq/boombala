@@ -493,109 +493,85 @@ export function getRequests(client: FastapiClient, accessToken: string, requestI
   return client.call({ method: "GET", route: ACCOUNT_ENDPOINTS.requests, feature: "account", bearer: accessToken, requestId }, parseRequests);
 }
 
-// ── Public availability (feature "calendar"). Contract PROPOSED, not yet published by FastAPI ───────────────
+// ── Public availability (feature "calendar") ─────────────────────────────────────────────────────────────
 //
-// The route below is the one the calendar contract proposes (docs/platform/CALENDAR-FASTAPI.md). FastAPI has no such
-// endpoint today, so with the flag on and no endpoint the answer is a 404 → "rejected" → the site says "unavailable".
-// The shapes are the SAME as the platform's dayAvailability / monthAvailability, so the existing calendar component
-// does not change. Parsers are strict: a missing or odd field is an error, never a silent "free".
+// Contract = BoomBalaApp `GET /api/v1/public/availability` (PR #11, codex/public-availability-v1), checked against
+// real responses captured from that code (scripts/fixtures/availability/*.json). Only `branchId` and exactly one of
+// `date` / `month` are sent. Ids are STRINGS on the FastAPI side; the site maps them with an explicit catalog map
+// (see src/lib/availability/catalog-map.ts), never by hardcoding.
 
-export interface AvailabilitySlot {
-  id: number;
-  startsAt: string;
-  endsAt: string;
-  freeRoomIds: string[];
-}
+export type PublicAvailabilityStatus = "free" | "busy";
 
-export type PriceSource = "date" | "weekday" | "base";
-
-export interface AvailabilityDay {
-  date: string;
-  slots: AvailabilitySlot[];
-  prices: Record<string, { amountKzt: number; source: PriceSource } | null>;
-}
-
-export interface AvailabilityMonth {
-  month: string;
-  roomCount: number;
-  /** date -> slotId -> number of FREE rooms. Days without an entry have no reservations (all rooms free). */
-  days: Record<string, Record<string, number>>;
+export interface PublicAvailabilityResponse {
+  branchId: string;
+  date: string | null;
+  month: string | null;
+  rooms: Array<{ id: string; name: string }>;
+  slots: Array<{ id: string; code: string; startsAt: string; endsAt: string }>;
+  availability: Array<{ date: string; roomId: string; slotId: string; status: PublicAvailabilityStatus }>;
+  packages: Array<{ id: string; name: string; priceKzt: number | null; priceSource: string | null }>;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
-const PRICE_SOURCES: readonly string[] = ["date", "weekday", "base"];
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export const isSafeBranchId = (id: string): boolean => ID_RE.test(id);
 
-export function parseAvailabilityDay(v: unknown): AvailabilityDay {
-  if (!isObject(v) || !isString(v.date) || !DATE_RE.test(v.date) || !Array.isArray(v.slots) || !isObject(v.prices)) {
+/**
+ * Strict check of the FastAPI payload. Anything outside the contract is `invalid_response`: a malformed answer is
+ * never read as "free". Extra fields are ignored here; the adapter builds its own objects, so they never reach the site.
+ */
+export function parsePublicAvailability(v: unknown): PublicAvailabilityResponse {
+  const bad = (): never => {
     throw new FastapiError("invalid_response");
-  }
-  const slots = v.slots.map((s): AvailabilitySlot => {
-    if (!isObject(s) || !Number.isInteger(s.id) || !isString(s.startsAt) || !isString(s.endsAt) || !Array.isArray(s.freeRoomIds)) {
-      throw new FastapiError("invalid_response");
-    }
-    if (!s.freeRoomIds.every((r) => typeof r === "string" && r.length > 0)) throw new FastapiError("invalid_response");
-    // A new object: any extra field (for example a customer name) is dropped here and never reaches the browser.
-    return { id: s.id as number, startsAt: s.startsAt, endsAt: s.endsAt, freeRoomIds: [...(s.freeRoomIds as string[])] };
+  };
+  if (!isObject(v) || !isString(v.branchId)) throw bad();
+  const date = v.date === null ? null : typeof v.date === "string" && DATE_RE.test(v.date) ? v.date : bad();
+  const month = v.month === null ? null : typeof v.month === "string" && MONTH_RE.test(v.month) ? v.month : bad();
+  if (!Array.isArray(v.rooms) || !Array.isArray(v.slots) || !Array.isArray(v.availability) || !Array.isArray(v.packages)) throw bad();
+
+  const rooms = v.rooms.map((r) => {
+    if (!isObject(r) || !isString(r.id) || typeof r.name !== "string") throw bad();
+    return { id: r.id, name: r.name };
   });
-  const prices: AvailabilityDay["prices"] = {};
-  for (const [packageId, p] of Object.entries(v.prices)) {
-    if (p === null) {
-      prices[packageId] = null;
-      continue;
-    }
-    if (!isObject(p) || !Number.isInteger(p.amountKzt) || (p.amountKzt as number) < 0 || !isString(p.source) || !PRICE_SOURCES.includes(p.source)) {
-      throw new FastapiError("invalid_response");
-    }
-    prices[packageId] = { amountKzt: p.amountKzt as number, source: p.source as PriceSource };
+  const slots = v.slots.map((x) => {
+    if (!isObject(x) || !isString(x.id) || !isString(x.code) || !isString(x.startsAt) || !isString(x.endsAt)) throw bad();
+    return { id: x.id, code: x.code, startsAt: x.startsAt, endsAt: x.endsAt };
+  });
+  const availability = v.availability.map((c) => {
+    if (!isObject(c) || typeof c.date !== "string" || !DATE_RE.test(c.date) || !isString(c.roomId) || !isString(c.slotId)) throw bad();
+    if (c.status !== "free" && c.status !== "busy") throw bad(); // e.g. "unavailable" is NOT a valid cell in V1
+    return { date: c.date, roomId: c.roomId, slotId: c.slotId, status: c.status as PublicAvailabilityStatus };
+  });
+  const packages = v.packages.map((p) => {
+    if (!isObject(p) || !isString(p.id) || typeof p.name !== "string") throw bad();
+    if (p.priceKzt !== null && p.priceKzt !== undefined && !(Number.isInteger(p.priceKzt) && (p.priceKzt as number) >= 1)) throw bad();
+    if (p.priceSource !== null && p.priceSource !== undefined && typeof p.priceSource !== "string") throw bad();
+    return {
+      id: p.id,
+      name: p.name,
+      priceKzt: typeof p.priceKzt === "number" ? p.priceKzt : null,
+      priceSource: typeof p.priceSource === "string" ? p.priceSource : null,
+    };
+  });
+  return { branchId: v.branchId, date, month, rooms, slots, availability, packages };
+}
+
+/** Exactly one of date / month; the branch id must be short and plain (the backend caps it at 32). */
+export function publicAvailabilityRoute(query: { branchId: string; date: string } | { branchId: string; month: string }): string {
+  if (!isSafeBranchId(query.branchId)) throw new FastapiError("not_configured");
+  if ("date" in query) {
+    if (!DATE_RE.test(query.date)) throw new FastapiError("rejected", 422, "validation_error");
+    return `/public/availability?branchId=${encodeURIComponent(query.branchId)}&date=${query.date}`;
   }
-  return { date: v.date, slots, prices };
+  if (!MONTH_RE.test(query.month)) throw new FastapiError("rejected", 422, "validation_error");
+  return `/public/availability?branchId=${encodeURIComponent(query.branchId)}&month=${query.month}`;
 }
 
-export function parseAvailabilityMonth(v: unknown): AvailabilityMonth {
-  if (!isObject(v) || !isString(v.month) || !MONTH_RE.test(v.month) || !Number.isInteger(v.roomCount) || (v.roomCount as number) < 1 || !isObject(v.days)) {
-    throw new FastapiError("invalid_response");
-  }
-  const roomCount = v.roomCount as number;
-  const days: AvailabilityMonth["days"] = {};
-  for (const [date, slotMap] of Object.entries(v.days)) {
-    if (!DATE_RE.test(date) || !isObject(slotMap)) throw new FastapiError("invalid_response");
-    const cleaned: Record<string, number> = {};
-    for (const [slotId, free] of Object.entries(slotMap)) {
-      if (!/^\d+$/.test(slotId) || !Number.isInteger(free) || (free as number) < 0 || (free as number) > roomCount) {
-        throw new FastapiError("invalid_response");
-      }
-      cleaned[slotId] = free as number;
-    }
-    days[date] = cleaned;
-  }
-  return { month: v.month, roomCount, days };
-}
-
-export interface AvailabilityQuery {
-  branchId: string;
-}
-
-/** The branch id is an opaque identifier; it must be short and plain so it cannot smuggle a second query parameter. */
-const BRANCH_RE = /^[A-Za-z0-9_-]{1,64}$/;
-export const isSafeBranchId = (id: string): boolean => BRANCH_RE.test(id);
-
-export function availabilityDayRoute(date: string, branchId: string): string {
-  if (!DATE_RE.test(date)) throw new FastapiError("rejected", 422, "invalid_date");
-  if (!BRANCH_RE.test(branchId)) throw new FastapiError("not_configured");
-  return `/public/availability?date=${date}&branch_id=${encodeURIComponent(branchId)}`;
-}
-
-export function availabilityMonthRoute(month: string, branchId: string): string {
-  if (!MONTH_RE.test(month)) throw new FastapiError("rejected", 422, "invalid_month");
-  if (!BRANCH_RE.test(branchId)) throw new FastapiError("not_configured");
-  return `/public/availability?month=${month}&branch_id=${encodeURIComponent(branchId)}`;
-}
-
-export function getAvailabilityDay(client: FastapiClient, date: string, query: AvailabilityQuery, requestId?: string) {
-  return client.call({ method: "GET", route: availabilityDayRoute(date, query.branchId), feature: "calendar", requestId }, parseAvailabilityDay);
-}
-
-export function getAvailabilityMonth(client: FastapiClient, month: string, query: AvailabilityQuery, requestId?: string) {
-  return client.call({ method: "GET", route: availabilityMonthRoute(month, query.branchId), feature: "calendar", requestId }, parseAvailabilityMonth);
+export function getPublicAvailability(
+  client: FastapiClient,
+  query: { branchId: string; date: string } | { branchId: string; month: string },
+  requestId?: string,
+) {
+  return client.call({ method: "GET", route: publicAvailabilityRoute(query), feature: "calendar", requestId }, parsePublicAvailability);
 }

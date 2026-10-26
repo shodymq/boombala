@@ -183,7 +183,10 @@ export function AvailabilityPanel({
               </p>
             ) : packageId === "undecided" ? (
               <p className="mt-3 text-sm text-muted">Выберите пакет, чтобы увидеть стоимость на эту дату.</p>
-            ) : null}
+            ) : (
+              // The price is unknown for this package and date: say so, never show a made-up tariff.
+              <p className="mt-3 text-sm text-muted" data-testid="price-unknown">Стоимость на эту дату уточнит менеджер.</p>
+            )}
             <p className="mt-2 text-xs text-muted">Заявка не бронирует время: слот закрепляется после подтверждения менеджером. Оплаты на сайте нет.</p>
           </div>
         ) : dayState === "loading" ? (
