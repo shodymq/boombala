@@ -18,12 +18,14 @@ export function parseRole(value: string | undefined): PlatformRole {
   return value === "admin" || value === "api" ? value : "all";
 }
 
-export type PathClass = "health" | "public_api" | "admin";
+export type PathClass = "health" | "public_api" | "internal" | "admin";
 
 /** The health check is allowed everywhere; intake and public reads belong to the API; everything else is admin. */
 export function classifyPath(pathname: string): PathClass {
   if (pathname === "/api/health") return "health";
   if (pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/")) return "public_api";
+  // Server-to-server sessions of the public site's parent cabinet: served by the api process only (see server/parent-sessions.ts).
+  if (pathname.startsWith("/api/internal/parent-sessions/")) return "internal";
   return "admin";
 }
 
@@ -101,7 +103,7 @@ export function decideExposure(cfg: ExposureConfig, req: ExposureRequest): Expos
   }
   const cls = classifyPath(req.pathname);
   if (cls !== "health") {
-    if (cfg.role === "api" && cls !== "public_api") return { allow: false, status: 404, reason: "role" };
+    if (cfg.role === "api" && cls !== "public_api" && cls !== "internal") return { allow: false, status: 404, reason: "role" };
     if (cfg.role === "admin" && cls !== "admin") return { allow: false, status: 404, reason: "role" };
   }
   // The admin application (and, in a shared deployment, its pages) is reachable only from the VPN networks. The health

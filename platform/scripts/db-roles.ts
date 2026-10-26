@@ -47,9 +47,15 @@ const ident = (name: string) => `"${name.replace(/"/g, '""')}"`;
 export interface RoleOptions {
   apiPassword: string;
   adminPassword: string;
+  /** Parent sessions only (migration 015). Optional: without it the role is not created and nothing can use the table. */
+  sessionPassword?: string;
   apiRole?: string;
   adminRole?: string;
+  sessionRole?: string;
 }
+
+/** The session role may touch exactly this table: the parent cabinet's server-side sessions. */
+export const SESSION_TABLE = "parent_sessions";
 
 async function ensureRole(pool: Pool, role: string, password: string, limit: number, statementTimeout: string): Promise<void> {
   if (password.length < 24) throw new Error(`password for ${role} must be at least 24 characters`);
@@ -61,16 +67,19 @@ async function ensureRole(pool: Pool, role: string, password: string, limit: num
   await pool.query(`ALTER ROLE ${ident(role)} SET idle_in_transaction_session_timeout = '15s'`);
 }
 
-export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: string; admin: string; tables: string[] }> {
+export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: string; admin: string; session: string | null; tables: string[] }> {
   const api = opts.apiRole ?? "bb_api";
   const admin = opts.adminRole ?? "bb_admin";
+  const session = opts.sessionRole ?? "bb_session";
   await ensureRole(pool, api, opts.apiPassword, 20, "5s");
   await ensureRole(pool, admin, opts.adminPassword, 20, "30s");
+  if (opts.sessionPassword) await ensureRole(pool, session, opts.sessionPassword, 5, "5s");
   const tables = (await pool.query<{ t: string }>("SELECT c.relname AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'bb' AND c.relkind = 'r' ORDER BY 1")).rows.map((r) => r.t);
   for (const t of Object.keys(API_GRANTS)) if (!tables.includes(t)) throw new Error(`API_GRANTS names a table that does not exist: ${t}`);
   for (const t of ADMIN_DELETE) if (!tables.includes(t)) throw new Error(`ADMIN_DELETE names a table that does not exist: ${t}`);
 
-  for (const role of [api, admin]) {
+  const roles = opts.sessionPassword ? [api, admin, session] : [api, admin];
+  for (const role of roles) {
     await pool.query(`REVOKE ALL ON ALL TABLES IN SCHEMA bb FROM ${ident(role)}`);
     await pool.query(`REVOKE ALL ON ALL SEQUENCES IN SCHEMA bb FROM ${ident(role)}`);
     await pool.query(`REVOKE ALL ON ALL FUNCTIONS IN SCHEMA bb FROM ${ident(role)}`);
@@ -88,12 +97,18 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
   const fns = (await pool.query<{ sig: string }>("SELECT p.oid::regprocedure::text AS sig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname LIKE $1", [`${API_FUNCTION_PREFIX}%`])).rows;
   if (fns.length === 0) throw new Error("no bb.intake_* functions found: apply migration 012 first");
   for (const f of fns) await pool.query(`GRANT EXECUTE ON FUNCTION ${f.sig} TO ${ident(api)}`);
+  if (opts.sessionPassword) {
+    await pool.query(`GRANT SELECT, INSERT, UPDATE ON bb.${ident(SESSION_TABLE)} TO ${ident(session)}`);
+    await pool.query(`CREATE POLICY ${ident(`${session}_access`)} ON bb.${ident(SESSION_TABLE)} FOR ALL TO ${ident(session)} USING (true) WITH CHECK (true)`);
+  }
   for (const t of tables) {
+    // Parent sessions belong to the public site's session role only: the staff application has no business with them.
+    if (t === SESSION_TABLE && opts.sessionPassword) continue;
     await pool.query(`GRANT SELECT, INSERT, UPDATE ON bb.${ident(t)} TO ${ident(admin)}`);
     if ((ADMIN_DELETE as readonly string[]).includes(t)) await pool.query(`GRANT DELETE ON bb.${ident(t)} TO ${ident(admin)}`);
     await pool.query(`CREATE POLICY ${ident(`${admin}_access`)} ON bb.${ident(t)} FOR ALL TO ${ident(admin)} USING (true) WITH CHECK (true)`);
   }
-  return { api, admin, tables };
+  return { api, admin, session: opts.sessionPassword ? session : null, tables };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -107,7 +122,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   const pool = createPool(url, { max: 2 });
   try {
-    const r = await applyRoles(pool, { apiPassword, adminPassword });
+    const r = await applyRoles(pool, { apiPassword, adminPassword, sessionPassword: process.env.BB_SESSION_PASSWORD });
     console.log(`roles ready: ${r.api}, ${r.admin}; ${r.tables.length} tables classified`);
   } finally {
     await pool.end();
