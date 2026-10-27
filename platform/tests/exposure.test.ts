@@ -183,3 +183,26 @@ describe("Exposure: the proxy cannot be skipped by a header the client chooses",
     for (let i = 0; i < forged.length; i++) assert.deepEqual(decideExposure(admin, req("/login", "panel.example.test", "203.0.113.9")), { allow: false, status: 404, reason: "network" });
   });
 });
+
+describe("internal parent-session API: served by the api role only", () => {
+  const api = { role: "api" as const, allowedHosts: ["api.example.test"], adminCidrs: ["10.77.0.0/24"] };
+  const admin = { role: "admin" as const, allowedHosts: ["panel.example.test"], adminCidrs: ["10.77.0.0/24"] };
+  const req = (pathname: string, host: string) => ({ pathname, host, realIp: "127.0.0.1" });
+
+  it("is classified as internal; lookalikes stay admin", () => {
+    assert.equal(classifyPath("/api/internal/parent-sessions/lookup"), "internal");
+    for (const p of ["/api/internal/parent-sessions", "/api/internal/parent-sessionsx/lookup", "/api/internal/other"]) assert.equal(classifyPath(p), "admin", p);
+  });
+
+  it("answers on the api process, to the site on loopback", () => {
+    assert.deepEqual(decideExposure(api, req("/api/internal/parent-sessions/lookup", "api.example.test")), { allow: true });
+  });
+
+  it("is a 404 on the admin process, even from the VPN", () => {
+    assert.deepEqual(decideExposure(admin, { ...req("/api/internal/parent-sessions/lookup", "panel.example.test"), realIp: "10.77.0.5" }), {
+      allow: false,
+      status: 404,
+      reason: "role",
+    });
+  });
+});
