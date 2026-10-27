@@ -1,7 +1,9 @@
 # Unified CRM → FastAPI cutover contract v1
 
-**Status:** contract and safety gate only. This document does not enable a
-writer, change the Platform database, or migrate production data.
+**Status:** server-only transport client and safety gate. The client lives in
+`platform/src/server/fastapi-crm.ts`, but the writer remains disabled. This
+document does not enable a writer, change the Platform database, or migrate
+production data.
 
 ## Ownership boundary
 
@@ -55,6 +57,12 @@ it must not substitute a shared owner identity.
 Before enabling mutations, the owner must approve the server-to-server auth
 mechanism, secret storage and rotation procedure. A Next.js browser session is
 not evidence that a request is authorized to FastAPI.
+
+The current adapter accepts only a short-lived FastAPI admin access token for
+the same acting staff member. It deliberately has no shared owner token or
+environment-wide fallback. Until a per-staff session bridge is approved and
+implemented, enabling `UNIFIED_FASTAPI_CRM_ENABLED=1` without an actor token
+fails closed and the legacy writer must not be called by the same action.
 
 ## Manager workflow and invariants
 
@@ -129,6 +137,5 @@ If the boundary cannot guarantee one writer, the cutover is blocked.
 - no production data, DNS, service, or database is changed by the test.
 
 Until these conditions and the external catalog/auth approvals exist, the
-CRM adapter remains a blocked, server-side-only implementation task. The
-existing Next.js CRM is not replaced and no second admin application is
-created.
+CRM runtime cutover remains blocked. The existing Next.js CRM is not replaced,
+no second admin application is created, and no dual-write fallback is allowed.
