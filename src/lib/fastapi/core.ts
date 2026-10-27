@@ -109,16 +109,88 @@ export interface BirthdayLeadCreate {
   guestCount?: number | null;
   comment?: string | null;
   packageId?: string | null;
+  roomId?: string | null;
+  slotId?: string | null;
   childId?: string | null;
   sourceCampaignId?: string | null;
   birthdayCycleId?: string | null;
   idempotencyKey?: string | null;
+  source?: "website" | "mobile_app" | "birthday_crm";
+  sourcePage?: string | null;
+  sourceReferrer?: string | null;
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  consent?: boolean;
+  consentDocumentKind?: string | null;
+  consentDocumentVersion?: number | null;
+  consentMethod?: "web_checkbox" | null;
 }
 
 export interface BirthdayLeadSubmittedResponse {
   requestId: string;
   submittedAt: string;
   nextStep: string;
+}
+
+export interface WebsiteLeadInput {
+  name: string;
+  phone: string;
+  date: string;
+  children: number | null;
+  packageId: string;
+  roomId: string | null;
+  slotId: string | null;
+  page: string;
+  referrer: string;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+  idempotencyKey: string;
+}
+
+export interface WebsiteLeadConfig {
+  branchId: string;
+  consentDocumentKind: string;
+  consentDocumentVersion: number;
+}
+
+/** Website lead writes are opt-in separately from the generic FastAPI client. */
+export function parseWebsiteLeadConfig(env: Record<string, string | undefined>): WebsiteLeadConfig | null {
+  if (env.UNIFIED_FASTAPI_WEBSITE_LEADS !== "1") return null;
+  const clientConfig = parseFastapiConfig(env);
+  if (!clientConfig?.features.has("leads")) throw new FastapiError("not_configured");
+  const branchId = (env.UNIFIED_FASTAPI_BRANCH_ID ?? "").trim();
+  const consentDocumentKind = (env.UNIFIED_FASTAPI_CONSENT_DOCUMENT_KIND ?? "").trim();
+  const consentDocumentVersion = Number(env.UNIFIED_FASTAPI_CONSENT_DOCUMENT_VERSION ?? "");
+  if (!branchId || !consentDocumentKind || !Number.isInteger(consentDocumentVersion) || consentDocumentVersion < 1) {
+    throw new FastapiError("not_configured");
+  }
+  return { branchId, consentDocumentKind, consentDocumentVersion };
+}
+
+export function buildWebsiteBirthdayLead(input: WebsiteLeadInput, config: WebsiteLeadConfig): BirthdayLeadCreate {
+  return {
+    name: input.name,
+    phone: input.phone,
+    branchId: config.branchId,
+    preferredDate: input.date,
+    guestCount: input.children,
+    packageId: input.packageId,
+    roomId: input.roomId,
+    slotId: input.slotId,
+    source: "website",
+    sourcePage: input.page,
+    sourceReferrer: input.referrer,
+    utmSource: input.utmSource,
+    utmMedium: input.utmMedium,
+    utmCampaign: input.utmCampaign,
+    idempotencyKey: input.idempotencyKey,
+    consent: true,
+    consentDocumentKind: config.consentDocumentKind,
+    consentDocumentVersion: config.consentDocumentVersion,
+    consentMethod: "web_checkbox",
+  };
 }
 
 export interface OtpRequest {
