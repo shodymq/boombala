@@ -4,6 +4,7 @@ import { leadPipeline, PlatformError, sendLeadToPlatform } from "@/lib/platform"
 import { deliverOnce, rateLimitCheck, rateLimitRecord } from "@/lib/rate-limit";
 import { siteMustRefuse } from "@/lib/site-profile";
 import { sendTelegramLead, telegramConfig, telegramDiagnostics, TelegramError } from "@/lib/telegram";
+import { sendWebsiteLeadToFastapi, unifiedWebsiteLeadsEnabled } from "@/lib/unified-leads";
 
 export const runtime = "nodejs";
 
@@ -82,6 +83,43 @@ export async function POST(request: Request) {
     // Client IP as set by the platform (Vercel overwrites x-forwarded-for, so it cannot be spoofed there).
     const ip = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
     const limitKey = `lead:${ip}`;
+
+    // Explicit FastAPI website mode is a single-write path. Any configuration or backend failure is returned
+    // as an unavailable/delivery error; it never falls through to Platform or Telegram and cannot dual-write.
+    if (unifiedWebsiteLeadsEnabled()) {
+      const check = rateLimitCheck(limitKey, RATE_LIMIT);
+      if (!check.ok) return json({ ok: false, error: "rate_limited" }, 429, { "Retry-After": String(check.retryAfter) });
+      const given = clip(body.idempotencyKey, 40);
+      const idempotencyKey = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(given) ? given : crypto.randomUUID();
+      const pagePath = clip(body.page, 200).split(/[?#]/)[0];
+      try {
+        const submitted = await sendWebsiteLeadToFastapi(
+          {
+            name: lead.name,
+            phone: lead.phone,
+            date: lead.date,
+            children: lead.children,
+            packageId: lead.package,
+            roomId: lead.room,
+            slotId: lead.slot,
+            page: pagePath.startsWith("/") ? pagePath : "",
+            referrer: clip(body.referrer, 300),
+            utmSource: clip(body.utm_source, 100),
+            utmMedium: clip(body.utm_medium, 100),
+            utmCampaign: clip(body.utm_campaign, 100),
+            idempotencyKey,
+          },
+          idempotencyKey,
+        );
+        rateLimitRecord(limitKey);
+        return json({ ok: true, requestId: submitted.requestId });
+      } catch (error) {
+        const kind = error instanceof PlatformError ? error.kind : error instanceof Error ? error.name : "unknown";
+        console.warn(`[lead] unified FastAPI path failed (${kind})`);
+        const unavailable = error instanceof Error && "kind" in error && ["not_configured", "unavailable", "timeout", "disabled"].includes(String((error as { kind?: unknown }).kind));
+        return json({ ok: false, error: unavailable ? "unavailable" : "delivery_failed" }, unavailable ? 503 : 502);
+      }
+    }
 
     // CRM path (LEAD_PIPELINE=dual|strict). The default `telegram-only` skips this block entirely: today's behaviour.
     // Success is reported only after the platform has committed the enquiry; the platform then notifies Telegram itself

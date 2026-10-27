@@ -10,7 +10,9 @@ import {
   correlationId,
   enabledFeatures,
   FastapiError,
+  buildWebsiteBirthdayLead,
   parseFastapiConfig,
+  parseWebsiteLeadConfig,
   postBirthdayLead,
   postContactLead,
   redact,
@@ -94,6 +96,78 @@ test("https and localhost are accepted; trailing slash removed; timeout clamped"
   assert.equal(c?.timeoutMs, 10_000);
   const local = parseFastapiConfig({ FASTAPI_FEATURES: "otp", FASTAPI_BASE_URL: "http://localhost:8000/api/v1" });
   assert.equal(local?.baseUrl, "http://localhost:8000/api/v1");
+});
+
+test("website lead mode is disabled unless its separate flag is exactly 1", () => {
+  assert.equal(parseWebsiteLeadConfig({}), null);
+  assert.equal(
+    parseWebsiteLeadConfig({
+      UNIFIED_FASTAPI_WEBSITE_LEADS: "0",
+      FASTAPI_FEATURES: "leads",
+      FASTAPI_BASE_URL: BASE,
+    }),
+    null,
+  );
+});
+
+test("enabled website lead mode refuses missing branch or consent catalog configuration", () => {
+  assert.throws(
+    () => parseWebsiteLeadConfig({ UNIFIED_FASTAPI_WEBSITE_LEADS: "1", FASTAPI_FEATURES: "leads", FASTAPI_BASE_URL: BASE }),
+    (e: unknown) => e instanceof FastapiError && e.kind === "not_configured",
+  );
+});
+
+test("website lead payload carries explicit source, branch, UTM and consent provenance", () => {
+  const config = parseWebsiteLeadConfig({
+    UNIFIED_FASTAPI_WEBSITE_LEADS: "1",
+    UNIFIED_FASTAPI_BRANCH_ID: "branch-approved-by-owner",
+    UNIFIED_FASTAPI_CONSENT_DOCUMENT_KIND: "personal_data_consent",
+    UNIFIED_FASTAPI_CONSENT_DOCUMENT_VERSION: "3",
+    FASTAPI_FEATURES: "leads",
+    FASTAPI_BASE_URL: BASE,
+  });
+  assert.ok(config);
+  assert.deepEqual(
+    buildWebsiteBirthdayLead(
+      {
+        name: "Айжан",
+        phone: "+77071234567",
+        date: "2027-01-20",
+        children: 4,
+        packageId: "wow-party",
+        roomId: "roblox-room",
+        slotId: "1",
+        page: "/birthdays",
+        referrer: "https://example.test/",
+        utmSource: "instagram",
+        utmMedium: "social",
+        utmCampaign: "birthday-v1",
+        idempotencyKey: "9f4f6f9e-6e20-4e7d-8cf3-0b8ad8e6a9e0",
+      },
+      config,
+    ),
+    {
+      name: "Айжан",
+      phone: "+77071234567",
+      branchId: "branch-approved-by-owner",
+      preferredDate: "2027-01-20",
+      guestCount: 4,
+      packageId: "wow-party",
+      roomId: "roblox-room",
+      slotId: "1",
+      source: "website",
+      sourcePage: "/birthdays",
+      sourceReferrer: "https://example.test/",
+      utmSource: "instagram",
+      utmMedium: "social",
+      utmCampaign: "birthday-v1",
+      idempotencyKey: "9f4f6f9e-6e20-4e7d-8cf3-0b8ad8e6a9e0",
+      consent: true,
+      consentDocumentKind: "personal_data_consent",
+      consentDocumentVersion: 3,
+      consentMethod: "web_checkbox",
+    },
+  );
 });
 
 // ── Feature gating: disabled means no network call ─────────────────────────────────────────────
