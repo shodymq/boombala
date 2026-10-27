@@ -141,10 +141,12 @@ export function reconcileUnifiedBookingSnapshots(input: ReconciliationInput): Re
     links.push(link);
     leadLinksByLegacy.set(link.legacyLeadId, links);
     if (links.length > 1) report.invalidLinks.push({ kind: "lead", id: link.legacyLeadId, reason: "duplicate" });
+    if (link.evidence !== "verified_external_link") {
+      report.invalidLinks.push({ kind: "lead", id: link.legacyLeadId, reason: "identity_not_verified" });
+    }
     if (!legacyById.has(link.legacyLeadId) || !fastById.has(link.fastApiRequestId)) {
       report.invalidLinks.push({ kind: "lead", id: link.legacyLeadId, reason: "missing_target" });
     }
-    if (fastById.has(link.fastApiRequestId)) linkedFastIds.add(link.fastApiRequestId);
   }
 
   const fastByPhone = new Map<string, string[]>();
@@ -156,11 +158,12 @@ export function reconcileUnifiedBookingSnapshots(input: ReconciliationInput): Re
   }
 
   for (const legacy of input.legacyLeads) {
-    const links = leadLinksByLegacy.get(legacy.leadId) ?? [];
+    const rawLinks = leadLinksByLegacy.get(legacy.leadId) ?? [];
+    const links = rawLinks.filter((link) => link.evidence === "verified_external_link");
     if (links.length !== 1) {
       report.unlinkedLegacy.push({
         legacyLeadId: legacy.leadId,
-        reason: links.length > 1 ? "ambiguous_link" : "missing_lead_link",
+        reason: rawLinks.length > 1 ? "ambiguous_link" : "missing_lead_link",
       });
       if (legacy.phoneE164) {
         const candidates = fastByPhone.get(legacy.phoneE164) ?? [];
@@ -174,6 +177,7 @@ export function reconcileUnifiedBookingSnapshots(input: ReconciliationInput): Re
       report.unlinkedLegacy.push({ legacyLeadId: legacy.leadId, reason: "missing_fastapi_record" });
       continue;
     }
+    linkedFastIds.add(fast.requestId);
     const identityLinks = identityByContact.get(legacy.contactId) ?? [];
     if (identityLinks.length !== 1 || identityLinks[0].evidence !== "verified_external_link" || identityLinks[0].mobileUserId !== fast.mobileUserId) {
       addConflict(report.conflicts, legacy.leadId, fast.requestId, "identity", identityLinks[0]?.mobileUserId ?? null, fast.mobileUserId);

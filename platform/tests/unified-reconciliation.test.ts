@@ -90,7 +90,10 @@ describe("unified booking reconciliation", () => {
     });
     assert.deepEqual(report.unlinkedLegacy, [{ legacyLeadId: "legacy-lead-1", reason: "ambiguous_link" }]);
     assert.equal(report.invalidLinks.filter((link) => link.reason === "duplicate").length, 1);
-    assert.deepEqual(report.unlinkedFastApi, []);
-    assert.equal(report.invalidLinks.filter((link) => link.reason === "identity_not_verified").length, 0);
+    assert.deepEqual(report.unlinkedFastApi, [
+      { fastApiRequestId: "fast-request-1", reason: "missing_lead_link" },
+      { fastApiRequestId: "fast-request-2", reason: "missing_lead_link" },
+    ]);
+    assert.equal(report.invalidLinks.filter((link) => link.reason === "identity_not_verified").length, 2);
   });
 });
