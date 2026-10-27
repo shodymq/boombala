@@ -1,4 +1,5 @@
 import "server-only";
+import { passkeyConfigFromEnv, passkeyConfigProblems } from "../core/passkey-config.ts";
 
 /** Set `PLATFORM_HTTPS=1` when the app is served over HTTPS (always in production behind the reverse proxy). */
 export const isHttps = process.env.PLATFORM_HTTPS === "1";
@@ -19,3 +20,11 @@ export function requireDatabaseUrl(): string {
 export const mfaRequired = process.env.MFA_MODE === "required";
 /** AES-256-GCM key (32 bytes, base64) that encrypts TOTP secrets in the database. Only the admin app has it. */
 export const mfaKey = process.env.MFA_ENC_KEY;
+
+/**
+ * Passkeys (Face ID / Touch ID). Off unless PASSKEYS_ENABLED=1; the RP ID and the origins come only from here (never from a request).
+ * `passkeyProblems` is empty when the configuration is usable; the pages and endpoints treat a non-empty list as "passkeys unavailable".
+ */
+export const passkeys = passkeyConfigFromEnv();
+export const passkeyProblems = passkeyConfigProblems(passkeys, { production: process.env.PLATFORM_PROFILE === "kz-production" });
+export const passkeysAvailable = passkeys.enabled && passkeyProblems.length === 0;

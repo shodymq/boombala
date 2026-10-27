@@ -147,6 +147,16 @@ describe("Exposure: what each deployment shows", () => {
       assert.deepEqual(profileProblems({ ...goodApi, ADMIN_ALLOWED_CIDRS: "10.77.0.0/24" }), ["api_must_not_have_admin_cidrs"]);
       assert.deepEqual(profileProblems({ ...goodApi, PLATFORM_INTAKE_TOKEN: "short" }), ["intake_token_required"]);
     });
+    it("passkeys: a valid https RP ID + origins is accepted; a broken, plain-http or foreign one stops the admin; the public API must not carry them", () => {
+      const pk = { PASSKEYS_ENABLED: "1", WEBAUTHN_RP_ID: "panel.example.test", WEBAUTHN_ORIGINS: "https://panel.example.test" };
+      assert.deepEqual(profileProblems({ ...goodAdmin, ...pk }), []);
+      assert.deepEqual(profileProblems({ ...goodAdmin, PASSKEYS_ENABLED: "0" }), [], "off: no requirements");
+      assert.deepEqual(profileProblems({ ...goodAdmin, ...pk, WEBAUTHN_ORIGINS: "http://panel.example.test" }), ["webauthn_origin_must_be_https"]);
+      assert.deepEqual(profileProblems({ ...goodAdmin, ...pk, WEBAUTHN_ORIGINS: "https://evil.example" }), ["webauthn_origin_outside_rp_id"]);
+      assert.deepEqual(profileProblems({ ...goodAdmin, ...pk, WEBAUTHN_RP_ID: "" }).includes("webauthn_rp_id_invalid"), true);
+      assert.deepEqual(profileProblems({ ...goodAdmin, PASSKEYS_ENABLED: "1" }).sort(), ["webauthn_origins_required", "webauthn_rp_id_invalid"]);
+      for (const k of ["PASSKEYS_ENABLED", "WEBAUTHN_RP_ID", "WEBAUTHN_ORIGINS"]) assert.deepEqual(profileProblems({ ...goodApi, [k]: "x" }), [`api_must_not_have_${k.toLowerCase()}`], k);
+    });
     it("problems are codes only: no secret value ever appears in them", () => {
       const text = JSON.stringify(profileProblems({ ...goodApi, MFA_ENC_KEY: "SUPERSECRETVALUE", CRON_SECRET: "ANOTHERSECRETVALUE" }));
       assert.ok(!text.includes("SECRETVALUE"));

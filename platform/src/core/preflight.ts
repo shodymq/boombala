@@ -4,13 +4,15 @@ import { join } from "node:path";
 import type { Queryable } from "./db.ts";
 
 /**
- * Deployment order (mandatory):  1. migrations 001..013  ->  2. database roles (`npm run db:roles`)  ->  3. verification
+ * Deployment order (mandatory):  1. migrations 001..014  ->  2. database roles (`npm run db:roles`)  ->  3. verification
  * (`npm run preflight`)  ->  4. start the applications.
  * Recreating a function in a migration drops the EXECUTE grant of the API role, so the roles step must follow every migration run.
  * Problems are CODES (no value of the environment, no data): a person fixes them, the application never guesses.
  */
 
 export const REQUIRED_MIGRATION = "013_attendance.sql";
+/** Required by EVERY build of this version, whatever PASSKEYS_ENABLED says: first-factor enrolment is refused without it (fail-closed). */
+export const PASSKEY_MIGRATION = "014_passkeys.sql";
 
 /** Cheap check used by the pages that depend on migration 013: true only when everything they read exists. */
 export async function attendanceSchemaReady(db: Queryable): Promise<boolean> {
@@ -65,6 +67,9 @@ async function runPreflight(db: Queryable, migrationsDir?: string): Promise<Pref
   }
 
   if (!(await attendanceSchemaReady(db))) problems.push("attendance_schema_missing: apply migration 013");
+  if (!applied.some((a) => a.name === PASSKEY_MIGRATION) || !(await has("to_regclass('bb.enrollment_codes') IS NOT NULL AND to_regclass('bb.step_up_grants') IS NOT NULL AND to_regclass('bb.passkeys') IS NOT NULL"))) {
+    problems.push("migration_014_missing: apply 014_passkeys.sql before this version (required even when passkeys are off)");
+  }
   const fnArgs = (await db.query<{ args: string }>("SELECT pg_get_function_identity_arguments(p.oid) AS args FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname = 'intake_insert_registration'")).rows.map((r) => r.args);
   if (!fnArgs.some((a) => /smallint/.test(a))) problems.push("intake_insert_registration_without_children_count_missing");
   if (fnArgs.some((a) => !/smallint/.test(a))) problems.push("old_intake_insert_registration_still_exists");

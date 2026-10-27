@@ -16,6 +16,7 @@ import { applyRoles } from "../scripts/db-roles.ts";
 import { createUser } from "../src/core/users.ts";
 import { beginEnrollment, confirmEnrollment } from "../src/core/mfa.ts";
 import { createPool } from "../src/core/db.ts";
+import { issueEnrollmentCodeByEmail } from "../src/core/enrollment.ts";
 import { totpAt } from "../src/core/totp.ts";
 import { createSession, revokeSessionsWithoutMfa } from "../src/core/session.ts";
 
@@ -347,6 +348,12 @@ try {
       ok(/\/login/.test(new URL(page.url()).pathname) && !/Клиенты|Заявки|Сотрудники|Журнал|Выгрузка|Здравствуйте/.test(t.replace("Подтверждение входа", "")), `${p} with only a password is not the admin (${new URL(page.url()).pathname})`);
     }
     await page.goto(A + "/login/mfa");
+    // a first factor is never enrolled with a password alone: the page asks for the one-time code first (here issued from the server console)
+    ok((await page.locator("[data-testid=enroll-code-form]").count()) === 1 && (await page.locator("[data-testid=mfa-secret]").count()) === 0, "a password alone does not show the authenticator secret: the page asks for the Owner's one-time code");
+    const enrolment = await issueEnrollmentCodeByEmail(owner, staff.owner.email);
+    await page.locator("input[name=code]").fill(enrolment.code);
+    await page.getByRole("button", { name: "Продолжить" }).click();
+    await page.locator("[data-testid=mfa-secret]").waitFor();
     ownerSecret = (await page.locator("[data-testid=mfa-secret]").innerText()).trim();
     ok(/^[A-Z2-7]{32}$/.test(ownerSecret), "the enrolment page shows a base32 secret");
     ok((await page.locator("a[href^='otpauth://']").count()) === 1, "and an authenticator link");
@@ -407,8 +414,13 @@ try {
     await page.goto(A + "/users");
     const card = page.locator("article", { hasText: staff.manager.email });
     await card.getByRole("button", { name: "Сбросить второй фактор" }).click();
+    // the reset needs the Owner's fresh step-up (their own authenticator code): nothing is sent before it
+    await page.locator("[data-testid=stepup]").waitFor();
+    ok(!/notice=mfa/.test(page.url()), "resetting a second factor first asks the Owner to confirm (step-up); nothing is sent yet");
+    await page.locator("[data-testid=stepup-code]").fill(totpAt(ownerSecret, Date.now() + 30_000));
+    await page.locator("[data-testid=stepup-submit]").click();
     await page.waitForURL(/notice=mfa/);
-    ok(true, "the Owner resets the Manager's second factor");
+    ok(true, "the Owner resets the Manager's second factor after the step-up");
     await mgr.goto(A + "/contacts");
     ok(new URL(mgr.url()).pathname.startsWith("/login"), "the Manager's open session ended at once");
     await mgrCtx.close();

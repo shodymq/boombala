@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
 import { listEnrolledUserIds } from "@/core/mfa";
+import { countActivePasskeys } from "@/core/passkeys";
+import { enrollmentGateActive } from "@/core/enrollment";
 import { ROLES } from "@/core/rbac";
 import { listUsers } from "@/core/users";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
-import { changeRoleAction, createUserAction, resetMfaAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
+import { passkeysAvailable } from "@/server/env";
+import { OwnerTools } from "./owner-tools";
+import { MfaResetButton } from "./reset-mfa";
+import { changeRoleAction, createUserAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
 
 export const metadata: Metadata = { title: "Сотрудники" };
 
@@ -22,6 +27,7 @@ function errorText(code: string): string {
   if (code === "last_owner") return "Нельзя оставить систему без активного владельца.";
   if (code === "email_taken") return "Сотрудник с таким e-mail уже есть.";
   if (code === "forbidden") return "Недостаточно прав.";
+  if (code === "step_up_required") return "Подтвердите, что это вы (код или Face ID / Touch ID), и повторите сброс.";
   // Only fixed texts are ever shown: the code comes from the URL and must not be echoed back.
   if (code === "invalid_password") return "Пароль должен быть не короче 12 символов.";
   if (code === "invalid_email") return "Проверьте e-mail.";
@@ -40,6 +46,10 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const actor = { id: user.id, role: user.role };
   const users = await listUsers(getPool(), actor);
   const enrolled = await listEnrolledUserIds(getPool(), actor);
+  const passkeyCounts = passkeysAvailable ? await countActivePasskeys(getPool()) : new Map<string, number>();
+  const gate = await enrollmentGateActive(getPool());
+  const ownHasTotp = enrolled.has(user.id);
+  const ownHasPasskey = (passkeyCounts.get(user.id) ?? 0) > 0;
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
 
   return (
@@ -101,12 +111,19 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="text-sm text-muted">Второй фактор: {enrolled.has(u.id) ? "включён" : "не включён"}</span>
               {enrolled.has(u.id) && u.id !== user.id ? (
-                <form action={resetMfaAction}>
-                  <input type="hidden" name="id" value={u.id} />
-                  <button type="submit" className={btnGhost}>Сбросить второй фактор</button>
-                </form>
+                <MfaResetButton userId={u.id} hasTotp={ownHasTotp} ownHasPasskey={ownHasPasskey} />
               ) : null}
             </div>
+            {gate ? (
+              <OwnerTools
+                userId={u.id}
+                name={u.name}
+                canIssueCode={u.isActive && !enrolled.has(u.id) && !(passkeyCounts.get(u.id) ?? 0)}
+                keyCount={passkeysAvailable ? (passkeyCounts.get(u.id) ?? 0) : 0}
+                hasTotp={ownHasTotp}
+                ownHasPasskey={ownHasPasskey}
+              />
+            ) : null}
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-extrabold text-grape-700">Задать новый пароль</summary>
               <form action={resetPasswordAction} className="mt-2 flex flex-wrap items-center gap-2">

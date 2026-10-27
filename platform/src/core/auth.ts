@@ -1,6 +1,7 @@
 import type { Pool } from "./db.ts";
 import { withTx } from "./db.ts";
 import { writeAudit } from "./audit.ts";
+import { mayEnroll } from "./enrollment.ts";
 import { confirmEnrollment, isEnrolled, verifySecondFactor } from "./mfa.ts";
 import { dummyVerify, verifyPassword } from "./password.ts";
 import { createSession, revokeSession, validateSession } from "./session.ts";
@@ -134,7 +135,8 @@ export async function completeMfaLogin(pool: Pool, input: MfaLoginInput, now = D
   let proven = false;
   if (await isEnrolled(pool, user.id)) {
     proven = (await verifySecondFactor(pool, user.id, input.code, input.mfaKey, meta, now)) !== null;
-  } else {
+  } else if (await mayEnroll(pool, pending)) {
+    // first enrolment: only after the Owner's one-time code was redeemed in THIS session (see enrollment.ts)
     const enrolled = await confirmEnrollment(pool, user.id, input.code, input.mfaKey, meta, now);
     proven = enrolled !== null;
     recoveryCodes = enrolled?.recoveryCodes;
