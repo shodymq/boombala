@@ -6,6 +6,8 @@
 import { chromium } from "playwright-core";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
+import { uniquePhone } from "./support/crm-fastapi.mjs";
+const runPhone = uniquePhone();
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -50,7 +52,7 @@ const probe = await ctx.request.post(pageUrl, {
   headers: { Origin: "http://evil.example", "Next-Action": actionId, Accept: "text/x-component" },
   multipart: {
     [`$ACTION_ID_${actionId}`]: "", branchId: "stg-almaty", date: DATE, roomId: "stg-room-b", startTime: "10:00", packageId: "stg-pkg-start",
-    customerName: probeName, phone: "+77001112299", guestCount: "", agreedPriceKzt: "100000", prepaymentKzt: "10000", prepaymentMethod: "cash",
+    customerName: probeName, phone: runPhone, guestCount: "", agreedPriceKzt: "100000", prepaymentKzt: "10000", prepaymentMethod: "cash",
     note: "", idempotencyKey: randomUUID(),
   },
   maxRedirects: 0,
@@ -65,7 +67,7 @@ const form = page.locator('form:has(input[name="customerName"])');
 await form.locator('select[name="roomId"]').selectOption({ label: "Комната B" });
 await form.locator('select[name="startTime"]').selectOption("10:00");
 await form.locator('input[name="customerName"]').fill(repeatName);
-await form.locator('input[name="phone"]').fill("+77001112299");
+await form.locator('input[name="phone"]').fill(runPhone);
 await form.locator('input[name="agreedPriceKzt"]').fill("100000");
 await form.locator('input[name="prepaymentKzt"]').fill("10000");
 const submit = form.locator('button[type="submit"]');
@@ -87,7 +89,7 @@ const form2 = page.locator('form:has(input[name="customerName"])');
 await form2.locator('select[name="roomId"]').selectOption({ label: "Комната B" });
 await form2.locator('select[name="startTime"]').selectOption("10:00");
 await form2.locator('input[name="customerName"]').fill(`${repeatName} второй`);
-await form2.locator('input[name="phone"]').fill("+77001112298");
+await form2.locator('input[name="phone"]').fill(runPhone);
 await form2.locator('input[name="agreedPriceKzt"]').fill("100000");
 await form2.locator('input[name="prepaymentKzt"]').fill("10000");
 await form2.locator('button[type="submit"]').click();

@@ -7,7 +7,7 @@ import { chromium } from "playwright-core";
 import pg from "pg";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { paidUnconfirmedRequest, staffToken } from "./support/crm-fastapi.mjs";
+import { paidUnconfirmedRequest, staffToken, uniquePhone } from "./support/crm-fastapi.mjs";
 
 const ADMIN = process.env.PLATFORM_URL ?? "http://127.0.0.1:3300";
 const PW = process.env.E2E_PASSWORD;
@@ -16,6 +16,7 @@ const ART = process.env.E2E_ARTIFACTS ?? join(process.cwd(), "e2e", "artifacts",
 if (!PW || !process.env.FASTAPI_DATABASE_URL) throw new Error("E2E_PASSWORD and FASTAPI_DATABASE_URL are required");
 mkdirSync(ART, { recursive: true });
 const stamp = Date.now().toString(36);
+const phoneRun = uniquePhone();
 
 const chrome =
   process.env.E2E_CHROME ??
@@ -72,7 +73,7 @@ await page.route("**/bookings**", async (route) => {
   await route.continue();
 });
 
-async function submitCreate(p, { room, start, name, price, prepay, phone = "+77001112288" }) {
+async function submitCreate(p, { room, start, name, price, prepay, phone = phoneRun }) {
   const form = p.locator('form:has(input[name="customerName"])');
   await form.locator('select[name="roomId"]').selectOption({ label: room });
   await form.locator('select[name="startTime"]').selectOption(start);
@@ -89,8 +90,8 @@ async function waitForOutcome(p) {
 
 // D. The response was lost after the manual payment, before the confirmation. The request exists and is paid; FastAPI shows it.
 // The manager's next attempt for the same phone must not create a second request or a second payment.
-const phoneD = `+7700${String(Date.now()).slice(-7)}`;
-const reqD = await paidUnconfirmedRequest(tokenA0(), { branchId: "stg-almaty", packageId: "stg-pkg-start", amountKzt: 20000, customerName: `LOST-D ${stamp}`, phone: phoneD });
+const phoneD = uniquePhone();
+const reqD = await paidUnconfirmedRequest(tokenA0(), { branchId: "stg-almaty", packageId: "stg-pkg-start", amountKzt: 20000, customerName: `LOST-D ${stamp}`, phone: phoneD, requestedDate: DATE });
 const byPhone = () => Promise.all([
   n("SELECT count(*)::int AS n FROM birthday_requests WHERE phone = $1", [phoneD]),
   n("SELECT count(*)::int AS n FROM birthday_payment_facts f JOIN birthday_requests r ON r.id = f.birthday_request_id WHERE r.phone = $1", [phoneD]),
@@ -128,7 +129,7 @@ await page.screenshot({ path: join(ART, "a-after-lost-response-and-reload.png"),
 
 // B. Paid, unconfirmed request. Confirm dropped BEFORE the server saw it. Reload shows it still unconfirmed; confirm once.
 const tokenA = await staffToken({ email: "manager-a@staging.boombala.example.com", staffId: "stg-manager-a" });
-const reqB = await paidUnconfirmedRequest(tokenA, { branchId: "stg-almaty", packageId: "stg-pkg-start", amountKzt: 20000, customerName: `LOST-B ${stamp}` });
+const reqB = await paidUnconfirmedRequest(tokenA, { branchId: "stg-almaty", packageId: "stg-pkg-start", amountKzt: 20000, customerName: `LOST-B ${stamp}`, requestedDate: DATE });
 await page.goto(`${pageUrl}&request=${reqB}`);
 await page.waitForLoadState("networkidle");
 const confirmForm = page.locator('form:has(input[name="requestId"])');
@@ -152,7 +153,7 @@ let [pay2, res2] = await countsByRequest(reqB);
 check("B: one payment fact and one reservation for the paid request", pay2 === 1 && res2 === 1, `pay=${pay2} res=${res2}`);
 
 // C. Confirm processed by the server, response lost, then the manager re-submits the same paid request with a new key.
-const reqC = await paidUnconfirmedRequest(tokenA, { branchId: "stg-almaty", packageId: "stg-pkg-start", amountKzt: 20000, customerName: `LOST-C ${stamp}` });
+const reqC = await paidUnconfirmedRequest(tokenA, { branchId: "stg-almaty", packageId: "stg-pkg-start", amountKzt: 20000, customerName: `LOST-C ${stamp}`, requestedDate: DATE });
 await page.goto(`${pageUrl}&request=${reqC}`);
 await page.waitForLoadState("networkidle");
 armed = "after-server";

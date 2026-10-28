@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import pg from "pg";
-import { lead, paidUnconfirmedRequest, staffToken } from "./support/crm-fastapi.mjs";
+import { lead, paidUnconfirmedRequest, staffToken, uniquePhone } from "./support/crm-fastapi.mjs";
 
 const ADMIN = process.env.PLATFORM_URL ?? "http://127.0.0.1:3300";
 const PW = process.env.E2E_PASSWORD;
@@ -53,18 +53,20 @@ async function afterAction(page) {
   await page.waitForLoadState("networkidle");
 }
 
-async function createBooking(page, { room, start, name, price, prepay }) {
+async function createBooking(page, { room, start, name, price, prepay, phone }) {
   const form = page.locator('form:has(input[name="customerName"])');
   await form.locator('select[name="roomId"]').selectOption({ label: room });
   await form.locator('select[name="startTime"]').selectOption(start);
   await form.locator('input[name="customerName"]').fill(name);
-  await form.locator('input[name="phone"]').fill("+77001112233");
+  await form.locator('input[name="phone"]').fill(phone);
   await form.locator('input[name="agreedPriceKzt"]').fill(String(price));
   await form.locator('input[name="prepaymentKzt"]').fill(String(prepay));
   await form.locator('button[type="submit"]').click();
   await afterAction(page);
 }
 
+const phoneA = uniquePhone();
+const phoneB = uniquePhone();
 const tokenA = await staffToken({ email: "manager-a@staging.boombala.example.com", staffId: "stg-manager-a" });
 const dbA = new pg.Client({ connectionString: process.env.FASTAPI_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://") });
 await dbA.connect();
@@ -85,7 +87,7 @@ try {
   await shot(pageA, "01-manager-a-calendar");
 
   // 2. A creates and confirms 14:00–18:00 in Room A with a test manual prepayment; success only after read-back.
-  await createBooking(pageA, { room: ROOM_A, start: "14:00", name: "Тест Клиент E2E A", price: 180000, prepay: 20000 });
+  await createBooking(pageA, { room: ROOM_A, start: "14:00", name: "Тест Клиент E2E A", price: 180000, prepay: 20000, phone: phoneA });
   const okA = await pageA.locator('[role="status"]').innerText().catch(() => "");
   check("A: booking 14:00–18:00 shown as verified only after FastAPI read-back", okA.includes("Проверено по данным системы"), okA);
   await shot(pageA, "02-a-booked-14-18");
@@ -99,14 +101,14 @@ try {
 
   // 4. B tries 16:00–20:00 in the same room: refused with time_conflict, nothing new is written.
   const beforeCount = (await pageB.locator('[role="listitem"][data-reservation]').count());
-  await createBooking(pageB, { room: ROOM_A, start: "16:00", name: "Тест Клиент Конфликт", price: 150000, prepay: 10000 });
+  await createBooking(pageB, { room: ROOM_A, start: "16:00", name: "Тест Клиент Конфликт", price: 150000, prepay: 10000, phone: phoneB });
   check("B: 16:00–20:00 refused with time_conflict", (await alertWith(pageB, "Комната занята").count()) === 1);
   const afterCount = await pageB.locator('[role="listitem"][data-reservation]').count();
   check("B: conflicting attempt wrote no second reservation", afterCount === beforeCount);
   await shot(pageB, "04-b-conflict-409");
 
   // 5. Paid but unconfirmed request, created through the FastAPI kernel with a real manual prepayment (20 000 ₸).
-  const requestId = await paidUnconfirmedRequest(tokenA, { branchId: BRANCH, packageId: PACKAGE_START, amountKzt: 20000, customerName: "Тест Оплачено" });
+  const requestId = await paidUnconfirmedRequest(tokenA, { branchId: BRANCH, packageId: PACKAGE_START, amountKzt: 20000, customerName: "Тест Оплачено", requestedDate: DATE });
   await openCalendar(pageB, `&request=${requestId}`);
   let pending = plain(await pageB.locator('section[aria-labelledby="paid-request"]').innerText().catch(() => ""));
   check("B: paid unconfirmed request shows FastAPI amount 20 000 ₸ and a no-repay confirm", pending.includes("20 000") && pending.includes("без повторной предоплаты"), pending.slice(0, 160));

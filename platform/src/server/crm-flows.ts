@@ -71,8 +71,11 @@ const KNOWN_ERRORS = new Set([
   "paid_request_pending",
 ]);
 
-/** A fixed code for the page; the page owns the Russian text. */
+/** A fixed code for the page; the page owns the Russian text. Unexpected errors are logged by name only. */
 export function failureCode(error: unknown): string {
+  if (!(error instanceof FastApiCrmError) && !(error instanceof FastApiCrmConfigurationError)) {
+    console.error("[crm-flows] unexpected error:", error instanceof Error ? error.name : "non-error");
+  }
   if (error instanceof FastApiCrmError) {
     if (error.status === 401 || error.status === 403) return error.code === "staff_not_linked" ? "staff_not_linked" : "forbidden";
     if (error.status === 409 || error.status === 404 || error.status === 422) return KNOWN_ERRORS.has(error.code) ? error.code : "failed";
@@ -105,16 +108,18 @@ export async function precheckRoom(client: BookingWriter, branchId: string, date
 const CLOSED_LEAD_STATUSES = new Set(["booked", "completed", "lost", "closed", "cancelled", "confirmed"]);
 
 /**
- * The request id of a paid, unconfirmed request for the same phone in this branch, or null. This covers a response lost after
- * the manual payment was recorded: the manager reloads and tries again, and a second request and a second payment must not
- * be created. The FastAPI detail decides, never the list alone.
+ * The request id of a paid, unconfirmed request for the same phone, branch and date, created in the last 24 hours, or null.
+ * It covers a response lost after the manual payment was recorded: the manager reloads and tries again, and a second request and
+ * a second payment must not be created. Older or different-date requests do not block a new booking. The FastAPI detail decides.
  */
-export async function findPaidUnconfirmedRequest(client: BookingWriter, branchId: string, phone: string, today: string): Promise<string | null> {
+export async function findPaidUnconfirmedRequest(client: BookingWriter, branchId: string, phone: string, date: string, today: string, nowMs = Date.now()): Promise<string | null> {
   const from = new Date(`${today}T00:00:00Z`);
-  from.setUTCDate(from.getUTCDate() - 30);
+  from.setUTCDate(from.getUTCDate() - 2);
   const list = await client.listLeads({ branchId, createdFrom: from.toISOString().slice(0, 10) });
   for (const item of list.items) {
     if (item.type !== "birthday_request" || CLOSED_LEAD_STATUSES.has(item.status) || !samePhone(item.phone, phone)) continue;
+    if (item.requestedDate !== date) continue;
+    if (nowMs - Date.parse(item.createdAt) > 24 * 60 * 60 * 1000) continue;
     const lead = await client.getBirthdayLead(item.id);
     if (lead.bookedAt === null && lead.manualPaymentFactStatus === "prepaid" && lead.manualPaymentFactAmountKzt > 0) return item.id;
   }
@@ -126,7 +131,7 @@ export async function createBookingFlow(client: BookingWriter, input: NewBooking
   let requestId: string | null = null;
   try {
     await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
-    const pending = await findPaidUnconfirmedRequest(client, input.branchId, input.phone, today);
+    const pending = await findPaidUnconfirmedRequest(client, input.branchId, input.phone, input.date, today);
     if (pending) return { ok: false, code: "paid_request_pending", requestId: pending };
     const request = await client.createStaffRequest({
       branchId: input.branchId,

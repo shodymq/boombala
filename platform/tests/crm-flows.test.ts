@@ -37,6 +37,7 @@ function fakeWriter(options: { reservations?: unknown[]; confirm?: () => unknown
 }
 
 const TODAY = "2026-11-19";
+const RECENT = new Date().toISOString();
 
 const input: NewBookingInput = {
   branchId: "stg-almaty",
@@ -112,5 +113,26 @@ describe("booking flows: token expiry", () => {
   it("a 401 is rethrown so the caller can issue a fresh bridge token and retry", async () => {
     const fake = fakeWriter({ confirm: () => { throw new FastApiCrmError(401, "token_expired", "x"); } });
     await assert.rejects(createBookingFlow(fake.writer, input, TODAY), (error: unknown) => error instanceof FastApiCrmError && error.status === 401);
+  });
+});
+
+describe("booking flows: the duplicate check is narrow", () => {
+  it("a paid request for another date does not block", async () => {
+    const fake = fakeWriter({
+      leads: [{ id: "req-other-day", type: "birthday_request", status: "new", phone: "77001112233", customerName: "Тест", createdAt: RECENT, requestedDate: "2026-11-27" }],
+      lead: { id: "req-other-day", status: "new", bookedAt: null, manualPaymentFactStatus: "prepaid", manualPaymentFactAmountKzt: 20000, customerName: "Тест" },
+    });
+    const result = await createBookingFlow(fake.writer, { ...input, phone: "77001112233" }, TODAY);
+    assert.equal(result.ok, true);
+  });
+
+  it("a paid request older than a day does not block", async () => {
+    const old = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+    const fake = fakeWriter({
+      leads: [{ id: "req-old", type: "birthday_request", status: "new", phone: "77001112233", customerName: "Тест", createdAt: old, requestedDate: "2026-11-20" }],
+      lead: { id: "req-old", status: "new", bookedAt: null, manualPaymentFactStatus: "prepaid", manualPaymentFactAmountKzt: 20000, customerName: "Тест" },
+    });
+    const result = await createBookingFlow(fake.writer, { ...input, phone: "77001112233" }, TODAY);
+    assert.equal(result.ok, true);
   });
 });
