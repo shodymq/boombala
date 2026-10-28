@@ -16,6 +16,15 @@ PostgreSQL (5432), nginx (80/443). `guard.sh` refuses to start if staging would 
 
 ## Prerequisites (VPS user `boombala-staging`, not root)
 
+The VPS user has no sudo. Things that need root are therefore replaced by user-level equivalents:
+
+- No `python3-venv`: create the venv with `python3 -m venv --without-pip venv`, then bootstrap pip with `get-pip.py` into it.
+- BoomBalaApp is a private repository. Move the pinned commit as a bundle: `git bundle create backend.bundle <sha>` on the
+  operator's Mac, `scp` it to `~/boombala-staging/incoming/`, then `git clone backend.bundle` and check out the SHA.
+- PostgreSQL binaries come from `/usr/lib/postgresql/17/bin`; the staging cluster uses its own data directory, port and socket
+  directory (`pg.sh` sets `unix_socket_directories` to `$STAGING_ROOT/run`, because the system socket directory belongs to
+  the production cluster).
+
 - Ubuntu 24.04 with PostgreSQL 17 server binaries (`initdb`, `pg_ctl`, `pg_dump`, `psql`), Node 22.18+ (`engines`), Python 3.11+.
 - Two checkouts at pinned SHAs: BoomBalaApp (`backend/`) and boombala (`platform/`). `staging.env` records the SHAs.
 - A Python venv for the backend at `$STAGING_ROOT/venv` with the backend requirements installed.
@@ -40,7 +49,22 @@ Then open an SSH tunnel from the operator's Mac (manager browsers use `http://12
 ./tunnel.sh boombala-claude                 # Ctrl-C to close
 ```
 
+`tunnel.sh` refuses when the host entry in `~/.ssh/config` sets `ClearAllForwardings yes`, because that setting disables
+port forwarding on purpose. To use the tunnel anyway, review the host entry and run `ALLOW_FORWARDING=1 ./tunnel.sh <host>`
+for that session only.
+
+Check the stack from the VPS itself (no browser, no secrets printed):
+
+```bash
+./smoke.sh                                  # FastAPI and Platform answer; linked manager gets a token; identity mismatch refused
+```
+
 ## Stop, back up, restore, roll back
+
+Verified on the VPS at the pinned SHAs: `backup.sh` then `restore-test.sh` (both databases restore and match table counts), the
+race E2E (`npm run e2e:crm-race` against the VPS FastAPI and database: 9/9), `smoke.sh` (4/4), and `rollback.sh` to the previous
+SHA pair and back.
+
 
 ```bash
 ./down.sh                                   # stops FastAPI and Platform; keeps data
