@@ -3,9 +3,11 @@ import Link from "next/link";
 import { getGrid, type Cell } from "@/core/bookings";
 import { listPackages } from "@/core/catalog";
 import { almatyToday, isValidDate } from "@/core/dates";
+import { unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { blockAction, manualBookingAction, releaseAction } from "./actions";
+import { CrmCalendar } from "./crm-calendar";
 
 export const metadata: Metadata = { title: "Календарь" };
 
@@ -27,9 +29,17 @@ const shift = (date: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-export default async function BookingsPage({ searchParams }: { searchParams: Promise<{ date?: string; notice?: string; error?: string }> }) {
-  const { user } = await requirePermission("bookings.manage");
+export default async function BookingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string; notice?: string; error?: string; branch?: string; start?: string }>;
+}) {
+  const session = await requirePermission("bookings.manage");
+  const { user } = session;
   const sp = await searchParams;
+  // With the unified flag on, FastAPI is the only reader and writer of the calendar. The legacy grid below is kept only
+  // for the flag-off rollback path and never writes while the flag is on.
+  if (unifiedFastapiCrmEnabled()) return <CrmCalendar session={session} search={sp} />;
   const date = sp.date && isValidDate(sp.date) ? sp.date : almatyToday();
   const actor = { id: user.id, role: user.role };
   const [grid, packages] = await Promise.all([getGrid(getPool(), actor, date), listPackages(getPool())]);

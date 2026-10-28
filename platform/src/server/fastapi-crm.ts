@@ -37,6 +37,11 @@ export type BookingTimeline = {
   reservations: BookingTimelineReservation[];
 };
 
+/** FastAPI admin responses use snake_case for these resources; only the fields the calendar reads are typed. */
+export type FastApiBranch = { id: string; name: string; working_hours: string; is_active: boolean; display_order: number };
+
+export type FastApiBirthdayPackage = { id: string; branch_id: string; name: string; price_from: number; is_active: boolean; display_order: number };
+
 export type FastApiLeadList = {
   items: unknown[];
   total: number;
@@ -165,6 +170,22 @@ export class FastApiCrmClient {
   getBookingTimeline(branchId: string, date: string): Promise<BookingTimeline> {
     const params = new URLSearchParams({ branchId, date });
     return this.request<BookingTimeline>(`/admin/birthday-bookings/timeline?${params.toString()}`);
+  }
+
+  listBranches(): Promise<FastApiBranch[]> {
+    return this.request<FastApiBranch[]>("/admin/branches");
+  }
+
+  listBirthdayPackages(): Promise<FastApiBirthdayPackage[]> {
+    return this.request<FastApiBirthdayPackage[]>("/admin/birthday-packages");
+  }
+
+  createStaffRequest(body: Record<string, unknown>): Promise<{ id: string; status: string; branchId: string; packageId: string | null; requestedDate: string | null; guestCount: number | null; source: string }> {
+    return this.request("/admin/birthday-requests", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  blockSlot(body: Record<string, unknown>): Promise<unknown> {
+    return this.request("/admin/birthday-slots/block", { method: "POST", body: JSON.stringify(body) });
   }
 
   rescheduleReservation(reservationId: string, body: Record<string, unknown>): Promise<unknown> {
