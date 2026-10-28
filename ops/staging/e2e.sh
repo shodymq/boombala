@@ -17,6 +17,8 @@ export E2E_CRM_SERVICE_TOKEN="$CRM_SERVICE_TOKEN" E2E_CRM_STAFF_ASSERTION_SECRET
 export PLATFORM_DATABASE_URL="postgres://$STAGING_PG_USER:$STAGING_PG_PASSWORD@127.0.0.1:$STAGING_PG_PORT/$STAGING_PLATFORM_DB"
 export FASTAPI_DATABASE_URL="postgresql://$STAGING_PG_USER:$STAGING_PG_PASSWORD@127.0.0.1:$STAGING_PG_PORT/$STAGING_BACKEND_DB"
 export E2E_CHROME="${E2E_CHROME:-$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | tail -1)}"
+# Shared libraries extracted without root (see README, "Browser on the staging host"). The path file lists their directories.
+[ -f "$STAGING_ROOT/libs/ld-path" ] && export LD_LIBRARY_PATH="$(cat "$STAGING_ROOT/libs/ld-path")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 [ -x "$E2E_CHROME" ] || { echo "no Chromium: run 'npx playwright-core install chromium' in PLATFORM_DIR" >&2; exit 2; }
 export E2E_ARTIFACTS="$out"
 cd "$PLATFORM_DIR"

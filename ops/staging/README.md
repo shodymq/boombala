@@ -102,3 +102,15 @@ The E2E scripts read `PLATFORM_URL`, `E2E_PASSWORD`, `PLATFORM_DATABASE_URL`, `F
 
 `boombala-staging.service` is a systemd user unit template. Copy it to `~/.config/systemd/user/`, then
 `systemctl --user daemon-reload && systemctl --user start boombala-staging`. Linger must be enabled for it to survive logout.
+
+## Browser on the staging host (no tunnel needed)
+
+When forwarding is not allowed, run the browser suites on the staging host itself:
+
+```bash
+cd "$PLATFORM_DIR" && npx --no-install playwright-core install chromium
+# Chromium needs runtime libraries. Without root, fetch the .deb files and unpack them into $STAGING_ROOT/libs/root:
+#   apt-get download <libnspr4 libnss3 libatk1.0-0t64 ... libgraphite2-3 libdatrie1>; dpkg-deb -x <each.deb> $STAGING_ROOT/libs/root
+#   find $STAGING_ROOT/libs/root -name '*.so*' -printf '%h\n' | sort -u | paste -sd: - > $STAGING_ROOT/libs/ld-path
+STAGING_ROOT=... STAGING_ENV=... ./e2e.sh <run-name> <date-prefix>    # STAGING_TEST_PASSWORD must be exported
+```
