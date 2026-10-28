@@ -13,9 +13,25 @@ export function requireDatabaseUrl(): string {
 }
 
 /**
- * `MFA_MODE=required`: every staff login needs a second factor (TOTP). It is `off` only for local development and the
- * existing Preview; the Kazakhstan production profile refuses to start without `required` (see server/exposure.ts).
+ * `MFA_MODE=required`: production staff accounts retain TOTP/recovery as a recovery factor. `PASSKEY_MODE=required`
+ * selects WebAuthn as the normal second factor without deleting existing TOTP material.
  */
 export const mfaRequired = process.env.MFA_MODE === "required";
+/** WebAuthn is the normal second factor when PASSKEY_MODE=required. */
+export const passkeyRequired = process.env.PASSKEY_MODE === "required";
 /** AES-256-GCM key (32 bytes, base64) that encrypts TOTP secrets in the database. Only the admin app has it. */
 export const mfaKey = process.env.MFA_ENC_KEY;
+
+export interface WebAuthnConfig {
+  rpID: string;
+  origin: string;
+  rpName: string;
+}
+
+export function webAuthnConfig(): WebAuthnConfig {
+  const rpID = process.env.WEBAUTHN_RP_ID?.trim();
+  const origin = process.env.WEBAUTHN_ORIGIN?.trim();
+  const rpName = process.env.WEBAUTHN_RP_NAME?.trim() || "Boom Bala CRM";
+  if (!rpID || !origin || !/^https:\/\//i.test(origin)) throw new Error("WebAuthn production configuration is incomplete");
+  return { rpID, origin, rpName };
+}
