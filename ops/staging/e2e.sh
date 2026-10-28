@@ -29,10 +29,12 @@ for pair in manager-a:stg-manager-a manager-b:stg-manager-b owner-a:stg-owner-a 
   npm run -s user:link-fastapi -- --email "${pair%%:*}@staging.boombala.example.com" --admin-user-id "${pair##*:}" >/dev/null
 done
 status=0
-E2E_DATE="$prefix-10" npm run -s e2e:crm-calendar >"$out/calendar.log" 2>&1 || status=1
-E2E_SECURITY_DATE="$prefix-11" E2E_ARTIFACTS="$out/security" npm run -s e2e:crm-security >"$out/security.log" 2>&1 || status=1
-E2E_RACE_DATE="$prefix-12" E2E_ARTIFACTS="$out/race" npm run -s e2e:crm-race >"$out/race.log" 2>&1 || status=1
-E2E_LOST_DATE="$prefix-13" E2E_ARTIFACTS="$out/lost-response" node --no-warnings --conditions=react-server "$PLATFORM_DIR/e2e/crm-lost-response.e2e.mjs" >"$out/lost-response.log" 2>&1 || status=1
-for f in calendar security race lost-response; do echo "$f: $(tail -1 "$out/$f.log")"; done
+suites="${SUITES:-calendar security race lost-response}"   # e.g. SUITES=calendar to run one
+want() { case " $suites " in *" $1 "*) return 0 ;; esac; return 1; }
+want calendar && { E2E_DATE="$prefix-10" npm run -s e2e:crm-calendar >"$out/calendar.log" 2>&1 || status=1; }
+want security && { E2E_SECURITY_DATE="$prefix-11" E2E_ARTIFACTS="$out/security" npm run -s e2e:crm-security >"$out/security.log" 2>&1 || status=1; }
+want race && { E2E_RACE_DATE="$prefix-12" E2E_ARTIFACTS="$out/race" npm run -s e2e:crm-race >"$out/race.log" 2>&1 || status=1; }
+want lost-response && { E2E_LOST_DATE="$prefix-13" E2E_ARTIFACTS="$out/lost-response" node --no-warnings --conditions=react-server "$PLATFORM_DIR/e2e/crm-lost-response.e2e.mjs" >"$out/lost-response.log" 2>&1 || status=1; }
+for f in $suites; do echo "$f: $(tail -1 "$out/$f.log")"; done
 echo "artifacts: $out"
 exit $status
