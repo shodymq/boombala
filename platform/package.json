@@ -26,7 +26,7 @@
     "legal:load": "node --no-warnings scripts/legal-load.ts",
     "db:restore": "node --no-warnings scripts/restore-db.mjs",
     "e2e": "node --no-warnings e2e/platform.e2e.mjs",
-    "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "test": "node --no-warnings --conditions=react-server --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
     "verify:remote": "node --no-warnings scripts/verify-remote.ts",
     "e2e:news": "node --no-warnings e2e/news.e2e.mjs",

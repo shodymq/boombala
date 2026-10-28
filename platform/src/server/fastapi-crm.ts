@@ -7,6 +7,36 @@ export type FastApiCrmActor = {
   requestId?: string;
 };
 
+export type BookingTimelineRoom = { id: string; name: string };
+
+export type BookingTimelineReservation = {
+  id: string;
+  kind: "booking" | "block";
+  status: "confirmed" | "blocked" | "released";
+  roomId: string;
+  startsAt: string;
+  endsAt: string;
+  slotId: string | null;
+  packageName: string | null;
+  priceKzt: number | null;
+  priceSource: string | null;
+  paidKzt: number;
+  note: string | null;
+  requestId: string | null;
+  /** Null unless the staff role may see client data (super_admin, sales_manager). */
+  customerName: string | null;
+  customerPhone: string | null;
+  createdByAdminId: string | null;
+};
+
+export type BookingTimeline = {
+  branchId: string;
+  date: string;
+  timezone: "Asia/Almaty";
+  rooms: BookingTimelineRoom[];
+  reservations: BookingTimelineReservation[];
+};
+
 export type FastApiLeadList = {
   items: unknown[];
   total: number;
@@ -130,6 +160,15 @@ export class FastApiCrmClient {
 
   confirmBooking(body: Record<string, unknown>): Promise<unknown> {
     return this.request("/admin/birthday-bookings/confirm", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  getBookingTimeline(branchId: string, date: string): Promise<BookingTimeline> {
+    const params = new URLSearchParams({ branchId, date });
+    return this.request<BookingTimeline>(`/admin/birthday-bookings/timeline?${params.toString()}`);
+  }
+
+  rescheduleReservation(reservationId: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.request(`/admin/birthday-reservations/${encodeURIComponent(reservationId)}/reschedule`, { method: "POST", body: JSON.stringify(body) });
   }
 
   releaseReservation(reservationId: string, body: Record<string, unknown>): Promise<unknown> {
