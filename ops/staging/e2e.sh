@@ -22,6 +22,12 @@ export E2E_CHROME="${E2E_CHROME:-$(ls -d "$HOME"/.cache/ms-playwright/chromium-*
 [ -x "$E2E_CHROME" ] || { echo "no Chromium: run 'npx playwright-core install chromium' in PLATFORM_DIR" >&2; exit 2; }
 export E2E_ARTIFACTS="$out"
 cd "$PLATFORM_DIR"
+# Automation accounts must be linked before any suite runs. A suite that stops in the middle of its unlink test leaves the
+# link missing; relinking here (idempotent) keeps the next run from failing for that reason.
+export DATABASE_URL="postgres://$STAGING_PG_USER:$STAGING_PG_PASSWORD@127.0.0.1:$STAGING_PG_PORT/$STAGING_PLATFORM_DB"
+for pair in manager-a:stg-manager-a manager-b:stg-manager-b owner-a:stg-owner-a owner-b:stg-owner-b; do
+  npm run -s user:link-fastapi -- --email "${pair%%:*}@staging.boombala.example.com" --admin-user-id "${pair##*:}" >/dev/null
+done
 status=0
 E2E_DATE="$prefix-10" npm run -s e2e:crm-calendar >"$out/calendar.log" 2>&1 || status=1
 E2E_SECURITY_DATE="$prefix-11" E2E_ARTIFACTS="$out/security" npm run -s e2e:crm-security >"$out/security.log" 2>&1 || status=1
