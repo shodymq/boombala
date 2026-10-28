@@ -21,7 +21,8 @@ load_secrets() {
   local file="$STAGING_ROOT/secrets.env"
   [ -f "$file" ] || { echo "missing $file: run gen-secrets.sh first" >&2; exit 2; }
   local mode
-  mode="$(stat -f %Lp "$file" 2>/dev/null || stat -c %a "$file")"
+  # GNU stat first: on Linux "stat -f" reports the filesystem, not the file mode.
+  mode="$(stat -c %a "$file" 2>/dev/null || stat -f %Lp "$file")"
   [ "$mode" = "600" ] || { echo "$file must be mode 600 (is $mode)" >&2; exit 2; }
   set -a
   # shellcheck disable=SC1090
