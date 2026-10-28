@@ -231,6 +231,22 @@ try {
   check("editor cannot open the calendar (no grid, no booking form)", !editorBody.includes("Новая бронь на 4 часа") && !editorBody.includes("Занятость"));
   await ctxEditor.close();
 
+  // 12c. Branch scope: an unknown or foreign branch id in the URL never reaches FastAPI; the page falls back to a visible branch.
+  await pageA.goto(`${ADMIN}/bookings?branch=foreign-branch-id&date=${DATE}`);
+  await pageA.waitForLoadState("networkidle");
+  const selectedBranch = await pageA.locator('select[name="branch"]').inputValue();
+  check("branch scope: a foreign branch id falls back to a visible branch", selectedBranch === "stg-almaty" || selectedBranch === "stg-shymkent", selectedBranch);
+
+  // 12d. Session expiry: an expired Platform session is refused on the next request and sent to login.
+  const platformDb = new pg.Client({ connectionString: process.env.PLATFORM_DATABASE_URL });
+  await platformDb.connect();
+  await platformDb.query("UPDATE bb.sessions SET expires_at = now() - interval '1 second' WHERE user_id = (SELECT id FROM bb.users WHERE email = $1) AND revoked_at IS NULL", ["manager-a@staging.boombala.example.com"]);
+  await platformDb.end();
+  await pageA.goto(`${ADMIN}/bookings?branch=${BRANCH}&date=${DATE}`);
+  await pageA.waitForURL((u) => u.pathname.startsWith("/login"), { timeout: 15000 }).catch(() => {});
+  check("expired Platform session is sent to login", pageA.url().includes("/login"), pageA.url());
+  await login(pageA, "manager-a@staging.boombala.example.com");
+
   // 13. Tablet width: no horizontal page overflow.
   await pageA.setViewportSize({ width: 768, height: 1024 });
   await openCalendar(pageA);

@@ -26,24 +26,38 @@ type Staff = { id: string; email: string };
  * Runs one FastAPI operation as the verified staff member. The FastAPI identity is read from the database on every call,
  * never from a cookie or the session object. When the account is not linked, nothing is sent.
  */
+export type CrmActorDeps = {
+  linkFor: (userId: string) => Promise<string | null>;
+  issue: typeof fastApiActorForStaff;
+};
+
+const liveDeps: CrmActorDeps = { linkFor: fastApiLinkFor, issue: fastApiActorForStaff };
+
 export async function withFastApiClient<T>(
   session: { sessionId: string; user: Staff },
   run: (client: FastApiCrmClient) => Promise<T>,
+  deps: CrmActorDeps = liveDeps,
 ): Promise<T> {
-  const identity = await fastApiLinkFor(session.user.id);
+  const identity = await deps.linkFor(session.user.id);
   if (!identity) throw new FastApiCrmError(403, "staff_not_linked", "link");
   const key = `${session.sessionId}|${identity}`;
   try {
-    return await run(new FastApiCrmClient(await actorFor(key, identity, session.user.email, false)));
+    return await run(new FastApiCrmClient(await actorFor(key, identity, session.user.email, false, deps.issue)));
   } catch (error) {
     if (!(error instanceof FastApiCrmError) || error.status !== 401) throw error;
     // Expired or revoked token: nothing was processed, so one fresh token and one retry are safe.
     cache.delete(key);
-    return run(new FastApiCrmClient(await actorFor(key, identity, session.user.email, true)));
+    return run(new FastApiCrmClient(await actorFor(key, identity, session.user.email, true, deps.issue)));
   }
 }
 
-async function actorFor(key: string, identity: string, email: string, fresh: boolean): Promise<FastApiCrmActor> {
+async function actorFor(
+  key: string,
+  identity: string,
+  email: string,
+  fresh: boolean,
+  issue: typeof fastApiActorForStaff,
+): Promise<FastApiCrmActor> {
   const requestId = randomUUID();
   const now = Date.now();
   const hit = cache.get(key);
@@ -51,7 +65,7 @@ async function actorFor(key: string, identity: string, email: string, fresh: boo
 
   let issuing = pending.get(key);
   if (!issuing) {
-    issuing = fastApiActorForStaff({ email, fastapiAdminUserId: identity }, { requestId })
+    issuing = issue({ email, fastapiAdminUserId: identity }, { requestId })
       .then((actor) => {
         remember(key, actor.accessToken);
         return actor.accessToken;

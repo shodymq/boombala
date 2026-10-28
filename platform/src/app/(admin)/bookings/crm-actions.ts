@@ -2,9 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { almatyWindow, isCalendarDate, windowOverlapsRoom } from "../../../core/booking-calendar.ts";
+import { isCalendarDate } from "../../../core/booking-calendar.ts";
 import { withFastApiClient } from "../../../server/crm-actor.ts";
-import { FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
+import { unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
+import { confirmPaidRequestFlow, createBookingFlow, failureCode } from "../../../server/crm-flows.ts";
 import { requirePermission } from "../../../server/dal.ts";
 
 /**
@@ -14,31 +15,6 @@ import { requirePermission } from "../../../server/dal.ts";
  * The redirect carries only identifiers. It never says that something succeeded: the calendar page reads the state back
  * from FastAPI and shows success only for what it finds there (`ok` and `reservation` are hints, not proof).
  */
-
-const KNOWN_ERRORS = new Set([
-  "time_conflict",
-  "slot_taken",
-  "outside_working_hours",
-  "branch_hours_unknown",
-  "start_in_past",
-  "invalid_start_time",
-  "birthday_prepayment_required",
-  "birthday_request_not_bookable",
-  "birthday_request_not_payable",
-  "request_already_booked",
-  "reservation_not_found",
-  "reservation_already_released",
-  "idempotency_conflict",
-  "idempotency_in_progress",
-  "forbidden",
-  "invalid",
-  "unavailable",
-  "failed",
-  "branch_access_denied",
-  "branch_not_found",
-  "availability_unavailable",
-  "staff_not_linked",
-]);
 
 const key = z.string().min(8).max(100);
 const startTime = z.string().regex(/^\d{2}:\d{2}$/);
@@ -90,16 +66,9 @@ function calendarUrl(branchId: string, date: string, query: string): string {
   return `/bookings?${params.toString()}&${query}`;
 }
 
-/** Turns a FastAPI failure into a fixed code; the page owns the Russian text. */
-function failureCode(error: unknown): string {
-  if (error instanceof FastApiCrmError) {
-    if (error.status === 401 || error.status === 403) return error.code === "staff_not_linked" ? "staff_not_linked" : "forbidden";
-    if (error.status === 409 || error.status === 404 || error.status === 422) return KNOWN_ERRORS.has(error.code) ? error.code : "failed";
-    return "unavailable";
-  }
-  if (error instanceof FastApiCrmConfigurationError) return "unavailable";
-  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError" || error.name === "TypeError")) return "unavailable";
-  return "failed";
+/** Only the branch and date are needed to return the manager to the same view. */
+async function branchAndDate(formData: FormData): Promise<{ branchId: string; date: string }> {
+  return { branchId: field(formData, "branchId"), date: field(formData, "date") };
 }
 
 function reservationIdOf(value: unknown): string | null {
@@ -107,23 +76,6 @@ function reservationIdOf(value: unknown): string | null {
     return (value as { id: string }).id;
   }
   return null;
-}
-
-/**
- * A UX hint only: refuses a window that overlaps a known occupancy (party plus buffer) before anything is written. PostgreSQL
- * stays the authority; a race still returns time_conflict from the kernel.
- */
-async function precheckRoom(client: FastApiCrmClient, branchId: string, date: string, roomId: string, startTime: string): Promise<void> {
-  const timeline = await client.getBookingTimeline(branchId, date);
-  const { startIso, endIso } = almatyWindow(date, startTime);
-  const newOccupiedEnd = new Date(Date.parse(endIso) + timeline.bufferMinutes * 60_000).toISOString();
-  const occupied = timeline.reservations.map((r) => ({ roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt, status: r.status }));
-  if (windowOverlapsRoom(occupied, roomId, startIso, newOccupiedEnd)) throw new FastApiCrmError(409, "time_conflict", "precheck");
-}
-
-/** Only the branch and date are needed to return the manager to the same view. */
-async function branchAndDate(formData: FormData): Promise<{ branchId: string; date: string }> {
-  return { branchId: field(formData, "branchId"), date: field(formData, "date") };
 }
 
 function okOutcome(kind: "booked" | "blocked" | "released" | "rescheduled", reservationId: string | null): string {
@@ -155,46 +107,26 @@ export async function createBookingAction(formData: FormData): Promise<void> {
 
   // Booking needs a request, then a recorded prepayment (the kernel refuses a confirmation without one), then the confirmation.
   // Each step has its own derived idempotency key, so a double submit replays the same records instead of creating new ones.
-  const trail: { requestId: string | null } = { requestId: null };
-  let outcome: string;
-  try {
-    const confirmed = await withFastApiClient(session, async (client) => {
-      // Refuse a known conflict before any request or prepayment is written, so no paid request is left behind.
-      await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
-      const request = await client.createStaffRequest({
-        branchId: input.branchId,
-        packageId: input.packageId,
-        customerName: input.customerName,
-        phone: input.phone,
-        guestCount: input.guestCount,
-        requestedDate: input.date,
-        notes: input.note,
-        idempotencyKey: `${input.idempotencyKey}:request`,
-      });
-      trail.requestId = request.id;
-      await client.recordManualPayment(request.id, {
-        amountKzt: input.prepaymentKzt,
-        method: input.prepaymentMethod,
-        idempotencyKey: `${input.idempotencyKey}:payment`,
-        note: input.note,
-      });
-      return client.confirmBooking({
-        requestId: request.id,
-        bookingDate: input.date,
-        roomId: input.roomId,
-        startTime: input.startTime,
-        packageId: input.packageId,
-        agreedPriceKzt: input.agreedPriceKzt,
-        idempotencyKey: `${input.idempotencyKey}:confirm`,
-        note: input.note,
-      });
-    });
-    outcome = okOutcome("booked", reservationIdOf(confirmed));
-  } catch (error) {
-    outcome = `error=${failureCode(error)}`;
-  }
+  const result = await withFastApiClient(session, (client) =>
+    createBookingFlow(client, {
+      branchId: input.branchId,
+      date: input.date,
+      roomId: input.roomId,
+      startTime: input.startTime,
+      packageId: input.packageId,
+      customerName: input.customerName,
+      phone: input.phone,
+      guestCount: input.guestCount,
+      agreedPriceKzt: input.agreedPriceKzt,
+      prepaymentKzt: input.prepaymentKzt,
+      prepaymentMethod: input.prepaymentMethod,
+      note: input.note,
+      idempotencyKey: input.idempotencyKey,
+    }),
+  );
+  let outcome = result.ok ? okOutcome("booked", result.reservationId) : `error=${result.code}`;
   // The request id lets the page read the real payment and booking state from FastAPI after a failure.
-  if (trail.requestId) outcome += `&request=${encodeURIComponent(trail.requestId)}`;
+  if (result.requestId) outcome += `&request=${encodeURIComponent(result.requestId)}`;
   redirect(calendarUrl(input.branchId, input.date, outcome));
 }
 
@@ -218,24 +150,8 @@ export async function confirmPaidRequestAction(formData: FormData): Promise<void
   if (!parsed.success) redirect(calendarUrl(branchId, rawDate, "error=invalid"));
   const input = parsed.data;
   if (!unifiedFastapiCrmEnabled()) redirect(calendarUrl(input.branchId, input.date, "error=unavailable"));
-  let outcome: string;
-  try {
-    const confirmed = await withFastApiClient(session, async (client) => {
-      await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
-      return client.confirmBooking({
-        requestId: input.requestId,
-        bookingDate: input.date,
-        roomId: input.roomId,
-        startTime: input.startTime,
-        packageId: input.packageId,
-        agreedPriceKzt: input.agreedPriceKzt,
-        idempotencyKey: `${input.idempotencyKey}:confirm`,
-      });
-    });
-    outcome = okOutcome("booked", reservationIdOf(confirmed));
-  } catch (error) {
-    outcome = `error=${failureCode(error)}`;
-  }
+  const result = await withFastApiClient(session, (client) => confirmPaidRequestFlow(client, { ...input }));
+  const outcome = result.ok ? okOutcome("booked", result.reservationId) : `error=${result.code}`;
   redirect(calendarUrl(input.branchId, input.date, `${outcome}&request=${encodeURIComponent(input.requestId)}`));
 }
 

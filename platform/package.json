@@ -30,6 +30,8 @@
     "test": "node --no-warnings --conditions=react-server --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
     "e2e:crm-calendar": "node --no-warnings e2e/crm-calendar.e2e.mjs",
+    "e2e:crm-race": "node --no-warnings e2e/crm-race.e2e.mjs",
+    "e2e:crm-security": "node --no-warnings e2e/crm-actions-security.e2e.mjs",
     "verify:remote": "node --no-warnings scripts/verify-remote.ts",
     "e2e:news": "node --no-warnings e2e/news.e2e.mjs",
     "e2e:release": "node --no-warnings e2e/release.e2e.mjs",
