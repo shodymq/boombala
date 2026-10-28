@@ -20,6 +20,22 @@ import { makeUser, seedFromSite, startTestDb, submitConsentV, TEST_PASSWORD, typ
 
 const API_PW = "api-role-password-0123456789abc";
 const ADMIN_PW = "admin-role-password-0123456789";
+
+/** The complete public surface of the database for the API role (migrations 012 and 014). */
+const INTAKE_FUNCTIONS = [
+  "intake_add_consent",
+  "intake_audit",
+  "intake_find_external_lead",
+  "intake_find_lead",
+  "intake_find_registration",
+  "intake_insert_external_lead",
+  "intake_insert_lead",
+  "intake_insert_registration",
+  "intake_lead_status",
+  "intake_queue_notification",
+  "intake_registration_documents",
+  "intake_upsert_contact",
+];
 const FUTURE = (() => {
   const d = new Date(`${almatyToday()}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 45);
@@ -135,7 +151,8 @@ describe("Database roles: one per application, least privilege", () => {
 
     it("the only doors to personal data are the intake functions: each returns one row or only non-personal columns, with no way to list or search", async () => {
       const fns = (await db.pool.query("SELECT p.oid, p.proname, pg_get_function_result(p.oid) result, p.prosecdef, p.proconfig FROM pg_proc p WHERE p.pronamespace = 'bb'::regnamespace AND p.proname LIKE 'intake\\_%' ORDER BY 2")).rows;
-      assert.equal(fns.length, 9);
+      // The exact public surface, by name: a new intake function is a deliberate change to this list, never an accident.
+      assert.deepEqual(fns.map((f: { proname: string }) => f.proname).sort(), [...INTAKE_FUNCTIONS].sort());
       for (const f of fns) {
         assert.equal(f.prosecdef, true, `${f.proname} is SECURITY DEFINER`);
         assert.ok((f.proconfig ?? []).some((c: string) => c.startsWith("search_path=")), `${f.proname} pins its search_path`);

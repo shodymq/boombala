@@ -1,21 +1,13 @@
 import "server-only";
 import { getVercelOidcToken } from "@vercel/oidc";
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { ConsentUnavailableError, DocumentsChangedError, ValidationError } from "../core/errors.ts";
+import { ConflictError, ConsentUnavailableError, DocumentsChangedError, IntakeMisconfiguredError, ValidationError } from "../core/errors.ts";
 import { telegramConfigFromEnv, sendTelegram } from "../core/telegram.ts";
 import { drainOutbox } from "../core/outbox.ts";
 import { getPool } from "./db.ts";
 import { notifyLevel } from "./notify-level.ts";
 
-/** Constant-time check of `Authorization: Bearer <secret>` against an environment secret. A missing secret denies everything. */
-export function bearerOk(request: Request, secret: string | undefined): boolean {
-  if (!secret || secret.length < 24) return false;
-  const given = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? "";
-  const a = createHash("sha256").update(given).digest();
-  const b = createHash("sha256").update(secret).digest();
-  return timingSafeEqual(a, b);
-}
+export { bearerOk } from "../core/intake-auth.ts";
 
 /** Personal data is accepted only when the owner has explicitly switched it on. */
 export const intakeEnabled = () => process.env.PII_INTAKE_ENABLED === "1";
@@ -37,6 +29,9 @@ export function errorResponse(error: unknown): NextResponse {
   if (error instanceof ValidationError) return json({ ok: false, error: "validation", fields: error.fields }, 422);
   if (error instanceof DocumentsChangedError) return json({ ok: false, error: "documents_changed" }, 409);
   if (error instanceof ConsentUnavailableError) return json({ ok: false, error: "consent_unavailable" }, 503);
+  if (error instanceof IntakeMisconfiguredError) return json({ ok: false, error: "intake_misconfigured" }, 503);
+  // The messages of these errors are fixed internal codes (never user input), so they are safe to return.
+  if (error instanceof ConflictError) return json({ ok: false, error: error.message }, 409);
   console.error(JSON.stringify({ event: "api.error", name: error instanceof Error ? error.name : "unknown" }));
   return json({ ok: false, error: "server" }, 500);
 }

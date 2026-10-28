@@ -5,6 +5,7 @@ import { almatyToday, isValidDate } from "./dates.ts";
 import { ConflictError, ValidationError } from "./errors.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
 import { assertCan, type Actor } from "./rbac.ts";
+import { canManagerTransition, type LeadStatus, type ManagerTarget } from "./lead-status.ts";
 import { resolvePrice, type PriceSource } from "./catalog.ts";
 import type { RequestMeta } from "./users.ts";
 
@@ -322,14 +323,14 @@ export async function listLeads(pool: Pool, actor: Actor, filter: { status?: str
 }
 
 /** in_progress / cancelled by hand. "confirmed" only comes from confirmLead; cancelling a confirmed lead goes through releaseReservation. */
-export async function setLeadStatus(pool: Pool, actor: Actor, leadId: string, status: "new" | "in_progress" | "cancelled", meta: RequestMeta = {}): Promise<void> {
+export async function setLeadStatus(pool: Pool, actor: Actor, leadId: string, status: ManagerTarget, meta: RequestMeta = {}): Promise<void> {
   assertCan(actor, "requests.manage");
-  if (!["new", "in_progress", "cancelled"].includes(status)) throw new ValidationError({ status: "Недопустимый статус" });
+  if (!(["new", "in_progress", "cancelled"] as const).includes(status)) throw new ValidationError({ status: "Недопустимый статус" });
   await withTx(pool, async (tx) => {
-    const { rows } = await tx.query<{ status: string }>("SELECT status FROM bb.lead_requests WHERE id = $1 FOR UPDATE", [leadId]);
+    const { rows } = await tx.query<{ status: LeadStatus }>("SELECT status FROM bb.lead_requests WHERE id = $1 FOR UPDATE", [leadId]);
     if (!rows[0]) throw new ValidationError({ leadId: "Заявка не найдена" });
-    if (!["new", "in_progress", "cancelled"].includes(rows[0].status)) throw new ConflictError("lead_not_open");
     if (rows[0].status === status) return;
+    if (!canManagerTransition(rows[0].status, status)) throw new ConflictError("lead_not_open");
     await tx.query("UPDATE bb.lead_requests SET status = $2 WHERE id = $1", [leadId, status]);
     await writeAudit(tx, { actorUserId: actor.id, action: "lead.status_changed", entityType: "lead_request", entityId: leadId, before: { status: rows[0].status }, after: { status }, ...meta });
   });
