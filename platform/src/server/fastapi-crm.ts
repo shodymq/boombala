@@ -35,6 +35,7 @@ export type BookingTimelineReservation = {
   createdByAdminId: string | null;
   /** The responsible staff member's name, when the server shares it. */
   createdByName: string | null;
+  releasedAt?: string | null;
 };
 
 export type BookingTimeline = {
@@ -65,6 +66,16 @@ export type BookingCatalogPackage = {
   priceLabel: string;
   guestCapacityLabel: string;
 };
+/** The FastAPI birthday lead read back after an action. Only these fields decide the calendar's money and booking text. */
+export type BirthdayLeadState = {
+  id: string;
+  status: string;
+  bookedAt: string | null;
+  manualPaymentFactStatus: "unpaid" | "prepaid";
+  manualPaymentFactAmountKzt: number;
+  customerName: string;
+};
+
 export type BookingCatalog = { branches: BookingCatalogBranch[]; rooms: BookingCatalogRoom[]; packages: BookingCatalogPackage[] };
 
 export type FastApiLeadList = {
@@ -176,8 +187,8 @@ export class FastApiCrmClient {
     return this.request<FastApiLeadList>(`/admin/leads${suffix}`);
   }
 
-  getBirthdayLead(leadId: string): Promise<unknown> {
-    return this.request(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
+  getBirthdayLead(leadId: string): Promise<BirthdayLeadState> {
+    return this.request<BirthdayLeadState>(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
   }
 
   updateLeadStatus(leadId: string, body: Record<string, unknown>): Promise<unknown> {

@@ -18,8 +18,8 @@ import {
 } from "../../../core/booking-calendar.ts";
 import { COLUMN_SPAN, COLUMN_START, LANE_START } from "../../../core/booking-grid-classes.ts";
 import type { ValidSession } from "../../../core/session.ts";
-import { crmActorForSession } from "../../../server/crm-actor.ts";
-import { FastApiCrmClient, FastApiCrmError, type BookingCatalog, type BookingCatalogBranch, type BookingTimeline, type BookingTimelineReservation } from "../../../server/fastapi-crm.ts";
+import { withFastApiClient } from "../../../server/crm-actor.ts";
+import { FastApiCrmError, type BookingCatalog, type BookingCatalogBranch, type BookingTimeline, type BookingTimelineReservation, type BirthdayLeadState } from "../../../server/fastapi-crm.ts";
 import { blockAction, confirmPaidRequestAction, createBookingAction, rescheduleAction, releaseAction } from "./crm-actions";
 import { FlashClean } from "./crm-flash-clean";
 
@@ -59,7 +59,10 @@ const input = "h-11 w-full rounded-xl border-2 border-grape-200 bg-white px-3 te
 const btn = "h-11 rounded-full bg-grape-700 px-5 text-sm font-extrabold text-white hover:bg-grape-600 disabled:opacity-50";
 const btnGhost = "flex h-11 items-center rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50";
 
-type Search = { branch?: string; date?: string; start?: string; notice?: string; error?: string; request?: string; paid?: string };
+type Search = { branch?: string; date?: string; start?: string; ok?: string; reservation?: string; error?: string; request?: string };
+
+/** The state a successful action must produce in FastAPI. Anything else is shown as not confirmed. */
+const EXPECTED_STATUS: Record<string, "confirmed" | "blocked" | "released"> = { booked: "confirmed", rescheduled: "confirmed", blocked: "blocked", released: "released" };
 
 function shiftDate(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
@@ -89,14 +92,23 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
   let catalog: BookingCatalog | null = null;
   let timeline: BookingTimeline | null = null;
   let branch: BookingCatalogBranch | undefined;
+  let requestState: BirthdayLeadState | null = null;
   try {
-    const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
-    // One catalog call for every role. For an operator the server returns only the assigned branch, so a foreign branch in the
-    // URL falls back to the first visible one and is never requested from FastAPI.
-    catalog = await client.getBookingCatalog();
-    const branches = [...catalog.branches].sort((a, b) => a.name.localeCompare(b.name, "ru"));
-    branch = branches.find((b) => b.id === search.branch) ?? branches[0];
-    if (branch) timeline = await client.getBookingTimeline(branch.id, date);
+    const loaded = await withFastApiClient(session, async (client) => {
+      const cat = await client.getBookingCatalog();
+      const branches = [...cat.branches].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+      // For an operator the server returns only the assigned branch, so a foreign branch in the URL falls back to the first
+      // visible one and is never requested from FastAPI.
+      const picked = branches.find((b) => b.id === search.branch) ?? branches[0];
+      const tl = picked ? await client.getBookingTimeline(picked.id, date) : null;
+      // A failed or refused read is "unknown", never "unpaid" and never "booked".
+      const lead = search.request ? await client.getBirthdayLead(search.request).then((x) => x as BirthdayLeadState).catch(() => null) : null;
+      return { cat, picked, tl, lead };
+    });
+    catalog = loaded.cat;
+    branch = loaded.picked;
+    timeline = loaded.tl;
+    requestState = loaded.lead;
   } catch (error) {
     // Fail closed: no grid, no guessed availability. Only the code is logged.
     console.error("[crm-calendar] load failed:", error instanceof FastApiCrmError ? `${error.status} ${error.code}` : "unexpected");
@@ -122,28 +134,41 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
   const hourMarks: number[] = [];
   for (let m = GRID_OPEN_MIN; m < 24 * 60; m += 60) hourMarks.push(m);
   const weekday = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
-  const notice = search.notice && NOTICES[search.notice];
   const errorText = search.error && ERRORS[search.error];
   const newStart = search.start && starts.includes(search.start) ? search.start : starts[0] ?? "";
   const branchQuery = { branch: branch.id, date };
-  // A paid request that was not confirmed blocks new bookings: the manager confirms that request, not a second one.
-  const paidPending = search.request && search.paid === "1" ? search.request : null;
+  // Success is shown only when FastAPI's timeline holds the reservation in the expected state. The URL is a hint.
+  const expected = search.ok ? EXPECTED_STATUS[search.ok] : undefined;
+  const confirmedRecord = search.reservation && expected ? timeline.reservations.find((r) => r.id === search.reservation) : undefined;
+  const verifiedOk = confirmedRecord && expected && confirmedRecord.status === expected ? search.ok : null;
+  const unverifiedOk = Boolean(search.ok) && !verifiedOk;
+  // A paid request that is not booked, as FastAPI reports it, blocks new bookings: the manager confirms that request.
+  const pendingPaid = requestState && requestState.bookedAt == null && requestState.manualPaymentFactStatus === "prepaid" && requestState.manualPaymentFactAmountKzt > 0 ? requestState : null;
+  const paidPending = pendingPaid ? pendingPaid.id : null;
 
   return (
     <div className="grid min-w-0 gap-5">
       <h1 className="text-3xl font-black tracking-tight text-grape-800">Календарь</h1>
-      {notice ? <FlashClean /> : null}
-      {notice ? <p role="status" className="rounded-2xl bg-grape-100 p-3 text-sm font-bold text-grape-900">{notice}</p> : null}
+      {search.ok || search.error ? <FlashClean /> : null}
+      {verifiedOk ? <p role="status" className="rounded-2xl bg-grape-100 p-3 text-sm font-bold text-grape-900">{NOTICES[verifiedOk]} Проверено по данным системы.</p> : null}
+      {unverifiedOk ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">Результат действия не подтверждён системой. Обновите страницу и проверьте список ниже: без этого ничего не считается выполненным.</p> : null}
       {errorText ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{errorText}</p> : null}
       {search.request ? (
-        <div role="alert" className="grid gap-1 rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">
-          <p>Бронь НЕ подтверждена. Заявка № {search.request}.</p>
-          <p>
-            {search.paid === "1"
-              ? "Предоплата записана вручную, бронь не создана. Выберите другое время или комнату в блоке «Оплаченная заявка» ниже и подтвердите её. Предоплата повторно не записывается."
-              : "Предоплата не записана. Откройте заявку в разделе «Заявки» и разберите её вручную, не создавайте новую заявку по этому же клиенту."}
-          </p>
-        </div>
+        requestState ? (
+          <div role="alert" className="grid gap-1 rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">
+            <p>Заявка № {search.request}. Бронь: {requestState.bookedAt ? "подтверждена" : "НЕ подтверждена"}.</p>
+            <p>
+              Предоплата: {requestState.manualPaymentFactStatus === "prepaid" && requestState.manualPaymentFactAmountKzt > 0
+                ? `записана вручную, ${kzt.format(requestState.manualPaymentFactAmountKzt)} ₸ (не онлайн-оплата)`
+                : "не записана"}.
+            </p>
+            <p>{pendingPaid ? "Ниже можно подтвердить эту заявку на другое время без повторной предоплаты." : "Разберите заявку в разделе «Заявки». Не создавайте новую заявку по этому же клиенту."}</p>
+          </div>
+        ) : (
+          <div role="alert" className="grid gap-1 rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">
+            <p>Не удалось прочитать заявку № {search.request} из системы. Состояние оплаты неизвестно: проверьте раздел «Заявки». Новую заявку и предоплату по этому клиенту не создавайте.</p>
+          </div>
+        )
       ) : null}
 
       <nav aria-label="Филиал и дата" className="flex flex-wrap items-end gap-3">
@@ -245,7 +270,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
         {paidPending ? (
           <section aria-labelledby="paid-request" className="grid gap-3 rounded-3xl border-2 border-sun-600 bg-white p-4">
             <h2 id="paid-request" className="text-lg font-black text-grape-800">Оплаченная заявка № {paidPending}</h2>
-            <p className="text-sm text-grape-900">Предоплата записана вручную. Бронь НЕ подтверждена. Подтвердите её на выбранные комнату и время или откройте заявку в разделе «Заявки». Новая предоплата здесь не записывается.</p>
+            <p className="text-sm text-grape-900">Предоплата {kzt.format(pendingPaid?.manualPaymentFactAmountKzt ?? 0)} ₸ записана вручную в системе. Бронь НЕ подтверждена. Подтвердите её на выбранные комнату и время: новая предоплата не записывается.</p>
             {hours && packages.length > 0 && rooms.length > 0 ? (
               <form action={confirmPaidRequestAction} className="grid gap-2">
                 <input type="hidden" name="branchId" value={branch.id} />
@@ -262,7 +287,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
                   <select name="packageId" required className={input}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} (ориентир от {kzt.format(p.priceFrom)} ₸)</option>)}</select>
                 </label>
                 <input name="agreedPriceKzt" type="number" required min={1} max={10000000} placeholder="Согласованная цена, ₸" aria-label="Согласованная цена" className={input} />
-                <button type="submit" className={btn}>Подтвердить оплаченную заявку</button>
+                <button type="submit" className={btn}>Подтвердить без повторной предоплаты</button>
               </form>
             ) : <p className="text-sm font-bold text-muted">Подтверждение недоступно: нет часов работы, комнат или пакетов.</p>}
           </section>
@@ -320,9 +345,9 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
       </div>
 
       <section aria-labelledby="day-list" className="grid gap-3">
-        <h2 id="day-list" className="text-lg font-black text-grape-800">Бронирования и блоки на день ({active.length})</h2>
-        {active.length === 0 ? <p className="text-sm font-bold text-muted">На эту дату ничего не забронировано.</p> : null}
-        {active.map((r) => (
+        <h2 id="day-list" className="text-lg font-black text-grape-800">Бронирования и блоки на день ({active.length}) · история: {timeline.reservations.length - active.length}</h2>
+        {timeline.reservations.length === 0 ? <p className="text-sm font-bold text-muted">На эту дату ничего не забронировано.</p> : null}
+        {[...timeline.reservations].sort((x, y) => x.startsAt.localeCompare(y.startsAt)).map((r) => (
           <ReservationRow key={r.id} r={r} rooms={rooms} starts={starts} branchId={branch.id} date={date} conflict={flagged.has(r.id)} />
         ))}
       </section>
@@ -346,6 +371,7 @@ function ReservationRow({
   conflict: boolean;
 }) {
   const roomName = rooms.find((x) => x.id === r.roomId)?.name ?? "—";
+  const history = r.status === "released";
   const payment = r.paymentStatus === "prepaid" && r.paidKzt > 0 ? `предоплата записана вручную: ${kzt.format(r.paidKzt)} ₸ (не онлайн-оплата)` : "предоплата не записана";
   return (
     <article className={`grid gap-2 rounded-2xl border-2 p-4 ${conflict ? "border-red-700 bg-red-50" : "border-line bg-white"}`}>
@@ -358,7 +384,8 @@ function ReservationRow({
         {r.kind === "block" ? r.note ?? "Без причины" : `${r.customerName ?? "Клиент скрыт"}${r.customerPhone ? ` · ${r.customerPhone}` : ""} · ${r.packageName ?? "пакет не указан"}${r.priceKzt != null ? ` · ${kzt.format(r.priceKzt)} ₸` : ""} · ${payment}`}
       </p>
       {r.kind === "booking" && r.createdByName ? <p className="text-xs text-muted">Ответственный: {r.createdByName}</p> : null}
-      <div className="flex flex-wrap gap-2">
+      {history ? <p className="text-sm font-bold text-muted">Отменено {r.releasedAt ? clock(r.releasedAt) : ""}. Интервал свободен; запись сохранена для истории.</p> : null}
+      {history ? null : <div className="flex flex-wrap gap-2">
         <details className="min-w-0">
           <summary className="flex min-h-11 cursor-pointer items-center text-sm font-extrabold text-grape-700">Перенести</summary>
           <form action={rescheduleAction} className="mt-2 grid gap-2">
@@ -382,7 +409,7 @@ function ReservationRow({
             <button type="submit" className={btnGhost}>{r.kind === "block" ? "Снять блокировку" : "Отменить бронь"}</button>
           </form>
         </details>
-      </div>
+      </div>}
     </article>
   );
 }

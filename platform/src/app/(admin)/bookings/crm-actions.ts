@@ -1,17 +1,18 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { almatyWindow, isCalendarDate, windowOverlapsRoom } from "../../../core/booking-calendar.ts";
+import { withFastApiClient } from "../../../server/crm-actor.ts";
 import { FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
-import { crmActorForSession } from "../../../server/crm-actor.ts";
 import { requirePermission } from "../../../server/dal.ts";
 
 /**
  * The only writer for the calendar when UNIFIED_FASTAPI_CRM_ENABLED=1. Every operation goes to the FastAPI kernel with the
- * verified staff actor. There is no Platform SQL fallback and no dual write: if FastAPI refuses or is unreachable, nothing
- * is shown as done.
+ * verified staff actor. There is no Platform SQL fallback and no dual write.
+ *
+ * The redirect carries only identifiers. It never says that something succeeded: the calendar page reads the state back
+ * from FastAPI and shows success only for what it finds there (`ok` and `reservation` are hints, not proof).
  */
 
 const KNOWN_ERRORS = new Set([
@@ -36,7 +37,7 @@ const KNOWN_ERRORS = new Set([
   "branch_access_denied",
   "branch_not_found",
   "availability_unavailable",
-  "time_conflict",
+  "staff_not_linked",
 ]);
 
 const key = z.string().min(8).max(100);
@@ -92,13 +93,20 @@ function calendarUrl(branchId: string, date: string, query: string): string {
 /** Turns a FastAPI failure into a fixed code; the page owns the Russian text. */
 function failureCode(error: unknown): string {
   if (error instanceof FastApiCrmError) {
-    if (error.status === 401 || error.status === 403) return "forbidden";
+    if (error.status === 401 || error.status === 403) return error.code === "staff_not_linked" ? "staff_not_linked" : "forbidden";
     if (error.status === 409 || error.status === 404 || error.status === 422) return KNOWN_ERRORS.has(error.code) ? error.code : "failed";
     return "unavailable";
   }
   if (error instanceof FastApiCrmConfigurationError) return "unavailable";
   if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError" || error.name === "TypeError")) return "unavailable";
   return "failed";
+}
+
+function reservationIdOf(value: unknown): string | null {
+  if (value && typeof value === "object" && "id" in value && typeof (value as { id: unknown }).id === "string") {
+    return (value as { id: string }).id;
+  }
+  return null;
 }
 
 /**
@@ -116,6 +124,11 @@ async function precheckRoom(client: FastApiCrmClient, branchId: string, date: st
 /** Only the branch and date are needed to return the manager to the same view. */
 async function branchAndDate(formData: FormData): Promise<{ branchId: string; date: string }> {
   return { branchId: field(formData, "branchId"), date: field(formData, "date") };
+}
+
+function okOutcome(kind: "booked" | "blocked" | "released" | "rescheduled", reservationId: string | null): string {
+  if (!reservationId) return "error=failed";
+  return `ok=${kind}&reservation=${encodeURIComponent(reservationId)}`;
 }
 
 export async function createBookingAction(formData: FormData): Promise<void> {
@@ -142,48 +155,46 @@ export async function createBookingAction(formData: FormData): Promise<void> {
 
   // Booking needs a request, then a recorded prepayment (the kernel refuses a confirmation without one), then the confirmation.
   // Each step has its own derived idempotency key, so a double submit replays the same records instead of creating new ones.
+  const trail: { requestId: string | null } = { requestId: null };
   let outcome: string;
-  // Once the request exists, a later failure must still tell the manager which request holds the money.
-  let requestId: string | null = null;
-  let paid = false;
   try {
-    const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
-    // Refuse a known conflict before any request or prepayment is written, so no paid request is left behind.
-    await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
-    const request = await client.createStaffRequest({
-      branchId: input.branchId,
-      packageId: input.packageId,
-      customerName: input.customerName,
-      phone: input.phone,
-      guestCount: input.guestCount,
-      requestedDate: input.date,
-      notes: input.note,
-      idempotencyKey: `${input.idempotencyKey}:request`,
+    const confirmed = await withFastApiClient(session, async (client) => {
+      // Refuse a known conflict before any request or prepayment is written, so no paid request is left behind.
+      await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
+      const request = await client.createStaffRequest({
+        branchId: input.branchId,
+        packageId: input.packageId,
+        customerName: input.customerName,
+        phone: input.phone,
+        guestCount: input.guestCount,
+        requestedDate: input.date,
+        notes: input.note,
+        idempotencyKey: `${input.idempotencyKey}:request`,
+      });
+      trail.requestId = request.id;
+      await client.recordManualPayment(request.id, {
+        amountKzt: input.prepaymentKzt,
+        method: input.prepaymentMethod,
+        idempotencyKey: `${input.idempotencyKey}:payment`,
+        note: input.note,
+      });
+      return client.confirmBooking({
+        requestId: request.id,
+        bookingDate: input.date,
+        roomId: input.roomId,
+        startTime: input.startTime,
+        packageId: input.packageId,
+        agreedPriceKzt: input.agreedPriceKzt,
+        idempotencyKey: `${input.idempotencyKey}:confirm`,
+        note: input.note,
+      });
     });
-    requestId = request.id;
-    await client.recordManualPayment(request.id, {
-      amountKzt: input.prepaymentKzt,
-      method: input.prepaymentMethod,
-      idempotencyKey: `${input.idempotencyKey}:payment`,
-      note: input.note,
-    });
-    paid = true;
-    await client.confirmBooking({
-      requestId: request.id,
-      bookingDate: input.date,
-      roomId: input.roomId,
-      startTime: input.startTime,
-      packageId: input.packageId,
-      agreedPriceKzt: input.agreedPriceKzt,
-      idempotencyKey: `${input.idempotencyKey}:confirm`,
-      note: input.note,
-    });
-    outcome = "notice=booked";
+    outcome = okOutcome("booked", reservationIdOf(confirmed));
   } catch (error) {
     outcome = `error=${failureCode(error)}`;
-    // A paid request that was not confirmed is kept on screen with its id, so the manager finds it and does not pay twice.
-    if (requestId) outcome += `&request=${encodeURIComponent(requestId)}&paid=${paid ? "1" : "0"}`;
   }
+  // The request id lets the page read the real payment and booking state from FastAPI after a failure.
+  if (trail.requestId) outcome += `&request=${encodeURIComponent(trail.requestId)}`;
   redirect(calendarUrl(input.branchId, input.date, outcome));
 }
 
@@ -209,22 +220,23 @@ export async function confirmPaidRequestAction(formData: FormData): Promise<void
   if (!unifiedFastapiCrmEnabled()) redirect(calendarUrl(input.branchId, input.date, "error=unavailable"));
   let outcome: string;
   try {
-    const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
-    await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
-    await client.confirmBooking({
-      requestId: input.requestId,
-      bookingDate: input.date,
-      roomId: input.roomId,
-      startTime: input.startTime,
-      packageId: input.packageId,
-      agreedPriceKzt: input.agreedPriceKzt,
-      idempotencyKey: `${input.idempotencyKey}:confirm`,
+    const confirmed = await withFastApiClient(session, async (client) => {
+      await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
+      return client.confirmBooking({
+        requestId: input.requestId,
+        bookingDate: input.date,
+        roomId: input.roomId,
+        startTime: input.startTime,
+        packageId: input.packageId,
+        agreedPriceKzt: input.agreedPriceKzt,
+        idempotencyKey: `${input.idempotencyKey}:confirm`,
+      });
     });
-    outcome = "notice=booked";
+    outcome = okOutcome("booked", reservationIdOf(confirmed));
   } catch (error) {
-    outcome = `error=${failureCode(error)}&request=${encodeURIComponent(input.requestId)}&paid=1`;
+    outcome = `error=${failureCode(error)}`;
   }
-  redirect(calendarUrl(input.branchId, input.date, outcome));
+  redirect(calendarUrl(input.branchId, input.date, `${outcome}&request=${encodeURIComponent(input.requestId)}`));
 }
 
 export async function blockAction(formData: FormData): Promise<void> {
@@ -242,9 +254,10 @@ export async function blockAction(formData: FormData): Promise<void> {
   const input = parsed.data;
   let outcome: string;
   try {
-    const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
-    await client.blockSlot({ branchId: input.branchId, bookingDate: input.date, roomId: input.roomId, startTime: input.startTime, reason: input.reason, idempotencyKey: input.idempotencyKey });
-    outcome = "notice=blocked";
+    const blocked = await withFastApiClient(session, (client) =>
+      client.blockSlot({ branchId: input.branchId, bookingDate: input.date, roomId: input.roomId, startTime: input.startTime, reason: input.reason, idempotencyKey: input.idempotencyKey }),
+    );
+    outcome = okOutcome("blocked", reservationIdOf(blocked));
   } catch (error) {
     outcome = `error=${failureCode(error)}`;
   }
@@ -265,14 +278,10 @@ export async function rescheduleAction(formData: FormData): Promise<void> {
   const input = parsed.data;
   let outcome: string;
   try {
-    const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
-    await client.rescheduleReservation(input.reservationId, {
-      idempotencyKey: input.idempotencyKey,
-      startTime: input.startTime,
-      bookingDate: input.date,
-      roomId: input.roomId,
-    });
-    outcome = "notice=rescheduled";
+    const moved = await withFastApiClient(session, (client) =>
+      client.rescheduleReservation(input.reservationId, { idempotencyKey: input.idempotencyKey, startTime: input.startTime, bookingDate: input.date, roomId: input.roomId }),
+    );
+    outcome = okOutcome("rescheduled", reservationIdOf(moved));
   } catch (error) {
     outcome = `error=${failureCode(error)}`;
   }
@@ -291,9 +300,10 @@ export async function releaseAction(formData: FormData): Promise<void> {
   const input = parsed.data;
   let outcome: string;
   try {
-    const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
-    await client.releaseReservation(input.reservationId, { idempotencyKey: input.idempotencyKey, reason: input.reason });
-    outcome = "notice=released";
+    const released = await withFastApiClient(session, (client) =>
+      client.releaseReservation(input.reservationId, { idempotencyKey: input.idempotencyKey, reason: input.reason }),
+    );
+    outcome = okOutcome("released", reservationIdOf(released));
   } catch (error) {
     outcome = `error=${failureCode(error)}`;
   }
