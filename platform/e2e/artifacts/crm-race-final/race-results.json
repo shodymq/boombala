@@ -1,0 +1,51 @@
+{
+  "at": "2026-10-28T16:11:52.924Z",
+  "date": "2026-12-05",
+  "results": [
+    {
+      "name": "the rival session took Room A 16:00 after A's pre-check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A's confirmation comes back as the kernel's time_conflict (not success)",
+      "ok": true,
+      "detail": "{\"ok\":false,\"code\":\"time_conflict\",\"requestId\":\"9cac4c19ed53442a8e6edc9ee1ca3625\"}"
+    },
+    {
+      "name": "paid request stays unbooked after the 409",
+      "ok": true,
+      "detail": "bookedAt=null"
+    },
+    {
+      "name": "the 20 000 ₸ payment fact is kept",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "DB: exactly one payment fact for the paid request",
+      "ok": true,
+      "detail": "{\"n\":1,\"total\":20000}"
+    },
+    {
+      "name": "the paid request is confirmed elsewhere without repaying",
+      "ok": true,
+      "detail": "{\"ok\":true,\"reservationId\":\"e98a4e83560c43f3a4dab2141a6956b5\",\"requestId\":\"9cac4c19ed53442a8e6edc9ee1ca3625\"}"
+    },
+    {
+      "name": "after confirmation: still one payment fact and the request is booked",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replaying the same confirm key does not create another reservation",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "DB: one active reservation for the paid request",
+      "ok": true,
+      "detail": "n=1"
+    }
+  ]
+}
