@@ -7,10 +7,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 load_env() {
   local file="${STAGING_ENV:-$HERE/staging.env}"
   [ -f "$file" ] || { echo "missing $file (copy staging.env.example)" >&2; exit 2; }
+  # Values passed by the caller (rollback.sh pins a SHA pair) win over the file: the file is the default, not the override.
+  local keep_backend="${BACKEND_SHA:-}" keep_platform="${PLATFORM_SHA:-}"
   set -a
   # shellcheck disable=SC1090
   . "$file"
   set +a
+  [ -z "$keep_backend" ] || BACKEND_SHA="$keep_backend"
+  [ -z "$keep_platform" ] || PLATFORM_SHA="$keep_platform"
+  export BACKEND_SHA PLATFORM_SHA
   STAGING_ROOT="$(eval echo "$STAGING_ROOT")"
   BACKEND_DIR="$(eval echo "$BACKEND_DIR")"
   PLATFORM_DIR="$(eval echo "$PLATFORM_DIR")"
