@@ -90,7 +90,8 @@ export function gridColumn(startIso: string, endIso: string): { start: number; s
   const startMin = almatyMinutes(startIso);
   const endRaw = almatyMinutes(endIso);
   if (startMin === null || endRaw === null) return null;
-  const endMin = endRaw <= startMin ? GRID_CLOSE_MIN : endRaw;
+  // An end at 00:00, or before the start, runs to the end of the day. An end equal to the start is empty (null below).
+  const endMin = endRaw === 0 || endRaw < startMin ? GRID_CLOSE_MIN : endRaw;
   const from = Math.max(startMin, GRID_OPEN_MIN);
   const to = Math.min(endMin, GRID_CLOSE_MIN);
   if (to <= from) return null;

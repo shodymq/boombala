@@ -33,6 +33,10 @@ const KNOWN_ERRORS = new Set([
   "invalid",
   "unavailable",
   "failed",
+  "branch_access_denied",
+  "branch_not_found",
+  "availability_unavailable",
+  "time_conflict",
 ]);
 
 const key = z.string().min(8).max(100);
@@ -55,6 +59,17 @@ const bookingSchema = z.object({
   prepaymentKzt: money,
   prepaymentMethod: z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]),
   note: optionalText(300),
+  idempotencyKey: key,
+});
+
+const confirmPaidSchema = z.object({
+  requestId: id,
+  branchId: id,
+  date,
+  roomId: id,
+  startTime,
+  packageId: id,
+  agreedPriceKzt: money,
   idempotencyKey: key,
 });
 
@@ -84,6 +99,18 @@ function failureCode(error: unknown): string {
   if (error instanceof FastApiCrmConfigurationError) return "unavailable";
   if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError" || error.name === "TypeError")) return "unavailable";
   return "failed";
+}
+
+/**
+ * A UX hint only: refuses a window that overlaps a known occupancy (party plus buffer) before anything is written. PostgreSQL
+ * stays the authority; a race still returns time_conflict from the kernel.
+ */
+async function precheckRoom(client: FastApiCrmClient, branchId: string, date: string, roomId: string, startTime: string): Promise<void> {
+  const timeline = await client.getBookingTimeline(branchId, date);
+  const { startIso, endIso } = almatyWindow(date, startTime);
+  const newOccupiedEnd = new Date(Date.parse(endIso) + timeline.bufferMinutes * 60_000).toISOString();
+  const occupied = timeline.reservations.map((r) => ({ roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt, status: r.status }));
+  if (windowOverlapsRoom(occupied, roomId, startIso, newOccupiedEnd)) throw new FastApiCrmError(409, "time_conflict", "precheck");
 }
 
 /** Only the branch and date are needed to return the manager to the same view. */
@@ -122,11 +149,7 @@ export async function createBookingAction(formData: FormData): Promise<void> {
   try {
     const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
     // Refuse a known conflict before any request or prepayment is written, so no paid request is left behind.
-    const { startIso, endIso } = almatyWindow(input.date, input.startTime);
-    const timeline = await client.getBookingTimeline(input.branchId, input.date);
-    if (windowOverlapsRoom(timeline.reservations, input.roomId, startIso, endIso)) {
-      throw new FastApiCrmError(409, "time_conflict", "precheck");
-    }
+    await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
     const request = await client.createStaffRequest({
       branchId: input.branchId,
       packageId: input.packageId,
@@ -160,6 +183,46 @@ export async function createBookingAction(formData: FormData): Promise<void> {
     outcome = `error=${failureCode(error)}`;
     // A paid request that was not confirmed is kept on screen with its id, so the manager finds it and does not pay twice.
     if (requestId) outcome += `&request=${encodeURIComponent(requestId)}&paid=${paid ? "1" : "0"}`;
+  }
+  redirect(calendarUrl(input.branchId, input.date, outcome));
+}
+
+/**
+ * Confirms a request whose manual prepayment is already recorded. It records no new request and no new payment fact, so a
+ * retry on another time never adds money. The kernel still decides the room and time under PostgreSQL's constraint.
+ */
+export async function confirmPaidRequestAction(formData: FormData): Promise<void> {
+  const session = await requirePermission("bookings.manage");
+  const { branchId, date: rawDate } = await branchAndDate(formData);
+  const parsed = confirmPaidSchema.safeParse({
+    requestId: field(formData, "requestId"),
+    branchId,
+    date: rawDate,
+    roomId: field(formData, "roomId"),
+    startTime: field(formData, "startTime"),
+    packageId: field(formData, "packageId"),
+    agreedPriceKzt: field(formData, "agreedPriceKzt"),
+    idempotencyKey: field(formData, "idempotencyKey"),
+  });
+  if (!parsed.success) redirect(calendarUrl(branchId, rawDate, "error=invalid"));
+  const input = parsed.data;
+  if (!unifiedFastapiCrmEnabled()) redirect(calendarUrl(input.branchId, input.date, "error=unavailable"));
+  let outcome: string;
+  try {
+    const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
+    await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
+    await client.confirmBooking({
+      requestId: input.requestId,
+      bookingDate: input.date,
+      roomId: input.roomId,
+      startTime: input.startTime,
+      packageId: input.packageId,
+      agreedPriceKzt: input.agreedPriceKzt,
+      idempotencyKey: `${input.idempotencyKey}:confirm`,
+    });
+    outcome = "notice=booked";
+  } catch (error) {
+    outcome = `error=${failureCode(error)}&request=${encodeURIComponent(input.requestId)}&paid=1`;
   }
   redirect(calendarUrl(input.branchId, input.date, outcome));
 }

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Fragment } from "react";
 import Link from "next/link";
 import {
   almatyDate,
@@ -18,8 +19,9 @@ import {
 import { COLUMN_SPAN, COLUMN_START, LANE_START } from "../../../core/booking-grid-classes.ts";
 import type { ValidSession } from "../../../core/session.ts";
 import { crmActorForSession } from "../../../server/crm-actor.ts";
-import { FastApiCrmClient, FastApiCrmError, type BookingTimeline, type BookingTimelineReservation, type FastApiBirthdayPackage, type FastApiBranch } from "../../../server/fastapi-crm.ts";
-import { blockAction, createBookingAction, rescheduleAction, releaseAction } from "./crm-actions";
+import { FastApiCrmClient, FastApiCrmError, type BookingCatalog, type BookingCatalogBranch, type BookingTimeline, type BookingTimelineReservation } from "../../../server/fastapi-crm.ts";
+import { blockAction, confirmPaidRequestAction, createBookingAction, rescheduleAction, releaseAction } from "./crm-actions";
+import { FlashClean } from "./crm-flash-clean";
 
 const NOTICES: Record<string, string> = {
   booked: "Бронь создана и подтверждена. Заявка и предоплата записаны.",
@@ -29,7 +31,7 @@ const NOTICES: Record<string, string> = {
 };
 
 const ERRORS: Record<string, string> = {
-  time_conflict: "Комната занята в это время: пересекается бронь или блокировка. Выберите другое время или комнату. Если вы создавали бронь, проверьте раздел «Заявки»: заявка и предоплата могли сохраниться.",
+  time_conflict: "Комната занята в это время: пересекается бронь или блокировка. Выберите другое время или комнату. Заявка и предоплата при этом сохраняются: выберите другое время в блоке «Оплаченная заявка».",
   slot_taken: "Комната занята в это время. Данные обновлены.",
   outside_working_hours: "Выбранное время выходит за часы работы филиала.",
   branch_hours_unknown: "Часы работы филиала не распознаны, поэтому бронирование отключено.",
@@ -44,6 +46,7 @@ const ERRORS: Record<string, string> = {
   idempotency_conflict: "Это действие уже выполнялось с другими данными. Обновите страницу и проверьте календарь.",
   idempotency_in_progress: "Это действие уже выполняется. Обновите страницу, чтобы увидеть результат.",
   forbidden: "Недостаточно прав для этого действия.",
+  branch_access_denied: "Этот филиал недоступен для вашей учётной записи.",
   invalid: "Проверьте введённые данные.",
   unavailable: "Система бронирования временно недоступна. Ничего не подтверждено, попробуйте позже.",
   failed: "Не удалось выполнить действие. Обновите страницу и проверьте календарь.",
@@ -83,28 +86,20 @@ function clock(iso: string): string {
 export async function CrmCalendar({ session, search }: { session: ValidSession; search: Search }) {
   const today = almatyDate();
   const date = isCalendarDate(search.date) ? search.date : today;
-  let branches: FastApiBranch[];
-  let timeline: BookingTimeline;
-  let packages: FastApiBirthdayPackage[];
-  let loadFailed = false;
+  let catalog: BookingCatalog | null = null;
+  let timeline: BookingTimeline | null = null;
+  let branch: BookingCatalogBranch | undefined;
   try {
     const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
-    branches = (await client.listBranches()).filter((b) => b.is_active).sort((a, b) => a.display_order - b.display_order);
-    const selected = branches.find((b) => b.id === search.branch) ?? branches[0];
-    [timeline, packages] = await Promise.all([
-      selected ? client.getBookingTimeline(selected.id, date) : Promise.resolve(null as unknown as BookingTimeline),
-      client.listBirthdayPackages(),
-    ]);
+    // One catalog call for every role. For an operator the server returns only the assigned branch, so a foreign branch in the
+    // URL falls back to the first visible one and is never requested from FastAPI.
+    catalog = await client.getBookingCatalog();
+    const branches = [...catalog.branches].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    branch = branches.find((b) => b.id === search.branch) ?? branches[0];
+    if (branch) timeline = await client.getBookingTimeline(branch.id, date);
   } catch (error) {
-    // Fail closed: no grid, no guessed availability. The page says the data is unavailable. Only the code is logged.
+    // Fail closed: no grid, no guessed availability. Only the code is logged.
     console.error("[crm-calendar] load failed:", error instanceof FastApiCrmError ? `${error.status} ${error.code}` : "unexpected");
-    loadFailed = true;
-    branches = [];
-    timeline = null as unknown as BookingTimeline;
-    packages = [];
-  }
-
-  if (loadFailed) {
     return (
       <div className="grid gap-5">
         <h1 className="text-3xl font-black tracking-tight text-grape-800">Календарь</h1>
@@ -112,34 +107,43 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
       </div>
     );
   }
-  if (branches.length === 0) {
+  if (!catalog || !branch || !timeline) {
     return <p role="alert" className="rounded-2xl bg-sun-100 p-4 text-sm font-bold text-grape-900">Для вашей учётной записи нет доступных филиалов.</p>;
   }
 
-  const branch = branches.find((b) => b.id === search.branch) ?? branches[0];
-  const hours = parseWorkingHours(branch.working_hours);
+  const branches = [...catalog.branches].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  const rooms = catalog.rooms.filter((r) => r.branchId === branch.id);
+  const packages = catalog.packages.filter((p) => p.branchId === branch.id);
+  const hours = parseWorkingHours(branch.workingHours);
   const starts = hours ? startOptions(hours) : [];
-  const branchPackages = packages.filter((p) => p.branch_id === branch.id && p.is_active);
   const active = timeline.reservations.filter((r) => r.status !== "released");
-  const flagged = overlappingIds(active.map((r) => ({ id: r.id, roomId: r.roomId, startsAt: r.startsAt, endsAt: r.endsAt })));
+  // The kernel decides on occupiedEndsAt (party plus buffer). This flag is a UX hint, never the authority.
+  const flagged = overlappingIds(active.map((r) => ({ id: r.id, roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt })));
   const hourMarks: number[] = [];
   for (let m = GRID_OPEN_MIN; m < 24 * 60; m += 60) hourMarks.push(m);
   const weekday = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
   const notice = search.notice && NOTICES[search.notice];
   const errorText = search.error && ERRORS[search.error];
   const newStart = search.start && starts.includes(search.start) ? search.start : starts[0] ?? "";
-  const idempotencyKey = () => randomUUID();
   const branchQuery = { branch: branch.id, date };
+  // A paid request that was not confirmed blocks new bookings: the manager confirms that request, not a second one.
+  const paidPending = search.request && search.paid === "1" ? search.request : null;
 
   return (
     <div className="grid min-w-0 gap-5">
       <h1 className="text-3xl font-black tracking-tight text-grape-800">Календарь</h1>
+      {notice ? <FlashClean /> : null}
       {notice ? <p role="status" className="rounded-2xl bg-grape-100 p-3 text-sm font-bold text-grape-900">{notice}</p> : null}
       {errorText ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{errorText}</p> : null}
       {search.request ? (
-        <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">
-          Бронь НЕ подтверждена. Заявка {search.request} {search.paid === "1" ? "создана, предоплата записана" : "создана"}. Не создавайте новую заявку: откройте её в разделе «Заявки» и разберите вручную.
-        </p>
+        <div role="alert" className="grid gap-1 rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">
+          <p>Бронь НЕ подтверждена. Заявка № {search.request}.</p>
+          <p>
+            {search.paid === "1"
+              ? "Предоплата записана вручную, бронь не создана. Выберите другое время или комнату в блоке «Оплаченная заявка» ниже и подтвердите её. Предоплата повторно не записывается."
+              : "Предоплата не записана. Откройте заявку в разделе «Заявки» и разберите её вручную, не создавайте новую заявку по этому же клиенту."}
+          </p>
+        </div>
       ) : null}
 
       <nav aria-label="Филиал и дата" className="flex flex-wrap items-end gap-3">
@@ -162,7 +166,9 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
           <Link href={{ pathname: "/bookings", query: { ...branchQuery, date: today } }} className="text-sm font-extrabold text-grape-700 underline">Сегодня</Link>
         </div>
       </nav>
-      <p className="text-base font-bold text-grape-900 first-letter:uppercase">{weekday} · {branch.name} · часы {hours ? branch.working_hours : "не распознаны"}</p>
+      <p className="text-base font-bold text-grape-900 first-letter:uppercase">
+        {weekday} · {branch.name} · часы {hours ? branch.workingHours : "не распознаны"} · подготовка после брони {timeline.bufferMinutes} мин
+      </p>
       {!hours ? <p className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">Часы работы филиала не распознаны. Бронирование отключено, до исправления часов работы показывается только занятость.</p> : null}
 
       <section aria-label="Комнаты" className="grid gap-2">
@@ -176,12 +182,12 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
                 ))}
               </div>
             </div>
-            {timeline.rooms.map((room) => {
+            {rooms.map((room) => {
               const items = active
                 .filter((r) => r.roomId === room.id)
-                .map((r) => ({ reservation: r, column: gridColumn(r.startsAt, r.endsAt) }))
-                .filter((x): x is { reservation: BookingTimelineReservation; column: { start: number; span: number } } => x.column !== null);
-              const lanes = assignLanes(items.map((x) => ({ id: x.reservation.id, start: x.column.start, span: x.column.span })));
+                .map((r) => ({ reservation: r, column: gridColumn(r.startsAt, r.endsAt), buffer: gridColumn(r.endsAt, r.occupiedEndsAt), occupied: gridColumn(r.startsAt, r.occupiedEndsAt) }))
+                .filter((x): x is { reservation: BookingTimelineReservation; column: { start: number; span: number }; buffer: { start: number; span: number } | null; occupied: { start: number; span: number } } => x.column !== null && x.occupied !== null);
+              const lanes = assignLanes(items.map((x) => ({ id: x.reservation.id, start: x.occupied.start, span: x.occupied.span })));
               return (
                 <div key={room.id} className="mt-2 grid grid-cols-[8rem_1fr] gap-2">
                   <h2 className="self-center text-sm font-black text-grape-800">{room.name}</h2>
@@ -189,20 +195,31 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
                     {closedColumns(hours).map((range) => (
                       <div key={`${range.start}-${range.span}`} aria-hidden="true" className={`${COLUMN_START[range.start]} ${COLUMN_SPAN[range.span]} row-start-1 row-span-1 self-stretch bg-line/30`} />
                     ))}
-                    {items.map(({ reservation: r, column }) => {
+                    {items.map(({ reservation: r, column, buffer }) => {
                       const conflict = flagged.has(r.id);
                       const tone = conflict ? "border-red-700 bg-red-100" : r.kind === "block" ? "border-muted bg-sun-100" : "border-grape-600 bg-grape-100";
+                      const lane = LANE_START[lanes.get(r.id) ?? 1];
                       return (
-                        <div
-                          key={r.id}
-                          role="listitem"
-                          data-reservation={r.id}
-                          data-state={conflict ? "conflict" : r.kind === "block" ? "blocked" : "booked"}
-                          className={`${COLUMN_START[column.start]} ${COLUMN_SPAN[column.span]} ${LANE_START[lanes.get(r.id) ?? 1]} z-10 mx-px min-w-0 overflow-hidden rounded-lg border-2 px-2 py-1 text-xs ${tone}`}
-                        >
-                          <p className="truncate font-black text-grape-900">{clock(r.startsAt)}–{clock(r.endsAt)} · {r.kind === "block" ? "Блок" : STATUS_LABEL[r.status]}{conflict ? " · конфликт" : ""}</p>
-                          <p className="truncate text-grape-900">{r.kind === "block" ? r.note ?? "" : r.customerName ?? "Клиент скрыт"}</p>
-                        </div>
+                        <Fragment key={r.id}>
+                          <div
+                            role="listitem"
+                            data-reservation={r.id}
+                            data-state={conflict ? "conflict" : r.kind === "block" ? "blocked" : "booked"}
+                            className={`${COLUMN_START[column.start]} ${COLUMN_SPAN[column.span]} ${lane} z-10 mx-px min-w-0 overflow-hidden rounded-lg border-2 px-2 py-1 text-xs ${tone}`}
+                          >
+                            <p className="truncate font-black text-grape-900">{clock(r.startsAt)}–{clock(r.endsAt)} · {r.kind === "block" ? "Блок" : STATUS_LABEL[r.status]}{conflict ? " · конфликт" : ""}</p>
+                            <p className="truncate text-grape-900">{r.kind === "block" ? r.note ?? "" : r.customerName ?? "Клиент скрыт"}</p>
+                          </div>
+                          {buffer ? (
+                            <div
+                              aria-hidden="true"
+                              data-buffer={r.id}
+                              className={`${COLUMN_START[buffer.start]} ${COLUMN_SPAN[buffer.span]} ${lane} z-10 mx-px min-w-0 overflow-hidden rounded-lg border border-dashed border-muted bg-line/60 px-2 py-1 text-[11px] font-bold text-muted`}
+                            >
+                              буфер до {clock(r.occupiedEndsAt)}
+                            </div>
+                          ) : null}
+                        </Fragment>
                       );
                     })}
                   </div>
@@ -211,7 +228,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
             })}
           </div>
         </div>
-        <p className="text-xs font-bold text-muted">Серый фон — свободно. Бежевый — блокировка. Сиреневый — бронь. Красный — пересечение, которого быть не должно: сообщите администратору.</p>
+        <p className="text-xs font-bold text-muted">Серый фон — свободно. Бежевый — блокировка. Сиреневый — бронь. Пунктир — буфер подготовки после брони. Красный — пересечение, которого быть не должно: сообщите администратору.</p>
       </section>
 
       {hours ? (
@@ -225,21 +242,46 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
       ) : null}
 
       <div className="grid gap-5 md:grid-cols-2">
+        {paidPending ? (
+          <section aria-labelledby="paid-request" className="grid gap-3 rounded-3xl border-2 border-sun-600 bg-white p-4">
+            <h2 id="paid-request" className="text-lg font-black text-grape-800">Оплаченная заявка № {paidPending}</h2>
+            <p className="text-sm text-grape-900">Предоплата записана вручную. Бронь НЕ подтверждена. Подтвердите её на выбранные комнату и время или откройте заявку в разделе «Заявки». Новая предоплата здесь не записывается.</p>
+            {hours && packages.length > 0 && rooms.length > 0 ? (
+              <form action={confirmPaidRequestAction} className="grid gap-2">
+                <input type="hidden" name="branchId" value={branch.id} />
+                <input type="hidden" name="date" value={date} />
+                <input type="hidden" name="requestId" value={paidPending} />
+                <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+                <label className="grid gap-1 text-xs font-extrabold text-muted">Комната
+                  <select name="roomId" required className={input}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+                </label>
+                <label className="grid gap-1 text-xs font-extrabold text-muted">Начало
+                  <select name="startTime" required defaultValue={newStart} className={input}>{starts.map((s) => <option key={s} value={s}>{s}–{formatMinutes(Number(s.slice(0, 2)) * 60 + Number(s.slice(3)) + 240)}</option>)}</select>
+                </label>
+                <label className="grid gap-1 text-xs font-extrabold text-muted">Пакет
+                  <select name="packageId" required className={input}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} (ориентир от {kzt.format(p.priceFrom)} ₸)</option>)}</select>
+                </label>
+                <input name="agreedPriceKzt" type="number" required min={1} max={10000000} placeholder="Согласованная цена, ₸" aria-label="Согласованная цена" className={input} />
+                <button type="submit" className={btn}>Подтвердить оплаченную заявку</button>
+              </form>
+            ) : <p className="text-sm font-bold text-muted">Подтверждение недоступно: нет часов работы, комнат или пакетов.</p>}
+          </section>
+        ) : (
         <section aria-labelledby="new-booking" className="grid gap-3 rounded-3xl border border-line bg-white p-4">
           <h2 id="new-booking" className="text-lg font-black text-grape-800">Новая бронь на 4 часа</h2>
-          {hours && branchPackages.length > 0 && timeline.rooms.length > 0 ? (
+          {hours && packages.length > 0 && rooms.length > 0 ? (
             <form action={createBookingAction} className="grid gap-2">
               <input type="hidden" name="branchId" value={branch.id} />
               <input type="hidden" name="date" value={date} />
-              <input type="hidden" name="idempotencyKey" value={idempotencyKey()} />
+              <input type="hidden" name="idempotencyKey" value={randomUUID()} />
               <label className="grid gap-1 text-xs font-extrabold text-muted">Комната
-                <select name="roomId" required className={input}>{timeline.rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+                <select name="roomId" required className={input}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
               </label>
               <label className="grid gap-1 text-xs font-extrabold text-muted">Начало
                 <select name="startTime" required defaultValue={newStart} className={input}>{starts.map((s) => <option key={s} value={s}>{s}–{formatMinutes(Number(s.slice(0, 2)) * 60 + Number(s.slice(3)) + 240)}</option>)}</select>
               </label>
               <label className="grid gap-1 text-xs font-extrabold text-muted">Пакет
-                <select name="packageId" required className={input}>{branchPackages.map((p) => <option key={p.id} value={p.id}>{p.name} (от {kzt.format(p.price_from)} ₸)</option>)}</select>
+                <select name="packageId" required className={input}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} (ориентир от {kzt.format(p.priceFrom)} ₸)</option>)}</select>
               </label>
               <input name="customerName" required maxLength={120} placeholder="Имя клиента" aria-label="Имя клиента" className={input} />
               <input name="phone" type="tel" required maxLength={20} placeholder="+7 707 123 45 67" aria-label="Телефон" className={input} />
@@ -252,22 +294,23 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
                 </select>
               </div>
               <textarea name="note" maxLength={300} placeholder="Заметка" aria-label="Заметка" className="min-h-20 rounded-xl border-2 border-grape-200 bg-white p-3 text-base" />
-              <p className="text-xs text-muted">Бронь подтверждается только после записи предоплаты. Повторное нажатие не создаст вторую бронь.</p>
-              <button type="submit" className={btn}>Создать и подтвердить</button>
+              <p className="text-xs text-muted">Предоплата записывается вручную менеджером; это не онлайн-оплата. Бронь подтверждается только после записи предоплаты и успешного подтверждения.</p>
+              <button type="submit" className={btn}>Создать заявку, записать предоплату и подтвердить</button>
             </form>
           ) : (
             <p className="text-sm font-bold text-muted">{!hours ? "Бронирование отключено: часы филиала не распознаны." : "Нет активных пакетов или комнат для этого филиала."}</p>
           )}
         </section>
+        )}
 
         <section aria-labelledby="block" className="grid gap-3 rounded-3xl border border-line bg-white p-4">
           <h2 id="block" className="text-lg font-black text-grape-800">Ручная блокировка</h2>
-          {hours && timeline.rooms.length > 0 ? (
+          {hours && rooms.length > 0 ? (
             <form action={blockAction} className="grid gap-2">
               <input type="hidden" name="branchId" value={branch.id} />
               <input type="hidden" name="date" value={date} />
-              <input type="hidden" name="idempotencyKey" value={idempotencyKey()} />
-              <select name="roomId" required className={input} aria-label="Комната блокировки">{timeline.rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+              <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+              <select name="roomId" required className={input} aria-label="Комната блокировки">{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
               <select name="startTime" required defaultValue={newStart} className={input} aria-label="Начало блокировки">{starts.map((s) => <option key={s} value={s}>{s}</option>)}</select>
               <input name="reason" required maxLength={300} placeholder="Причина" aria-label="Причина блокировки" className={input} />
               <button type="submit" className={btnGhost}>Заблокировать на 4 часа</button>
@@ -280,7 +323,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
         <h2 id="day-list" className="text-lg font-black text-grape-800">Бронирования и блоки на день ({active.length})</h2>
         {active.length === 0 ? <p className="text-sm font-bold text-muted">На эту дату ничего не забронировано.</p> : null}
         {active.map((r) => (
-          <ReservationRow key={r.id} r={r} rooms={timeline.rooms} starts={starts} branchId={branch.id} date={date} conflict={flagged.has(r.id)} />
+          <ReservationRow key={r.id} r={r} rooms={rooms} starts={starts} branchId={branch.id} date={date} conflict={flagged.has(r.id)} />
         ))}
       </section>
     </div>
@@ -303,17 +346,18 @@ function ReservationRow({
   conflict: boolean;
 }) {
   const roomName = rooms.find((x) => x.id === r.roomId)?.name ?? "—";
-  const paid = r.paidKzt > 0 ? `${kzt.format(r.paidKzt)} ₸` : "предоплата не записана";
+  const payment = r.paymentStatus === "prepaid" && r.paidKzt > 0 ? `предоплата записана вручную: ${kzt.format(r.paidKzt)} ₸ (не онлайн-оплата)` : "предоплата не записана";
   return (
     <article className={`grid gap-2 rounded-2xl border-2 p-4 ${conflict ? "border-red-700 bg-red-50" : "border-line bg-white"}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-base font-black text-grape-800">{roomName} · {clock(r.startsAt)}–{clock(r.endsAt)} · {r.kind === "block" ? "Блокировка" : STATUS_LABEL[r.status]}</p>
         {conflict ? <p className="text-sm font-black text-red-800">Пересечение: сообщите администратору</p> : null}
       </div>
+      <p className="text-xs text-muted">Занято до {clock(r.occupiedEndsAt)} включая буфер подготовки</p>
       <p className="break-words text-sm text-grape-900">
-        {r.kind === "block" ? r.note ?? "Без причины" : `${r.customerName ?? "Клиент скрыт"}${r.customerPhone ? ` · ${r.customerPhone}` : ""} · ${r.packageName ?? "пакет не указан"}${r.priceKzt != null ? ` · ${kzt.format(r.priceKzt)} ₸` : ""} · ${paid}`}
+        {r.kind === "block" ? r.note ?? "Без причины" : `${r.customerName ?? "Клиент скрыт"}${r.customerPhone ? ` · ${r.customerPhone}` : ""} · ${r.packageName ?? "пакет не указан"}${r.priceKzt != null ? ` · ${kzt.format(r.priceKzt)} ₸` : ""} · ${payment}`}
       </p>
-      {r.kind === "booking" && r.createdByAdminId ? <p className="text-xs text-muted">Ответственный (ID в CRM): {r.createdByAdminId}</p> : null}
+      {r.kind === "booking" && r.createdByName ? <p className="text-xs text-muted">Ответственный: {r.createdByName}</p> : null}
       <div className="flex flex-wrap gap-2">
         <details className="min-w-0">
           <summary className="flex min-h-11 cursor-pointer items-center text-sm font-extrabold text-grape-700">Перенести</summary>

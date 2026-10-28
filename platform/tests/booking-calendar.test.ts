@@ -51,6 +51,8 @@ test("places a reservation on the 15-minute grid and clips it to the day", () =>
   assert.equal(gridColumn("2026-10-28T02:00:00Z", "2026-10-28T03:00:00Z"), null, "03:00-04:00 Almaty is before the grid");
   // 18:00 to midnight Almaty: an end at 00:00 means the end of the day.
   assert.deepEqual(gridColumn("2026-10-28T13:00:00Z", "2026-10-28T19:00:00Z"), { start: 37, span: 24 });
+  // A zero-length interval (no buffer) draws nothing; it must not run to midnight.
+  assert.equal(gridColumn("2026-10-28T13:00:00Z", "2026-10-28T13:00:00Z"), null);
 });
 
 test("shades hours outside working time as grid columns", () => {
