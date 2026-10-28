@@ -10,6 +10,8 @@ import {
   gridRangeColumns,
   windowOverlapsRoom,
   startOptions,
+  bookedWithRealPayment,
+  samePhone,
 } from "../src/core/booking-calendar.ts";
 
 test("parses branch hours and refuses unknown or too-short ranges", () => {
@@ -80,4 +82,25 @@ test("refuses a window that overlaps an active reservation in the same room", ()
   assert.equal(windowOverlapsRoom(taken, "r2", at("16:00").startIso, at("16:00").endIso), false, "another room is free");
   const released = [{ ...taken[0], status: "released" }];
   assert.equal(windowOverlapsRoom(released, "r1", at("16:00").startIso, at("16:00").endIso), false);
+});
+
+test("a confirmed reservation is verified only with a real manual prepayment on the request", () => {
+  const confirmedUnpaid = { status: "confirmed", paidKzt: 0, paymentStatus: "unpaid" };
+  const paidConfirmed = { status: "confirmed", paidKzt: 20000, paymentStatus: "prepaid" };
+  const bookedWithFact = { bookedAt: "2026-11-20T10:00:00Z", manualPaymentFactStatus: "prepaid" as const, manualPaymentFactAmountKzt: 20000 };
+  const bookedNoFact = { bookedAt: "2026-11-20T10:00:00Z", manualPaymentFactStatus: "unpaid" as const, manualPaymentFactAmountKzt: 0 };
+  // An existing confirmed reservation with no money recorded is not a verified success, whatever the request says.
+  assert.equal(bookedWithRealPayment(confirmedUnpaid, bookedWithFact), false, "reservation shows no payment");
+  assert.equal(bookedWithRealPayment(confirmedUnpaid, null), false, "no FastAPI read-back");
+  // Paid on the reservation, but the request has no booking or no fact in FastAPI.
+  assert.equal(bookedWithRealPayment(paidConfirmed, { ...bookedWithFact, bookedAt: null }), false, "request not booked");
+  assert.equal(bookedWithRealPayment(paidConfirmed, bookedNoFact), false, "no manual payment fact");
+  assert.equal(bookedWithRealPayment({ status: "released", paidKzt: 20000, paymentStatus: "prepaid" }, bookedWithFact), false, "released");
+  assert.equal(bookedWithRealPayment(paidConfirmed, bookedWithFact), true);
+});
+
+test("phones compare by digits", () => {
+  assert.equal(samePhone("+7 700 111-22-33", "77001112233"), true);
+  assert.equal(samePhone("+7 700 111-22-34", "77001112233"), false);
+  assert.equal(samePhone("12", "12"), false, "too short to be a phone");
 });

@@ -39,10 +39,10 @@ export async function api(token, method, path, body) {
 }
 
 /** Creates a request and records a manual prepayment, without confirming. Returns the request id. */
-export async function paidUnconfirmedRequest(token, { branchId, packageId, amountKzt, customerName }) {
+export async function paidUnconfirmedRequest(token, { branchId, packageId, amountKzt, customerName, phone = "+77001234567" }) {
   const key = randomUUID();
   const created = await api(token, "POST", "/admin/birthday-requests", {
-    branchId, packageId, customerName, phone: "+77001234567", guestCount: 10, idempotencyKey: `${key}:req`,
+    branchId, packageId, customerName, phone, guestCount: 10, idempotencyKey: `${key}:req`,
   });
   if (created.status !== 201) throw new Error(`request ${created.status}`);
   const payment = await api(token, "POST", `/admin/birthday-requests/${created.body.id}/manual-payments`, {

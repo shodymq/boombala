@@ -5,7 +5,8 @@ load_env
 "$HERE/guard.sh" >/dev/null
 ensure_checkouts
 load_secrets
-"$HERE/pg.sh" start >/dev/null 2>&1 || true
+"$HERE/pg.sh" start || { echo "PostgreSQL did not start; not starting the services" >&2; exit 1; }
+assert_staging_cluster
 
 start_service() { # name port logfile -- command...
   local name="$1" port="$2" log="$3"; shift 3

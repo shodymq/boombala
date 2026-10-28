@@ -39,6 +39,11 @@ const countsByRequest = (id) => Promise.all([
   n("SELECT count(*)::int AS n FROM birthday_slot_reservations WHERE birthday_request_id = $1 AND kind = 'booking' AND released_at IS NULL", [id]),
 ]);
 
+// The harness token for the same staff account as the browser, fetched once.
+let cachedTokenA = null;
+const tokenA0 = () => cachedTokenA;
+cachedTokenA = await staffToken({ email: "manager-a@staging.boombala.example.com", staffId: "stg-manager-a" });
+
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const page = await ctx.newPage();
 await page.goto(`${ADMIN}/login`);
@@ -67,12 +72,12 @@ await page.route("**/bookings**", async (route) => {
   await route.continue();
 });
 
-async function submitCreate(p, { room, start, name, price, prepay }) {
+async function submitCreate(p, { room, start, name, price, prepay, phone = "+77001112288" }) {
   const form = p.locator('form:has(input[name="customerName"])');
   await form.locator('select[name="roomId"]').selectOption({ label: room });
   await form.locator('select[name="startTime"]').selectOption(start);
   await form.locator('input[name="customerName"]').fill(name);
-  await form.locator('input[name="phone"]').fill("+77001112288");
+  await form.locator('input[name="phone"]').fill(phone);
   await form.locator('input[name="agreedPriceKzt"]').fill(String(price));
   await form.locator('input[name="prepaymentKzt"]').fill(String(prepay));
   await form.locator('button[type="submit"]').click();
@@ -81,6 +86,23 @@ async function waitForOutcome(p) {
   await p.waitForURL((u) => /[?&](ok|error)=/.test(u.search), { timeout: 20000 }).catch(() => {});
   await p.waitForLoadState("networkidle");
 }
+
+// D. The response was lost after the manual payment, before the confirmation. The request exists and is paid; FastAPI shows it.
+// The manager's next attempt for the same phone must not create a second request or a second payment.
+const phoneD = `+7700${String(Date.now()).slice(-7)}`;
+const reqD = await paidUnconfirmedRequest(tokenA0(), { branchId: "stg-almaty", packageId: "stg-pkg-start", amountKzt: 20000, customerName: `LOST-D ${stamp}`, phone: phoneD });
+const byPhone = () => Promise.all([
+  n("SELECT count(*)::int AS n FROM birthday_requests WHERE phone = $1", [phoneD]),
+  n("SELECT count(*)::int AS n FROM birthday_payment_facts f JOIN birthday_requests r ON r.id = f.birthday_request_id WHERE r.phone = $1", [phoneD]),
+]);
+await page.goto(pageUrl);
+await page.waitForLoadState("networkidle");
+await submitCreate(page, { room: "Комната B", start: "14:00", name: `LOST-D2 ${stamp}`, price: 100000, prepay: 10000, phone: phoneD });
+await waitForOutcome(page);
+check("D: a new attempt for a phone with a paid, unconfirmed request is refused, with that request shown", (await page.locator("main [role=alert]", { hasText: "оплаченная заявка" }).count()) >= 1);
+let [reqsD, factsD] = await byPhone();
+check("D: no second request and no second payment fact for the phone", reqsD === 1 && factsD === 1, `requests=${reqsD} facts=${factsD}`);
+check("D: the page names the existing request", (await page.locator("main").innerText()).includes(reqD));
 
 // A. Create, response lost after the server finished. Reload. Re-submit with a new key.
 await page.goto(pageUrl);

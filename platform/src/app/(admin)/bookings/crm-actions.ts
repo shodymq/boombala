@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { isCalendarDate } from "../../../core/booking-calendar.ts";
+import { almatyDate, isCalendarDate } from "../../../core/booking-calendar.ts";
 import { withFastApiClient } from "../../../server/crm-actor.ts";
 import { unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
 import { confirmPaidRequestFlow, createBookingFlow, failureCode } from "../../../server/crm-flows.ts";
@@ -122,7 +122,7 @@ export async function createBookingAction(formData: FormData): Promise<void> {
       prepaymentMethod: input.prepaymentMethod,
       note: input.note,
       idempotencyKey: input.idempotencyKey,
-    }),
+    }, almatyDate()),
   );
   let outcome = result.ok ? okOutcome("booked", result.reservationId) : `error=${result.code}`;
   // The request id lets the page read the real payment and booking state from FastAPI after a failure.

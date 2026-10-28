@@ -1,46 +1,55 @@
-# Safe staging check by a person (manager pilot rehearsal)
+# Manual check of the closed synthetic staging (two managers)
 
-This is the checklist for a human reviewer. It uses synthetic test data only. Never enter real client names, phones or payments.
+Scope: synthetic branches, rooms, clients and prepayments only. No real client data, no production systems, no public domain.
+Accounts are created by the operator on the staging host. **Passwords are not written in this file or in any chat.** The operator
+gives each manager their own login out of band.
 
-## 1. Open the tunnel from your Mac
+## Before you start (operator)
 
-Your `~/.ssh/config` may set `ClearAllForwardings yes` for `boombala-claude`. Forwarding for this one session is your decision.
-Run this in your own terminal, then leave it open:
+1. Open the tunnel on your own Mac with your own SSH settings (`ClearAllForwardings=no` is needed on this host):
+   `ssh -N -o IdentitiesOnly=yes -o ClearAllForwardings=no -L 127.0.0.1:3400:127.0.0.1:3400 boombala-claude`
+2. Or share your screen; the managers then work in your browser session. Do not share the SSH agent or key files.
+3. Tell managers the test date range. Each check uses fresh days, so use a new range for each session.
 
-```bash
-ssh -N -o IdentitiesOnly=yes -o ClearAllForwardings=no -L 127.0.0.1:3400:127.0.0.1:3400 boombala-claude
-```
+## Login
 
-Port 3400 is the CRM on the staging host. It is reachable only from your Mac through this tunnel.
+- Address: `http://127.0.0.1:3400/login` (only reachable through the tunnel).
+- Manager A and manager B each have their own pilot account (the operator gives you the email and password).
+- Do not use owner accounts. Do not change the password.
 
-## 2. Sign in with a test account
+## Checklist (about 25 minutes, each manager does their part)
 
-Use one of the synthetic staff accounts: `manager-a@staging.boombala.example.com` or `manager-b@...`. The password is given to you
-out of band (it is not stored in this repository). Owner accounts exist only for administrators.
+Use a date the operator gave you. Use only the test names the operator gives you (for example "Тест Клиент 1").
 
-Open `http://127.0.0.1:3400/login`.
+**Manager A**
+1. Open the calendar: both branches are in the list; the grid loads; no error banner.
+2. Create a booking: Room A, 14:00, price 180 000 ₸, prepayment 20 000 ₸, cash. Expect the green line "Проверено по данным системы".
+   The booking card shows the prepayment "записана вручную ... (не онлайн-оплата)".
+3. Reload the page three times. The green line does not come back, and the booking stays once.
+4. Try to create another booking for the same phone at another time. Expect a message about an unconfirmed paid request
+   and no new request. Do not pay twice.
 
-## 3. Checklist (about 20 minutes)
+**Manager B** (second browser or private window)
+5. See A's booking in the list with the responsible name.
+6. Try Room A at 16:00 for another client: expect "Комната занята". Nothing new appears.
+7. Cancel A's booking (Отменить бронь). It stays in the day list as "Отменено"; the room is free in the grid.
+8. Book Room A at 16:00 for another client: expect success after the green check.
 
-1. Calendar loads for the branch, both branches are listed, no 403 or "Не удалось загрузить".
-2. Create a booking on the test date for 14:00 in Room A (price 180 000, prepayment 20 000, cash). A green line says it was checked
-   against the system. The day list shows the booking with "предоплата записана вручную ... (не онлайн-оплата)".
-3. Open a second browser profile or a private window, sign in as the other manager, try 16:00 in Room A: it is refused with
-   "Комната занята". Nothing new appears.
-4. Reload the page several times. The success line does not come back.
-5. Press the browser back button after a booking. Nothing is booked twice.
-6. Cancel the booking. It stays in the list as "Отменено"; the room is free again.
-7. Try to open the page with a changed `date` or `branch` in the address bar: no data from another branch is shown without the
-   catalog allowing it.
-8. Sign out, then try the calendar address: you must be sent to the login page.
+**Both**
+9. Sign out, then open the calendar address: you must land on the login page.
+10. Sign in again: the calendar loads.
 
-## 4. What to report
+## What to report
 
-- Pass/fail for each item, the time, and a screenshot (blur any personal data first; the data here is synthetic anyway).
-- Anything that shows a success you did not see on the grid.
-- Anything that shows another person's data.
+- Each numbered item: pass or fail, the time, and the test date.
+- Any success line you did not see on the grid, any duplicate booking or payment, and any other person's data on screen.
+- Anything the calendar did not explain.
 
-## 5. Do not
+Send the report to the operator only. Do not paste credentials, tunnel commands with passwords, or screenshots that show a login page
+with a password field filled in.
 
-- Do not try to reach the production sites, the production database or any other port on the staging host.
-- Do not change settings, passwords or accounts. Ask the operator.
+## Do not
+
+- Do not try to reach other ports, the production sites, the production database or any public address.
+- Do not change settings, accounts or passwords. Ask the operator.
+- Do not enter real names, phones, prepayments or consent data.

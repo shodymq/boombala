@@ -4,6 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_env
 load_secrets
+assert_staging_cluster
 "$HERE/guard.sh" >/dev/null
 [ -n "${STAGING_TEST_PASSWORD:-}" ] || { echo "set STAGING_TEST_PASSWORD (12+ chars, test-only) in the environment" >&2; exit 2; }
 export_backend_env

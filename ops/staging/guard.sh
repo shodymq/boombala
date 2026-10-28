@@ -28,6 +28,12 @@ for name in "$STAGING_BACKEND_DB" "$STAGING_PLATFORM_DB"; do
   done
 done
 
+# Database target: this host, a non-protected port, and (when the cluster answers) the staging data directory.
+assert_local_port || fail "database target refused"
+if "$STAGING_PG_BIN/pg_isready" -h 127.0.0.1 -p "$STAGING_PG_PORT" -q 2>/dev/null; then
+  assert_staging_cluster || fail "cluster on $STAGING_PG_PORT is not the staging cluster"
+fi
+
 [ -d "$BACKEND_DIR/backend" ] || fail "BACKEND_DIR does not contain backend/: $BACKEND_DIR"
 [ -f "$PLATFORM_DIR/package.json" ] || fail "PLATFORM_DIR does not contain package.json: $PLATFORM_DIR"
 

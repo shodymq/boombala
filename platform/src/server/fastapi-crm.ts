@@ -79,8 +79,10 @@ export type BirthdayLeadState = {
 
 export type BookingCatalog = { branches: BookingCatalogBranch[]; rooms: BookingCatalogRoom[]; packages: BookingCatalogPackage[] };
 
+export type FastApiLeadListItem = { id: string; type: string; status: string; phone: string; customerName: string; createdAt: string };
+
 export type FastApiLeadList = {
-  items: unknown[];
+  items: FastApiLeadListItem[];
   total: number;
 };
 

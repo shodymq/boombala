@@ -11,6 +11,7 @@ import {
   gridRangeColumns,
   overlappingIds,
   parseWorkingHours,
+  bookedWithRealPayment,
   QUICK_STARTS,
   START_STEP_MINUTES,
   startOptions,
@@ -31,6 +32,7 @@ const NOTICES: Record<string, string> = {
 };
 
 const ERRORS: Record<string, string> = {
+  paid_request_pending: "По этому клиенту уже есть оплаченная заявка, которая не подтверждена. Новая заявка и новая предоплата не созданы: подтвердите ту заявку ниже.",
   time_conflict: "Комната занята в это время: пересекается бронь или блокировка. Выберите другое время или комнату. Заявка и предоплата при этом сохраняются: выберите другое время в блоке «Оплаченная заявка».",
   slot_taken: "Комната занята в это время. Данные обновлены.",
   outside_working_hours: "Выбранное время выходит за часы работы филиала.",
@@ -93,6 +95,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
   let timeline: BookingTimeline | null = null;
   let branch: BookingCatalogBranch | undefined;
   let requestState: BirthdayLeadState | null = null;
+  let bookingLead: BirthdayLeadState | null = null;
   try {
     const loaded = await withFastApiClient(session, async (client) => {
       const cat = await client.getBookingCatalog();
@@ -103,12 +106,16 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
       const tl = picked ? await client.getBookingTimeline(picked.id, date) : null;
       // A failed or refused read is "unknown", never "unpaid" and never "booked".
       const lead = search.request ? await client.getBirthdayLead(search.request).then((x) => x as BirthdayLeadState).catch(() => null) : null;
-      return { cat, picked, tl, lead };
+      // A success is shown only with the money behind it: read the request of the reservation the URL names, if any.
+      const named = tl?.reservations.find((r) => r.id === search.reservation);
+      const bookingLead = named?.requestId ? await client.getBirthdayLead(named.requestId).then((x) => x as BirthdayLeadState).catch(() => null) : null;
+      return { cat, picked, tl, lead, bookingLead };
     });
     catalog = loaded.cat;
     branch = loaded.picked;
     timeline = loaded.tl;
     requestState = loaded.lead;
+    bookingLead = loaded.bookingLead;
   } catch (error) {
     // Fail closed: no grid, no guessed availability. Only the code is logged.
     console.error("[crm-calendar] load failed:", error instanceof FastApiCrmError ? `${error.status} ${error.code}` : "unexpected");
@@ -140,7 +147,12 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
   // Success is shown only when FastAPI's timeline holds the reservation in the expected state. The URL is a hint.
   const expected = search.ok ? EXPECTED_STATUS[search.ok] : undefined;
   const confirmedRecord = search.reservation && expected ? timeline.reservations.find((r) => r.id === search.reservation) : undefined;
-  const verifiedOk = confirmedRecord && expected && confirmedRecord.status === expected ? search.ok : null;
+  // Booked and rescheduled need the money too: the reservation's payment and the request's manual fact must both be there.
+  const moneyRequired = search.ok === "booked" || search.ok === "rescheduled";
+  const verifiedOk =
+    confirmedRecord && expected && confirmedRecord.status === expected && (!moneyRequired || bookedWithRealPayment(confirmedRecord, bookingLead))
+      ? search.ok
+      : null;
   const unverifiedOk = Boolean(search.ok) && !verifiedOk;
   // A paid request that is not booked, as FastAPI reports it, blocks new bookings: the manager confirms that request.
   const pendingPaid = requestState && requestState.bookedAt == null && requestState.manualPaymentFactStatus === "prepaid" && requestState.manualPaymentFactAmountKzt > 0 ? requestState : null;

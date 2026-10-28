@@ -53,6 +53,7 @@ PLATFORM_TABLES="users sessions audit_log"
 # Restores one dump into a fresh database. Any pg_restore error fails the call (no silent skips).
 restore_strict() { # dump-file target-db
   local dump="$1" target="$2" log
+  is_scratch_name "$target" || fail_target "restore target $target is not a scratch database"
   log="$STAGING_ROOT/logs/restore-$target.log"
   PGPASSWORD="$STAGING_PG_PASSWORD" "$STAGING_PG_BIN/psql" -h 127.0.0.1 -p "$STAGING_PG_PORT" -U "$STAGING_PG_USER" -d postgres -qAt -v ON_ERROR_STOP=1 \
     -c "DROP DATABASE IF EXISTS \"$target\"" -c "CREATE DATABASE \"$target\"" >/dev/null
@@ -72,6 +73,7 @@ manifest_of() { # database tables...
 }
 
 drop_db() { # database
+  is_scratch_name "$1" || fail_target "refusing to drop $1: not a scratch database"
   PGPASSWORD="$STAGING_PG_PASSWORD" "$STAGING_PG_BIN/psql" -h 127.0.0.1 -p "$STAGING_PG_PORT" -U "$STAGING_PG_USER" -d postgres -qAt \
     -c "DROP DATABASE IF EXISTS \"$1\"" >/dev/null
 }
@@ -88,4 +90,39 @@ ensure_checkouts() {
   if [ -n "${PLATFORM_SHA:-}" ] && [ "$head" != "$PLATFORM_SHA" ] && ! git -C "$root" merge-base --is-ancestor "$PLATFORM_SHA" "$head" 2>/dev/null; then
     echo "platform checkout is at $head, not at pinned $PLATFORM_SHA" >&2; exit 4
   fi
+}
+
+# ---- Target safety: every script that touches a database calls these first. They refuse, they never guess. ----
+
+fail_target() { echo "TARGET REFUSED: $*" >&2; exit 5; }
+
+# The database host must be this machine, and the port must not be a live one.
+assert_local_port() {
+  case "${STAGING_PG_HOST:-127.0.0.1}" in
+    127.0.0.1|localhost|::1) ;;
+    *) fail_target "STAGING_PG_HOST=${STAGING_PG_HOST:-} is not this machine" ;;
+  esac
+  for protected in $PROTECTED_PORTS; do
+    [ "$STAGING_PG_PORT" != "$protected" ] || fail_target "port $STAGING_PG_PORT is a protected live port"
+  done
+}
+
+# The cluster that answers must be the staging cluster under STAGING_ROOT: its data directory is compared, not assumed.
+assert_staging_cluster() {
+  assert_local_port
+  local expected actual
+  expected="$(cd "$STAGING_ROOT/pgdata" 2>/dev/null && pwd -P)" || fail_target "no staging data directory at $STAGING_ROOT/pgdata"
+  actual="$(PGPASSWORD="$STAGING_PG_PASSWORD" "$STAGING_PG_BIN/psql" -h "${STAGING_PG_HOST:-127.0.0.1}" -p "$STAGING_PG_PORT" -U "$STAGING_PG_USER" -d postgres -qAt -c 'show data_directory' 2>/dev/null)" \
+    || fail_target "cannot query the cluster on port $STAGING_PG_PORT (not staging, or not running)"
+  actual="$(cd "$actual" 2>/dev/null && pwd -P || echo "$actual")"
+  [ "$actual" = "$expected" ] || fail_target "port $STAGING_PG_PORT serves $actual, not $expected"
+}
+
+# Scratch databases only: names that end in _restore_test or _manifest_tmp. Never the live staging databases.
+is_scratch_name() {
+  case "$1" in
+    "$STAGING_BACKEND_DB"|"$STAGING_PLATFORM_DB") return 1 ;;
+    *_restore_test|*_manifest_tmp) return 0 ;;
+    *) return 1 ;;
+  esac
 }

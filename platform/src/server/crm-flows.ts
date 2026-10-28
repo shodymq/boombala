@@ -1,6 +1,7 @@
 import "server-only";
 import { almatyWindow, windowOverlapsRoom } from "../core/booking-calendar.ts";
 import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmClient } from "./fastapi-crm.ts";
+import { samePhone } from "../core/booking-calendar.ts";
 
 /**
  * The booking steps the calendar performs, as plain functions over the FastAPI client. The server actions wrap them with
@@ -11,7 +12,7 @@ import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmClient } 
  */
 
 /** The methods the flows use. A test can pass a fake with only these. */
-export type BookingWriter = Pick<FastApiCrmClient, "getBookingTimeline" | "createStaffRequest" | "recordManualPayment" | "confirmBooking">;
+export type BookingWriter = Pick<FastApiCrmClient, "getBookingTimeline" | "createStaffRequest" | "recordManualPayment" | "confirmBooking" | "listLeads" | "getBirthdayLead">;
 
 export type NewBookingInput = {
   branchId: string;
@@ -67,6 +68,7 @@ const KNOWN_ERRORS = new Set([
   "branch_not_found",
   "availability_unavailable",
   "staff_not_linked",
+  "paid_request_pending",
 ]);
 
 /** A fixed code for the page; the page owns the Russian text. */
@@ -100,11 +102,32 @@ export async function precheckRoom(client: BookingWriter, branchId: string, date
   if (windowOverlapsRoom(occupied, roomId, startIso, newOccupiedEnd)) throw new FastApiCrmError(409, "time_conflict", "precheck");
 }
 
+const CLOSED_LEAD_STATUSES = new Set(["booked", "completed", "lost", "closed", "cancelled", "confirmed"]);
+
+/**
+ * The request id of a paid, unconfirmed request for the same phone in this branch, or null. This covers a response lost after
+ * the manual payment was recorded: the manager reloads and tries again, and a second request and a second payment must not
+ * be created. The FastAPI detail decides, never the list alone.
+ */
+export async function findPaidUnconfirmedRequest(client: BookingWriter, branchId: string, phone: string, today: string): Promise<string | null> {
+  const from = new Date(`${today}T00:00:00Z`);
+  from.setUTCDate(from.getUTCDate() - 30);
+  const list = await client.listLeads({ branchId, createdFrom: from.toISOString().slice(0, 10) });
+  for (const item of list.items) {
+    if (item.type !== "birthday_request" || CLOSED_LEAD_STATUSES.has(item.status) || !samePhone(item.phone, phone)) continue;
+    const lead = await client.getBirthdayLead(item.id);
+    if (lead.bookedAt === null && lead.manualPaymentFactStatus === "prepaid" && lead.manualPaymentFactAmountKzt > 0) return item.id;
+  }
+  return null;
+}
+
 /** Request, then the manual prepayment, then the confirmation. Each step has its own derived idempotency key. */
-export async function createBookingFlow(client: BookingWriter, input: NewBookingInput): Promise<FlowResult> {
+export async function createBookingFlow(client: BookingWriter, input: NewBookingInput, today: string): Promise<FlowResult> {
   let requestId: string | null = null;
   try {
     await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
+    const pending = await findPaidUnconfirmedRequest(client, input.branchId, input.phone, today);
+    if (pending) return { ok: false, code: "paid_request_pending", requestId: pending };
     const request = await client.createStaffRequest({
       branchId: input.branchId,
       packageId: input.packageId,

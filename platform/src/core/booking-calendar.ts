@@ -186,3 +186,24 @@ export function almatyDate(now: Date = new Date()): string {
 export function isCalendarDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
+
+/** What FastAPI reports about a birthday request's money and confirmation (the fields the calendar reads). */
+export type LeadMoneyState = { bookedAt: string | null; manualPaymentFactStatus: "unpaid" | "prepaid"; manualPaymentFactAmountKzt: number };
+
+/**
+ * A reservation counts as a verified booking only when the reservation is confirmed AND the request has a real manual
+ * prepayment fact AND the request is booked. The reservation status alone is not proof of money.
+ */
+export function bookedWithRealPayment(reservation: { status: string; paidKzt: number; paymentStatus: string }, lead: LeadMoneyState | null): boolean {
+  if (reservation.status !== "confirmed") return false;
+  if (reservation.paidKzt <= 0 || reservation.paymentStatus !== "prepaid") return false;
+  if (!lead) return false;
+  return lead.bookedAt !== null && lead.manualPaymentFactStatus === "prepaid" && lead.manualPaymentFactAmountKzt > 0;
+}
+
+/** Phone numbers compared by digits only, so "+7 700 111-22-33" equals "77001112233". */
+export function samePhone(a: string, b: string): boolean {
+  const da = a.replace(/\D/g, "");
+  const db = b.replace(/\D/g, "");
+  return da.length >= 7 && da === db;
+}

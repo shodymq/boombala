@@ -4,6 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_env
 load_secrets
+assert_staging_cluster
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dir="$STAGING_ROOT/backups/$stamp"; mkdir -p "$dir"
 for pair in "$STAGING_BACKEND_DB:$CRM_TABLES" "$STAGING_PLATFORM_DB:$PLATFORM_TABLES"; do

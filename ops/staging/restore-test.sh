@@ -5,6 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_env
 load_secrets
+assert_staging_cluster
 dir="${1:-$(ls -1d "$STAGING_ROOT"/backups/*/ | sort | tail -1)}"
 dir="${dir%/}"
 scratches=()
