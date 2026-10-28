@@ -14,7 +14,9 @@ case "${1:-status}" in
     say "cluster initialised at $DATA (not the production cluster)"
     ;;
   start)
-    "$STAGING_PG_BIN/pg_ctl" -D "$DATA" -l "$LOG" -o "-p $STAGING_PG_PORT -c listen_addresses=127.0.0.1" -w start
+    # Unix socket in the staging run directory: the system socket directory belongs to the production cluster.
+    "$STAGING_PG_BIN/pg_ctl" -D "$DATA" -l "$LOG" \
+      -o "-p $STAGING_PG_PORT -c listen_addresses=127.0.0.1 -c unix_socket_directories=$STAGING_ROOT/run" -w start
     ;;
   stop)
     "$STAGING_PG_BIN/pg_ctl" -D "$DATA" -m fast stop || true
