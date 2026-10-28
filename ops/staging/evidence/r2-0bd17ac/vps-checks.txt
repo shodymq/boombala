@@ -1,0 +1,51 @@
+## headers
+PASS login: X-Frame-Options DENY (clickjacking)
+PASS login: CSP frame-ancestors 'none'
+PASS login: CSP object-src 'none' and base-uri 'self'
+PASS login: X-Content-Type-Options nosniff
+PASS login: Referrer-Policy same-origin
+PASS login: Permissions-Policy denies camera, microphone, geolocation, payment
+PASS script CSP has no unsafe-eval in the production build
+PASS protected page without session is redirected (no content)
+PASS cross-origin POST refused with 403
+9 passed, 0 failed
+## smoke
+PASS FastAPI docs answer on 127.0.0.1:8100
+PASS Platform login answers on 127.0.0.1:3400
+  {"token":true,"catalog":200,"timeline":200,"branches":2}
+  MISMATCH_REFUSED
+PASS linked manager obtains a token and reads catalog and timeline
+PASS identity mismatch is refused by FastAPI
+4 passed, 0 failed
+## backup and strict restore
+NOTICE:  database "crm_staging_restore_test" does not exist, skipping
+[staging] PASS crm_staging: restored data matches the manifest (9 tables)
+NOTICE:  database "platform_staging_restore_test" does not exist, skipping
+[staging] PASS platform_staging: restored data matches the manifest (3 tables)
+[staging] restore test PASSED
+## manifests (crm, platform) of /home/claudeops/boombala-staging/backups/20261028T180219Z/
+admin_users 8 dfce24e042d32bf2fa405c789085a0bd
+branches 2 45f040e3075707abaf7dcec38b3acb86
+birthday_packages 3 b51651caf263f7a7b04d6218b8635fdd
+birthday_booking_rooms 3 18061042d96a3738a5f965adf77bef6e
+birthday_requests 50 bc2183b96857a5395ad8920cc002d99f
+birthday_payment_facts 50 6b1ddc4278de200ffa89cf8bb497eaab
+birthday_slot_reservations 47 4a5e08b8f5b61776ebcc5f83beeccb15
+birthday_booking_audit 50 487a94cb47f2bef14948f4fcf1306606
+birthday_payment_audit 50 0f77e79bb0aed720b6c07c494e31aa2e
+users 7 de2d6fbe5fba33f6245d918167ef2112
+sessions 38 5c3fbbbb308a56f11f997dc6baf56305
+audit_log 56 4efbb92f110851499837bfcad3367fb6
+## negative target checks (exit codes)
+port 5432 exit=5
+remote host exit=5
+## pg ready
+[staging] cluster ready on 127.0.0.1:55433
+## isolation
+127.0.0.1:3100
+127.0.0.1:3101
+127.0.0.1:3400
+127.0.0.1:8100
+127.0.0.1:55433
+127.0.0.1:3000
+127.0.0.1:5432
