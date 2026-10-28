@@ -1,3 +1,4 @@
+import "server-only";
 import { almatyWindow, windowOverlapsRoom } from "../core/booking-calendar.ts";
 import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmClient } from "./fastapi-crm.ts";
 
