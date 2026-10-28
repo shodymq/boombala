@@ -7,7 +7,7 @@ load_secrets
 "$HERE/guard.sh" >/dev/null
 [ -n "${STAGING_TEST_PASSWORD:-}" ] || { echo "set STAGING_TEST_PASSWORD (12+ chars, test-only) in the environment" >&2; exit 2; }
 export_backend_env
-( cd "$BACKEND_DIR/backend" && "$STAGING_ROOT/venv/bin/python" "$HERE/seed/seed_calendar.py" && "$STAGING_ROOT/venv/bin/python" "$HERE/seed/add_owners.py" && "$STAGING_ROOT/venv/bin/python" "$HERE/seed/add_managers.py" )
+( cd "$BACKEND_DIR/backend" && "$STAGING_ROOT/venv/bin/python" "$HERE/seed/seed_calendar.py" && "$STAGING_ROOT/venv/bin/python" "$HERE/seed/add_owners.py" )
 export DATABASE_URL="postgres://$STAGING_PG_USER:$STAGING_PG_PASSWORD@127.0.0.1:$STAGING_PG_PORT/$STAGING_PLATFORM_DB"
 cd "$PLATFORM_DIR"
 for account in "owner-a:stg-owner-a" "owner-b:stg-owner-b" "manager-a:stg-manager-a" "manager-b:stg-manager-b"; do
