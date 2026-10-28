@@ -1,0 +1,65 @@
+PASS manager A calendar loads (catalog without 403)
+PASS manager A (global booking role) sees every active branch from the catalog — Тест-Алматы, Тест-Шымкент
+PASS A: booking 14:00–18:00 shown as verified only after FastAPI read-back — Бронь создана и подтверждена. Заявка и предоплата записаны. Проверено по данным системы.
+PASS B sees A's booking with the manual prepayment label
+PASS B: 16:00–20:00 refused with time_conflict
+PASS B: conflicting attempt wrote no second reservation
+PASS B: paid unconfirmed request shows FastAPI amount 20 000 ₸ and a no-repay confirm — Оплаченная заявка № 22d4d9b985ae4d29a65a5d319934bc30
+PASS forged ok/paid parameters show no success
+PASS unknown request state is reported as unknown
+PASS B: confirm after payment shows time_conflict, not success
+PASS FastAPI after 409: request not booked, payment fact still 20 000 — {"bookedAt":null,"fact":20000}
+PASS after 409 the paid request stays visible with its id and a way forward
+PASS B: paid request confirmed at 18:00 Room B, verified — Бронь создана и подтверждена. Заявка и предоплата записаны. 
+PASS FastAPI: request booked, still exactly one payment fact of 20 000
+PASS DB: exactly one manual payment fact for the request — n=1
+PASS manager A: manual block refused with a clear forbidden message
+PASS manager A: refused block left no block on the grid
+PASS owner: manual block verified — Время заблокировано. Проверено по данным системы.
+PASS A: release verified — Бронь отменена, комната свободна. Проверено по данным систем
+PASS history keeps the cancelled booking
+PASS after revocation the calendar re-issues a token and loads
+PASS unlinked manager A is refused (fail closed)
+PASS relinked manager A works again
+PASS logged-out context cannot open the calendar
+PASS logout then login restores the calendar
+PASS editor cannot open the calendar (no grid, no booking form)
+PASS branch scope: a foreign branch id falls back to a visible branch — stg-almaty
+PASS expired Platform session is sent to login — http://127.0.0.1:3400/login
+PASS tablet 768px: no horizontal page overflow — overflow=0
+29/29 passed
+PASS booking form exposes a server action id
+PASS cross-origin action POST is refused (Next aborts it) — status=403
+PASS cross-origin POST wrote no request and no payment
+PASS double click creates one request — requests=1
+PASS double click records one payment fact — facts=1
+PASS double click leaves one active booking — bookings=1
+PASS second submit for the same time is refused with time_conflict
+PASS second submit wrote no request and no payment — requests=1
+8/8 passed
+PASS the rival session took Room A 16:00 after A's pre-check
+PASS A's confirmation comes back as the kernel's time_conflict (not success) — {"ok":false,"code":"time_conflict","requestId":"7c7aa1b4f5db4741868cc84c918f1020"}
+PASS paid request stays unbooked after the 409 — bookedAt=null
+PASS the 20 000 ₸ payment fact is kept
+PASS DB: exactly one payment fact for the paid request — {"n":1,"total":20000}
+PASS the paid request is confirmed elsewhere without repaying — {"ok":true,"reservationId":"6d8fbdf6037c417094cf16882ff0afa5","requestId":"7c7aa1b4f5db4741868cc84c918f1020"}
+PASS after confirmation: still one payment fact and the request is booked
+PASS replaying the same confirm key does not create another reservation — status=200
+PASS DB: one active reservation for the paid request — n=1
+9/9 passed
+PASS D: a new attempt for a phone with a paid, unconfirmed request is refused, with that request shown
+PASS D: no second request and no second payment fact for the phone — requests=1 facts=1
+PASS D: the page names the existing request
+PASS A: the browser saw no response (the action was dropped after the server ran)
+PASS A: the server recorded exactly one request, one payment and one reservation — req=1 pay=1 res=1
+PASS A: after reload the booking is visible from FastAPI state
+PASS A: re-submit with a new key is refused by the room check, no duplicate
+PASS A: after re-submit still one request, one payment, one reservation — req=1 pay=1 res=1
+PASS B: a dropped confirm leaves the request unconfirmed
+PASS B: reload still offers the paid request, without a new payment
+PASS B: confirm after reload succeeds and is verified
+PASS B: one payment fact and one reservation for the paid request — pay=1 res=1
+PASS C: after a lost response the reload shows the request as booked, not offered again
+PASS C: the booked state is read from FastAPI
+PASS C: still one payment fact and one reservation — pay=1 res=1
+15/15 passed

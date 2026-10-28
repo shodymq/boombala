@@ -1,0 +1,60 @@
+## headers-check (VPS, production build)
+PASS login: X-Frame-Options DENY (clickjacking)
+PASS login: CSP frame-ancestors 'none'
+PASS login: CSP object-src 'none' and base-uri 'self'
+PASS login: X-Content-Type-Options nosniff
+PASS login: Referrer-Policy same-origin
+PASS login: Permissions-Policy denies camera, microphone, geolocation, payment
+PASS script CSP has no unsafe-eval in the production build
+PASS protected page without session is redirected (no content)
+PASS cross-origin POST refused with 403
+9 passed, 0 failed
+
+## smoke
+PASS FastAPI docs answer on 127.0.0.1:8100
+PASS Platform login answers on 127.0.0.1:3400
+  {"token":true,"catalog":200,"timeline":200,"branches":2}
+  MISMATCH_REFUSED
+PASS linked manager obtains a token and reads catalog and timeline
+PASS identity mismatch is refused by FastAPI
+4 passed, 0 failed
+
+## backup manifest (latest, produced by a strict restore of the same dump)
+dir=/home/claudeops/boombala-staging/backups/20261028T170445Z/
+-- crm_staging
+admin_users 6 ba93cfb00e2ec4b654a98caa9b03f662
+branches 2 45f040e3075707abaf7dcec38b3acb86
+birthday_packages 3 b51651caf263f7a7b04d6218b8635fdd
+birthday_booking_rooms 3 18061042d96a3738a5f965adf77bef6e
+birthday_requests 24 7eec6b40285500167d92c8eec680d4de
+birthday_payment_facts 24 4347c968e11d68b449ac16e3d3c2d6df
+birthday_slot_reservations 23 9e2a9d8fe906ef7ef6fcd894f6946d39
+birthday_booking_audit 25 4c070016bf340b3db05206775d2db1ab
+birthday_payment_audit 24 c16ebd7dc087721850f2206cc59016ed
+-- platform_staging
+users 5 3510a1460fb3ff99cbd44c354005d961
+sessions 19 9fa97a85ba849648cfcf9c597a3bf156
+audit_log 28 7e8a1ec3dcf1f8823fa19d32dbd11323
+
+## restore test
+NOTICE:  database "crm_staging_restore_test" does not exist, skipping
+[staging] PASS crm_staging: restored data matches the manifest (9 tables)
+NOTICE:  database "platform_staging_restore_test" does not exist, skipping
+[staging] PASS platform_staging: restored data matches the manifest (3 tables)
+[staging] restore test PASSED
+
+## isolation
+pid 132659 DATABASE_URL=postgres://***@127.0.0.1:55433/platform_staging
+pid 136095 DATABASE_URL=postgresql+psycopg://***@127.0.0.1:55433/crm_staging
+127.0.0.1:3100
+127.0.0.1:3101
+127.0.0.1:3400
+127.0.0.1:8100
+127.0.0.1:55433
+127.0.0.1:3000
+127.0.0.1:5432
+
+## supervisor and unit
+enabled
+active
+Linger=yes

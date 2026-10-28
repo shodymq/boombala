@@ -1,0 +1,151 @@
+{
+  "at": "2026-10-28T15:48:23.989Z",
+  "date": "2026-11-26",
+  "results": [
+    {
+      "name": "manager A calendar loads (catalog without 403)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "manager A (global booking role) sees every active branch from the catalog",
+      "ok": true,
+      "detail": "Тест-Алматы, Тест-Шымкент"
+    },
+    {
+      "name": "A: booking 14:00–18:00 shown as verified only after FastAPI read-back",
+      "ok": true,
+      "detail": "Бронь создана и подтверждена. Заявка и предоплата записаны. Проверено по данным системы."
+    },
+    {
+      "name": "B sees A's booking with the manual prepayment label",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: 16:00–20:00 refused with time_conflict",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: conflicting attempt wrote no second reservation",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: paid unconfirmed request shows FastAPI amount 20 000 ₸ and a no-repay confirm",
+      "ok": true,
+      "detail": "Оплаченная заявка № 4128e9de4d7e484fb081f90e844b64a6\n\nПредоплата 20 000 ₸ записана вручную в системе. Бронь НЕ подтверждена. Подтвердите её на выбранные комнату"
+    },
+    {
+      "name": "forged ok/paid parameters show no success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "unknown request state is reported as unknown",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: confirm after payment shows time_conflict, not success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FastAPI after 409: request not booked, payment fact still 20 000",
+      "ok": true,
+      "detail": "{\"bookedAt\":null,\"fact\":20000}"
+    },
+    {
+      "name": "after 409 the paid request stays visible with its id and a way forward",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: paid request confirmed at 18:00 Room B, verified",
+      "ok": true,
+      "detail": "Бронь создана и подтверждена. Заявка и предоплата записаны. "
+    },
+    {
+      "name": "FastAPI: request booked, still exactly one payment fact of 20 000",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "DB: exactly one manual payment fact for the request",
+      "ok": true,
+      "detail": "n=1"
+    },
+    {
+      "name": "manager A: manual block refused with a clear forbidden message",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "manager A: refused block left no block on the grid",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "owner: manual block verified",
+      "ok": true,
+      "detail": "Время заблокировано. Проверено по данным системы."
+    },
+    {
+      "name": "A: release verified",
+      "ok": true,
+      "detail": "Бронь отменена, комната свободна. Проверено по данным систем"
+    },
+    {
+      "name": "history keeps the cancelled booking",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "after revocation the calendar re-issues a token and loads",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "unlinked manager A is refused (fail closed)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "relinked manager A works again",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "logged-out context cannot open the calendar",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "logout then login restores the calendar",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "editor cannot open the calendar (no grid, no booking form)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "branch scope: a foreign branch id falls back to a visible branch",
+      "ok": true,
+      "detail": "stg-almaty"
+    },
+    {
+      "name": "expired Platform session is sent to login",
+      "ok": true,
+      "detail": "http://127.0.0.1:3300/login"
+    },
+    {
+      "name": "tablet 768px: no horizontal page overflow",
+      "ok": true,
+      "detail": "overflow=0"
+    }
+  ]
+}

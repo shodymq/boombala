@@ -1,0 +1,81 @@
+{
+  "at": "2026-10-28T18:01:47.273Z",
+  "date": "2027-11-13",
+  "results": [
+    {
+      "name": "D: a new attempt for a phone with a paid, unconfirmed request is refused, with that request shown",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "D: no second request and no second payment fact for the phone",
+      "ok": true,
+      "detail": "requests=1 facts=1"
+    },
+    {
+      "name": "D: the page names the existing request",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A: the browser saw no response (the action was dropped after the server ran)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A: the server recorded exactly one request, one payment and one reservation",
+      "ok": true,
+      "detail": "req=1 pay=1 res=1"
+    },
+    {
+      "name": "A: after reload the booking is visible from FastAPI state",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A: re-submit with a new key is refused by the room check, no duplicate",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A: after re-submit still one request, one payment, one reservation",
+      "ok": true,
+      "detail": "req=1 pay=1 res=1"
+    },
+    {
+      "name": "B: a dropped confirm leaves the request unconfirmed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: reload still offers the paid request, without a new payment",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: confirm after reload succeeds and is verified",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B: one payment fact and one reservation for the paid request",
+      "ok": true,
+      "detail": "pay=1 res=1"
+    },
+    {
+      "name": "C: after a lost response the reload shows the request as booked, not offered again",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "C: the booked state is read from FastAPI",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "C: still one payment fact and one reservation",
+      "ok": true,
+      "detail": "pay=1 res=1"
+    }
+  ]
+}

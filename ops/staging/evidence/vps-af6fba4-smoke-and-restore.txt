@@ -1,0 +1,18 @@
+PASS FastAPI docs answer on 127.0.0.1:8100
+PASS Platform login answers on 127.0.0.1:3400
+  {"token":true,"catalog":200,"timeline":200,"branches":2}
+  MISMATCH_REFUSED
+PASS linked manager obtains a token and reads catalog and timeline
+PASS identity mismatch is refused by FastAPI
+4 passed, 0 failed
+---backup/restore (last run)
+/home/claudeops/boombala-staging/backups/20261028T160848Z
+---history
+2026-10-28T16:04:58Z fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=39e1a51d52d82c49485ccdac40570d613dab5bf9
+2026-10-28T16:08:39Z fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=558f0a0f0be098d7f665e5edb2265e02fbcef493
+2026-10-28T16:09:00Z fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=558f0a0f0be098d7f665e5edb2265e02fbcef493
+2026-10-28T16:09:00Z ROLLBACK fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=39e1a51d52d82c49485ccdac40570d613dab5bf9
+2026-10-28T16:10:37Z fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=558f0a0f0be098d7f665e5edb2265e02fbcef493
+2026-10-28T16:10:37Z ROLLBACK fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=739588ed3196eb7bef8cc22846420cb6efedfaf5
+2026-10-28T16:11:55Z fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=af6fba43eb99076a61a702969e05bf01bcd74d1c
+2026-10-28T16:11:55Z ROLLBACK fastapi=6245ddcb97f16b1ff6eb1ebd0f83f2437fa5e986 platform=af6fba43eb99076a61a702969e05bf01bcd74d1c

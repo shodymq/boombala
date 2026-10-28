@@ -1,0 +1,46 @@
+{
+  "at": "2026-10-28T16:11:52.709Z",
+  "date": "2026-12-04",
+  "results": [
+    {
+      "name": "booking form exposes a server action id",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "cross-origin action POST is refused (Next aborts it)",
+      "ok": true,
+      "detail": "status=500"
+    },
+    {
+      "name": "cross-origin POST wrote no request and no payment",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "double click creates one request",
+      "ok": true,
+      "detail": "requests=1"
+    },
+    {
+      "name": "double click records one payment fact",
+      "ok": true,
+      "detail": "facts=1"
+    },
+    {
+      "name": "double click leaves one active booking",
+      "ok": true,
+      "detail": "bookings=1"
+    },
+    {
+      "name": "second submit for the same time is refused with time_conflict",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "second submit wrote no request and no payment",
+      "ok": true,
+      "detail": "requests=1"
+    }
+  ]
+}

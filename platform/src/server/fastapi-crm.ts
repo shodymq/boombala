@@ -1,3 +1,4 @@
+import "server-only";
 import { randomUUID } from "node:crypto";
 
 export type FastApiCrmActor = {
@@ -14,31 +15,74 @@ export type BookingTimelineReservation = {
   kind: "booking" | "block";
   status: "confirmed" | "blocked" | "released";
   roomId: string;
+  /** The four-hour party window. */
   startsAt: string;
   endsAt: string;
+  /** End of the room occupancy, including the branch preparation buffer. The PostgreSQL overlap rule uses this value. */
+  occupiedEndsAt: string;
   slotId: string | null;
   packageName: string | null;
   priceKzt: number | null;
   priceSource: string | null;
+  /** Manager-recorded manual prepayment total. Never an online payment. */
   paidKzt: number;
+  /** "prepaid" means a positive manual fact exists. It does not mean the booking is confirmed or paid online. */
+  paymentStatus: "unpaid" | "prepaid";
   note: string | null;
   requestId: string | null;
   /** Null unless the staff role may see client data (super_admin, sales_manager). */
   customerName: string | null;
   customerPhone: string | null;
   createdByAdminId: string | null;
+  /** The responsible staff member's name, when the server shares it. */
+  createdByName: string | null;
+  releasedAt?: string | null;
 };
 
 export type BookingTimeline = {
   branchId: string;
   date: string;
   timezone: "Asia/Almaty";
+  bufferMinutes: number;
   rooms: BookingTimelineRoom[];
   reservations: BookingTimelineReservation[];
 };
 
+/** Booking-scoped catalog (camelCase). Only active rows; the server applies the caller's branch scope. */
+export type BookingCatalogBranch = {
+  id: string;
+  slug: string;
+  name: string;
+  city: string;
+  workingHours: string;
+  bufferMinutes: number;
+};
+export type BookingCatalogRoom = { id: string; branchId: string; name: string };
+export type BookingCatalogPackage = {
+  id: string;
+  branchId: string;
+  name: string;
+  /** Indicative "from" value. Never the agreed price. */
+  priceFrom: number;
+  priceLabel: string;
+  guestCapacityLabel: string;
+};
+/** The FastAPI birthday lead read back after an action. Only these fields decide the calendar's money and booking text. */
+export type BirthdayLeadState = {
+  id: string;
+  status: string;
+  bookedAt: string | null;
+  manualPaymentFactStatus: "unpaid" | "prepaid";
+  manualPaymentFactAmountKzt: number;
+  customerName: string;
+};
+
+export type BookingCatalog = { branches: BookingCatalogBranch[]; rooms: BookingCatalogRoom[]; packages: BookingCatalogPackage[] };
+
+export type FastApiLeadListItem = { id: string; type: string; status: string; phone: string; customerName: string; createdAt: string; requestedDate?: string | null; branch?: { id: string } | null };
+
 export type FastApiLeadList = {
-  items: unknown[];
+  items: FastApiLeadListItem[];
   total: number;
 };
 
@@ -146,8 +190,8 @@ export class FastApiCrmClient {
     return this.request<FastApiLeadList>(`/admin/leads${suffix}`);
   }
 
-  getBirthdayLead(leadId: string): Promise<unknown> {
-    return this.request(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
+  getBirthdayLead(leadId: string): Promise<BirthdayLeadState> {
+    return this.request<BirthdayLeadState>(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
   }
 
   updateLeadStatus(leadId: string, body: Record<string, unknown>): Promise<unknown> {
@@ -165,6 +209,20 @@ export class FastApiCrmClient {
   getBookingTimeline(branchId: string, date: string): Promise<BookingTimeline> {
     const params = new URLSearchParams({ branchId, date });
     return this.request<BookingTimeline>(`/admin/birthday-bookings/timeline?${params.toString()}`);
+  }
+
+  /** The only catalog the calendar reads. For an operator the server applies the assigned branch. */
+  getBookingCatalog(branchId?: string): Promise<BookingCatalog> {
+    const suffix = branchId ? `?${new URLSearchParams({ branchId }).toString()}` : "";
+    return this.request<BookingCatalog>(`/admin/birthday-bookings/catalog${suffix}`);
+  }
+
+  createStaffRequest(body: Record<string, unknown>): Promise<{ id: string; status: string; branchId: string; packageId: string | null; requestedDate: string | null; guestCount: number | null; source: string }> {
+    return this.request("/admin/birthday-requests", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  blockSlot(body: Record<string, unknown>): Promise<unknown> {
+    return this.request("/admin/birthday-slots/block", { method: "POST", body: JSON.stringify(body) });
   }
 
   rescheduleReservation(reservationId: string, body: Record<string, unknown>): Promise<unknown> {
