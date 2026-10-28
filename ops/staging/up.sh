@@ -3,6 +3,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_env
 "$HERE/guard.sh" >/dev/null
+ensure_checkouts
 load_secrets
 "$HERE/pg.sh" start >/dev/null 2>&1 || true
 

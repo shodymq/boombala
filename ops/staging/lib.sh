@@ -45,3 +45,47 @@ export_backend_env() {
 }
 
 say() { printf '[staging] %s\n' "$*"; }
+
+# Tables whose content must survive a restore: money, requests, reservations, staff, audit. Used by backup and restore tests.
+CRM_TABLES="admin_users branches birthday_packages birthday_booking_rooms birthday_requests birthday_payment_facts birthday_slot_reservations birthday_booking_audit birthday_payment_audit"
+PLATFORM_TABLES="users sessions audit_log"
+
+# Restores one dump into a fresh database. Any pg_restore error fails the call (no silent skips).
+restore_strict() { # dump-file target-db
+  local dump="$1" target="$2" log
+  log="$STAGING_ROOT/logs/restore-$target.log"
+  PGPASSWORD="$STAGING_PG_PASSWORD" "$STAGING_PG_BIN/psql" -h 127.0.0.1 -p "$STAGING_PG_PORT" -U "$STAGING_PG_USER" -d postgres -qAt -v ON_ERROR_STOP=1 \
+    -c "DROP DATABASE IF EXISTS \"$target\"" -c "CREATE DATABASE \"$target\"" >/dev/null
+  if ! PGPASSWORD="$STAGING_PG_PASSWORD" "$STAGING_PG_BIN/pg_restore" -h 127.0.0.1 -p "$STAGING_PG_PORT" -U "$STAGING_PG_USER" \
+      -d "$target" --no-owner --exit-on-error "$dump" >"$log" 2>&1; then
+    echo "pg_restore FAILED for $dump (see $log)" >&2
+    tail -5 "$log" >&2
+    return 1
+  fi
+}
+
+# Manifest lines for one database, using the same connection settings as the staging services.
+manifest_of() { # database tables...
+  local db="$1"; shift
+  PGHOST=127.0.0.1 PGPORT="$STAGING_PG_PORT" PGUSER="$STAGING_PG_USER" PGPASSWORD="$STAGING_PG_PASSWORD" \
+    PSQL="$STAGING_PG_BIN/psql" "$HERE/manifest.sh" "$db" "$@"
+}
+
+drop_db() { # database
+  PGPASSWORD="$STAGING_PG_PASSWORD" "$STAGING_PG_BIN/psql" -h 127.0.0.1 -p "$STAGING_PG_PORT" -U "$STAGING_PG_USER" -d postgres -qAt \
+    -c "DROP DATABASE IF EXISTS \"$1\"" >/dev/null
+}
+
+# The checkouts must exist at the pinned SHAs before anything starts. This never deletes or re-clones: a missing or moved
+# checkout stops the stack with a message, and the operator restores it from the pinned SHA.
+ensure_checkouts() {
+  [ -d "$BACKEND_DIR/backend" ] || { echo "backend checkout missing at $BACKEND_DIR (restore it at BACKEND_SHA)" >&2; exit 4; }
+  [ -f "$PLATFORM_DIR/package.json" ] || { echo "platform checkout missing at $PLATFORM_DIR (restore it at PLATFORM_SHA)" >&2; exit 4; }
+  local root
+  root="$(git -C "$PLATFORM_DIR" rev-parse --show-toplevel 2>/dev/null)" || { echo "platform checkout is not a git repository" >&2; exit 4; }
+  local head
+  head="$(git -C "$root" rev-parse HEAD)"
+  if [ -n "${PLATFORM_SHA:-}" ] && [ "$head" != "$PLATFORM_SHA" ] && ! git -C "$root" merge-base --is-ancestor "$PLATFORM_SHA" "$head" 2>/dev/null; then
+    echo "platform checkout is at $head, not at pinned $PLATFORM_SHA" >&2; exit 4
+  fi
+}
