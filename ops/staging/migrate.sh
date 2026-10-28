@@ -8,6 +8,6 @@ pg_url() { printf 'postgresql://%s:%s@127.0.0.1:%s/%s' "$STAGING_PG_USER" "$STAG
 export DATABASE_URL="$(pg_url "$STAGING_PLATFORM_DB")"
 ( cd "$PLATFORM_DIR" && npm run -s db:migrate )
 say "platform migrations applied"
-export DATABASE_URL="postgresql+psycopg://$STAGING_PG_USER:$STAGING_PG_PASSWORD@127.0.0.1:$STAGING_PG_PORT/$STAGING_BACKEND_DB"
+export_backend_env
 ( cd "$BACKEND_DIR/backend" && "$STAGING_ROOT/venv/bin/alembic" upgrade head )
 say "FastAPI migrations applied"

@@ -15,11 +15,7 @@ start_service() { # name port logfile -- command...
   say "$name started (pid $(cat "$pid_file"), 127.0.0.1:$port)"
 }
 
-export DATABASE_URL="postgresql+psycopg://$STAGING_PG_USER:$STAGING_PG_PASSWORD@127.0.0.1:$STAGING_PG_PORT/$STAGING_BACKEND_DB"
-export CRM_SERVICE_TOKEN CRM_STAFF_ASSERTION_SECRET JWT_SECRET_KEY TICKET_QR_SECRET
-export APP_ENV=test OTP_MOCK_MODE=true PAYMENT_PROVIDER=mock FREEDOMPAY_MOCK_MODE=true ONLINE_PAYMENTS_ENABLED=false
-export BIRTHDAY_BOOKING_ENABLED=true PUSH_NOTIFICATIONS_ENABLED=false CRM_BRIDGE_ALLOWED_IPS=127.0.0.1,::1
-export MEDIA_ROOT="$STAGING_ROOT/media"; mkdir -p "$MEDIA_ROOT"
+export_backend_env
 start_service fastapi "$STAGING_FASTAPI_PORT" "$STAGING_ROOT/logs/fastapi.log" \
   bash -c "cd '$BACKEND_DIR/backend' && exec nice -n 5 '$STAGING_ROOT/venv/bin/uvicorn' app.main:app --host 127.0.0.1 --port $STAGING_FASTAPI_PORT --workers 1"
 
