@@ -1,0 +1,16 @@
+# systemd --user unit template for the staging stack (copy to ~/.config/systemd/user/). Starts and stops the staging services
+# only; it does not touch bb-admin, bb-site, bb-api, nginx or the production PostgreSQL.
+[Unit]
+Description=Boom Bala CRM staging (isolated, 127.0.0.1 only)
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/src/boombala-platform-staging/ops/staging
+ExecStartPre=%h/src/boombala-platform-staging/ops/staging/guard.sh
+ExecStart=%h/src/boombala-platform-staging/ops/staging/up.sh
+ExecStop=%h/src/boombala-platform-staging/ops/staging/down.sh
+
+[Install]
+WantedBy=default.target
