@@ -56,7 +56,7 @@ const input = "h-11 w-full rounded-xl border-2 border-grape-200 bg-white px-3 te
 const btn = "h-11 rounded-full bg-grape-700 px-5 text-sm font-extrabold text-white hover:bg-grape-600 disabled:opacity-50";
 const btnGhost = "flex h-11 items-center rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50";
 
-type Search = { branch?: string; date?: string; start?: string; notice?: string; error?: string };
+type Search = { branch?: string; date?: string; start?: string; notice?: string; error?: string; request?: string; paid?: string };
 
 function shiftDate(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
@@ -136,6 +136,11 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
       <h1 className="text-3xl font-black tracking-tight text-grape-800">Календарь</h1>
       {notice ? <p role="status" className="rounded-2xl bg-grape-100 p-3 text-sm font-bold text-grape-900">{notice}</p> : null}
       {errorText ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{errorText}</p> : null}
+      {search.request ? (
+        <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">
+          Бронь НЕ подтверждена. Заявка {search.request} {search.paid === "1" ? "создана, предоплата записана" : "создана"}. Не создавайте новую заявку: откройте её в разделе «Заявки» и разберите вручную.
+        </p>
+      ) : null}
 
       <nav aria-label="Филиал и дата" className="flex flex-wrap items-end gap-3">
         <form method="get" className="flex flex-wrap items-end gap-2">

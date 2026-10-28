@@ -55,3 +55,10 @@ short-lived staff access token from `POST /api/v1/admin/auth/service/staff-acces
 
 Nothing else blocks the calendar. The Platform does not add backend endpoints and does not write to the database
 for booking operations.
+
+## Bridge V1 (BoomBalaApp 576ecf5)
+
+- The bridge call sends `X-CRM-Service-Token` and `X-CRM-Staff-Assertion` (signed with `CRM_STAFF_ASSERTION_SECRET`, 60 s, bound to the body `requestId`). Format and rules: `docs/architecture/CRM_FASTAPI_BRIDGE_V1.md` in BoomBalaApp.
+- The FastAPI identity is explicit: `bb.users.fastapi_admin_user_id` (migration 014), set with `npm run user:link-fastapi -- --email <email> --admin-user-id <id>`. A staff account without a link is refused before any network call (`staff_not_linked`). There is no e-mail-only fallback.
+- Verified on local staging against FastAPI 576ecf5: linked staff get a token; a mismatched link returns `403 crm_staff_identity_mismatch`; an unlinked account returns `403 staff_not_linked`.
+- Open backend gap (unchanged): `GET /admin/branches` and `GET /admin/birthday-packages` return `403 insufficient_role` for `sales_manager`. Managers see the fail-closed alert until a booking-scoped catalog endpoint exists (contract item 5).

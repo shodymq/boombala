@@ -17,6 +17,7 @@
     "db:seed": "node --no-warnings scripts/seed.ts",
     "user:create": "node --no-warnings scripts/create-user.ts",
     "user:mfa-reset": "node --no-warnings scripts/mfa-reset.ts",
+    "user:link-fastapi": "node --no-warnings scripts/link-fastapi-staff.ts",
     "user:set-password": "node --no-warnings scripts/set-password.ts",
     "sessions:revoke": "node --no-warnings scripts/revoke-sessions.ts",
     "db:roles": "node --no-warnings scripts/db-roles.ts",

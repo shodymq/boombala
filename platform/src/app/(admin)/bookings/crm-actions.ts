@@ -116,6 +116,9 @@ export async function createBookingAction(formData: FormData): Promise<void> {
   // Booking needs a request, then a recorded prepayment (the kernel refuses a confirmation without one), then the confirmation.
   // Each step has its own derived idempotency key, so a double submit replays the same records instead of creating new ones.
   let outcome: string;
+  // Once the request exists, a later failure must still tell the manager which request holds the money.
+  let requestId: string | null = null;
+  let paid = false;
   try {
     const client = new FastApiCrmClient(await crmActorForSession(session, randomUUID()));
     // Refuse a known conflict before any request or prepayment is written, so no paid request is left behind.
@@ -134,12 +137,14 @@ export async function createBookingAction(formData: FormData): Promise<void> {
       notes: input.note,
       idempotencyKey: `${input.idempotencyKey}:request`,
     });
+    requestId = request.id;
     await client.recordManualPayment(request.id, {
       amountKzt: input.prepaymentKzt,
       method: input.prepaymentMethod,
       idempotencyKey: `${input.idempotencyKey}:payment`,
       note: input.note,
     });
+    paid = true;
     await client.confirmBooking({
       requestId: request.id,
       bookingDate: input.date,
@@ -153,6 +158,8 @@ export async function createBookingAction(formData: FormData): Promise<void> {
     outcome = "notice=booked";
   } catch (error) {
     outcome = `error=${failureCode(error)}`;
+    // A paid request that was not confirmed is kept on screen with its id, so the manager finds it and does not pay twice.
+    if (requestId) outcome += `&request=${encodeURIComponent(requestId)}&paid=${paid ? "1" : "0"}`;
   }
   redirect(calendarUrl(input.branchId, input.date, outcome));
 }

@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach, afterEach } from "node:test";
+import { createHmac } from "node:crypto";
 import { fastApiActorForStaff } from "../src/server/fastapi-staff.ts";
 
 const TOKEN = "s".repeat(40);
-const saved = { token: process.env.CRM_SERVICE_TOKEN, base: process.env.FASTAPI_ADMIN_BASE_URL };
+const ASSERTION_SECRET = "a".repeat(40);
+const LINKED = { email: "manager-a@boombala.kz", fastapiAdminUserId: "adminuser0000000000000000000000a1" };
+const saved = { token: process.env.CRM_SERVICE_TOKEN, base: process.env.FASTAPI_ADMIN_BASE_URL, assertion: process.env.CRM_STAFF_ASSERTION_SECRET };
+
+function verifyAssertion(assertion: string): Record<string, unknown> {
+  const [version, encoded, signature] = assertion.split(".");
+  assert.equal(version, "v1");
+  assert.equal(signature, createHmac("sha256", ASSERTION_SECRET).update(encoded, "ascii").digest("hex"));
+  return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+}
 
 function stub(status: number, body: unknown, calls: Array<{ url: string; init: RequestInit }>): typeof fetch {
   return (async (url: string | URL | Request, init: RequestInit = {}) => {
@@ -16,18 +26,21 @@ describe("staff token bridge (server only)", () => {
   beforeEach(() => {
     process.env.CRM_SERVICE_TOKEN = TOKEN;
     process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    process.env.CRM_STAFF_ASSERTION_SECRET = ASSERTION_SECRET;
   });
   afterEach(() => {
     if (saved.token === undefined) delete process.env.CRM_SERVICE_TOKEN;
     else process.env.CRM_SERVICE_TOKEN = saved.token;
     if (saved.base === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
     else process.env.FASTAPI_ADMIN_BASE_URL = saved.base;
+    if (saved.assertion === undefined) delete process.env.CRM_STAFF_ASSERTION_SECRET;
+    else process.env.CRM_STAFF_ASSERTION_SECRET = saved.assertion;
   });
 
   it("asks FastAPI for a token for the given staff email with the service secret in a header", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const actor = await fastApiActorForStaff(
-      { email: "manager-a@boombala.kz" },
+      LINKED,
       { requestId: "req-1", fetchImpl: stub(200, { access_token: "bridge-token", token_type: "bearer", expires_in_seconds: 900, user: {} }, calls) },
     );
     assert.equal(actor.accessToken, "bridge-token");
@@ -37,11 +50,33 @@ describe("staff token bridge (server only)", () => {
     assert.equal(headers.get("x-crm-service-token"), TOKEN);
     assert.equal(headers.get("authorization"), null, "no bearer on the bridge call");
     assert.deepEqual(JSON.parse(String(calls[0].init.body)), { email: "manager-a@boombala.kz", requestId: "req-1" });
+    const claims = verifyAssertion(headers.get("x-crm-staff-assertion") ?? "");
+    assert.equal(claims.staffId, LINKED.fastapiAdminUserId);
+    assert.equal(claims.email, "manager-a@boombala.kz");
+    assert.equal(claims.requestId, "req-1", "the assertion is bound to the body request id");
+    assert.ok((claims.expiresAt as number) - (claims.issuedAt as number) <= 60);
+  });
+
+  it("refuses a staff account with no FastAPI link before any network call", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    await assert.rejects(
+      fastApiActorForStaff({ email: LINKED.email, fastapiAdminUserId: null }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, calls) }),
+      (error: Error & { code?: string }) => error.code === "staff_not_linked",
+    );
+    assert.equal(calls.length, 0);
+  });
+
+  it("fails closed when the assertion secret is missing or short", async () => {
+    process.env.CRM_STAFF_ASSERTION_SECRET = "short";
+    await assert.rejects(
+      fastApiActorForStaff(LINKED, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, []) }),
+      (error: Error) => error.message === "crm_actor_missing",
+    );
   });
 
   it("returns only the access token, never a refresh token or the service secret", async () => {
     const actor = await fastApiActorForStaff(
-      { email: "manager-a@boombala.kz" },
+      LINKED,
       { requestId: "req-2", fetchImpl: stub(200, { access_token: "bridge-token", refresh_token: "must-not-leak" }, []) },
     );
     assert.deepEqual(Object.keys(actor).sort(), ["accessToken", "requestId"]);
@@ -52,21 +87,21 @@ describe("staff token bridge (server only)", () => {
   it("fails closed when the service secret is missing or short", async () => {
     process.env.CRM_SERVICE_TOKEN = "short";
     await assert.rejects(
-      fastApiActorForStaff({ email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, []) }),
+      fastApiActorForStaff(LINKED, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, []) }),
       (error: Error) => error.message === "crm_actor_missing",
     );
   });
 
   it("fails closed when FastAPI refuses the staff member (unlinked, inactive, or bad secret)", async () => {
     await assert.rejects(
-      fastApiActorForStaff({ email: "ghost@boombala.kz" }, { requestId: "r", fetchImpl: stub(403, { error: { code: "staff_not_linked" } }, []) }),
+      fastApiActorForStaff({ ...LINKED, email: "ghost@boombala.kz" }, { requestId: "r", fetchImpl: stub(403, { error: { code: "staff_not_linked" } }, []) }),
       (error: Error & { code?: string; status?: number }) => error.code === "staff_not_linked" && error.status === 403,
     );
   });
 
   it("fails closed on a response without a token", async () => {
     await assert.rejects(
-      fastApiActorForStaff({ email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { ok: true }, []) }),
+      fastApiActorForStaff(LINKED, { requestId: "r", fetchImpl: stub(200, { ok: true }, []) }),
       (error: Error & { code?: string }) => error.code === "staff_token_missing",
     );
   });

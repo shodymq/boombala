@@ -6,6 +6,8 @@ import { z } from "zod";
 import { authenticate } from "../../core/auth.ts";
 import { MAX_PASSWORD_LENGTH } from "../../core/password.ts";
 import { revokeSession } from "../../core/session.ts";
+import { forgetCrmActor } from "../../server/crm-actor.ts";
+import { getSession } from "../../server/dal.ts";
 import { getPool } from "../../server/db.ts";
 import { SESSION_COOKIE, isHttps, mfaRequired } from "../../server/env.ts";
 import { requestMeta } from "../../server/request.ts";
@@ -43,6 +45,8 @@ export async function login(_prev: LoginState | undefined, formData: FormData): 
 export async function logout(): Promise<void> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
+  const session = await getSession();
+  if (session) forgetCrmActor(session.sessionId);
   if (token) await revokeSession(getPool(), token);
   jar.delete(SESSION_COOKIE);
   redirect("/login");
