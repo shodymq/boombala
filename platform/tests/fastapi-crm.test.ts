@@ -104,10 +104,105 @@ describe("FastAPI CRM adapter", () => {
       },
     });
     await assert.rejects(
-      () => client.confirmBookingAndRead({ requestId: "lead-1", idempotencyKey: "confirm-0001" }),
+      () => client.confirmBookingAndRead({
+        requestId: "lead-1", bookingDate: "2099-05-15", roomId: "room-1", startTime: "10:00",
+        idempotencyKey: "confirm-0001",
+      }),
       (error) => error instanceof FastApiCrmError && error.status === 409 && error.code === "slot_taken",
     );
     assert.deepEqual(paths, ["/api/v1/admin/birthday-bookings/confirm", "/api/v1/admin/leads/lead-1/birthday"]);
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("confirms a booking only after the lead and room timeline show the saved booking", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    const paths: string[] = [];
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async (url) => {
+        const path = new URL(String(url)).pathname;
+        paths.push(path);
+        if (path.endsWith("/birthday-bookings/confirm")) {
+          return new Response(JSON.stringify({ id: "reservation-1", kind: "booking", status: "confirmed" }), { status: 200 });
+        }
+        if (path.endsWith("/birthday")) {
+          return new Response(JSON.stringify({
+            id: "request-1", status: "booked", source: "website", customerName: "Parent", phone: "+77070000000",
+            contactMethod: "phone", branch: { id: "branch-1", name: "Алматы", shortLabel: "ALM" },
+            manualPaymentFacts: [], manualRefundFacts: [], manualRefundFactAmountKzt: 0,
+            netManualPaymentAmountKzt: 10000, manualPaymentFactAmountKzt: 10000,
+            manualPaymentFactStatus: "prepaid", createdAt: "2026-10-31T10:00:00Z",
+            agreedAmountTenge: 180000,
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          branchId: "branch-1", date: "2026-11-15", timezone: "Asia/Almaty", bufferMinutes: 30,
+          rooms: [{ id: "room-1", name: "Комната" }],
+          reservations: [{
+            id: "reservation-1", kind: "booking", status: "confirmed", roomId: "room-1",
+            startsAt: "2026-11-15T10:00:00+05:00", endsAt: "2026-11-15T14:00:00+05:00",
+            occupiedEndsAt: "2026-11-15T14:30:00+05:00", slotId: null, packageName: "Party",
+            priceKzt: 180000, priceSource: "manager_agreed", paidKzt: 10000, paymentStatus: "prepaid",
+            note: null, requestId: "request-1", customerName: "Parent", customerPhone: "+77070000000",
+            createdByAdminId: "staff-1", createdByName: "Manager",
+          }],
+        }), { status: 200 });
+      },
+    });
+
+    const result = await client.confirmBookingAndRead({
+      requestId: "request-1", bookingDate: "2026-11-15", roomId: "room-1", startTime: "10:00",
+      packageId: "package-1", agreedPriceKzt: 180000, idempotencyKey: "confirm-1",
+    });
+
+    assert.equal(result.booking.id, "reservation-1");
+    assert.deepEqual(paths, [
+      "/api/v1/admin/birthday-bookings/confirm",
+      "/api/v1/admin/leads/request-1/birthday",
+      "/api/v1/admin/birthday-bookings/timeline",
+    ]);
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("does not acknowledge a manual payment missing from the saved lead facts", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    let call = 0;
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => {
+        call += 1;
+        if (call === 1) {
+          return new Response(JSON.stringify({
+            id: "payment-1", requestId: "request-1", amountKzt: 10000, method: "cash",
+            receivedAt: "2026-10-31T10:00:00Z", source: "manager_manual", idempotencyKey: "payment-1",
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          id: "request-1", status: "new", source: "website", customerName: "Parent", phone: "+77070000000",
+          contactMethod: "phone", manualPaymentFacts: [], manualRefundFacts: [], manualRefundFactAmountKzt: 0,
+          netManualPaymentAmountKzt: 0, manualPaymentFactAmountKzt: 0,
+          manualPaymentFactStatus: "unpaid", createdAt: "2026-10-31T10:00:00Z",
+        }), { status: 200 });
+      },
+    });
+
+    await assert.rejects(
+      () => client.recordManualPaymentAndRead("request-1", {
+        amountKzt: 10000, method: "cash", idempotencyKey: "payment-1",
+      }),
+      (error) => error instanceof FastApiCrmError && error.code === "payment_readback_mismatch",
+    );
+
     if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
     else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
     if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;

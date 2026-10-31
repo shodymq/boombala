@@ -27,6 +27,8 @@ function detailError(id: string, error: unknown, retryKey?: { name: string; valu
     else if (error.status === 404) code = "not_found";
     else if (error.status === 409 && ["time_conflict", "slot_taken"].includes(error.code)) code = "slot_taken";
     else if (error.status === 409 && error.code === "birthday_prepayment_required") code = "prepayment_required";
+    else if (error.status === 409 && error.code === "booking_buffer_required") code = "buffer_required";
+    else if (error.status === 409 && error.code === "booking_buffer_reconciliation_required") code = "buffer_reconciliation_required";
     else if (error.status === 409 && error.code === "birthday_refund_exceeds_paid") code = "refund_exceeds_paid";
     else if (error.status === 422 && error.code === "invalid_lead_status_transition") code = "transition";
     else if (error.status === 409) code = "conflict";

@@ -26,7 +26,15 @@ function failure(date: string, error: unknown, retryKey?: { name: string; value:
   else if (error instanceof ValidationError) code = "invalid";
   else if (error instanceof ForbiddenError) code = "forbidden";
   else if (error instanceof FastApiCrmConfigurationError) code = "fastapi_unavailable";
-  else if (error instanceof FastApiCrmError) code = error.status === 403 ? "forbidden" : error.status === 409 ? ["time_conflict", "slot_taken"].includes(error.code) ? "slot_taken" : "conflict" : error.status >= 500 ? "fastapi_unavailable" : "invalid";
+  else if (error instanceof FastApiCrmError) {
+    if (error.status === 403) code = "forbidden";
+    else if (error.status === 409 && error.code === "booking_buffer_required") code = "buffer_required";
+    else if (error.status === 409 && error.code === "booking_buffer_reconciliation_required") code = "buffer_reconciliation_required";
+    else if (error.status === 409 && ["time_conflict", "slot_taken"].includes(error.code)) code = "slot_taken";
+    else if (error.status === 409) code = "conflict";
+    else if (error.status >= 500) code = "fastapi_unavailable";
+    else code = "invalid";
+  }
   const keepKey = retryKey && canRetryWithSameIdempotencyKey(error);
   const params = new URLSearchParams({ error: code });
   if (keepKey) {
