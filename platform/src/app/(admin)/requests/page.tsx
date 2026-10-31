@@ -1,86 +1,274 @@
+import { randomUUID } from "node:crypto";
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
+import { FlaticonIcon } from "@/components/flaticon-icon";
 import { listLeads } from "@/core/bookings";
 import { listPackages, listRooms, listSlots } from "@/core/catalog";
+import { isValidDate } from "@/core/dates";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { DatePicker } from "@/components/date-picker";
+import { FastApiCrmClient, unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
+import { fastApiActorForStaff } from "@/server/fastapi-staff";
 import { confirmLeadAction, leadStatusAction } from "./actions";
 
 export const metadata: Metadata = { title: "Заявки" };
 
-const STATUS: Record<string, string> = { new: "Новая", in_progress: "В работе", confirmed: "Подтверждена", cancelled: "Отменена", completed: "Завершена" };
+const LEGACY_STATUS: Record<string, string> = {
+  new: "Новая", in_progress: "В работе", confirmed: "Подтверждена", cancelled: "Отменена", completed: "Завершена",
+};
+const FASTAPI_STATUS: Record<string, string> = {
+  new: "Новая", contacted: "Связались", qualified: "Квалифицирована", booked: "Забронирована",
+  paid: "Оплачена", completed: "Завершена", lost: "Потеряна", in_progress: "В работе",
+  confirmed: "Подтверждена", cancelled: "Отменена", closed: "Закрыта",
+};
 const NOTICES: Record<string, string> = { status: "Статус изменён." };
 const ERRORS: Record<string, string> = {
   slot_taken: "Этот слот уже занят. Выберите другую комнату или время.",
   invalid: "Проверьте дату, слот, комнату и пакет (у пакета должна быть цена; прошедший слот занять нельзя).",
   conflict: "Заявка уже обработана.", forbidden: "Недостаточно прав.",
+  fastapi_unavailable: "FastAPI CRM недоступна. Данные из старой базы не показаны.",
 };
-const input = "h-11 w-full rounded-xl border-2 border-grape-200 bg-white px-3 text-base text-ink focus:border-grape-600 focus:outline-none";
-const btn = "h-11 rounded-full bg-grape-700 px-5 text-sm font-extrabold text-white hover:bg-grape-600";
-const btnGhost = "h-11 rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50";
+const input = "crm-requests-control";
+const btn = "crm-requests-action";
+const btnGhost = "crm-requests-action crm-requests-action-secondary";
 
-export default async function RequestsPage({ searchParams }: { searchParams: Promise<{ status?: string; notice?: string; error?: string }> }) {
+type RequestItem = {
+  id: string;
+  label: string;
+  status: string;
+  name: string;
+  phone: string;
+  createdAt: Date;
+  requestedDate: string | null;
+  packageName: string;
+  children: number | null;
+  packageId: string | null;
+  roomId: string | null;
+  slotId: number | null;
+  reservationId: string | null;
+  source?: string;
+  branch?: string;
+  summary?: string;
+};
+
+export default async function RequestsPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; createdFrom?: string; createdTo?: string; notice?: string; error?: string }> }) {
   const { user } = await requirePermission("requests.manage");
   const sp = await searchParams;
-  const status = sp.status && STATUS[sp.status] ? sp.status : undefined;
-  const actor = { id: user.id, role: user.role };
-  const pool = getPool();
-  const [leads, packages, rooms, slots] = await Promise.all([listLeads(pool, actor, { status }), listPackages(pool), listRooms(pool), listSlots(pool)]);
+  const unified = unifiedFastapiCrmEnabled();
+  const statusLabels = unified ? FASTAPI_STATUS : LEGACY_STATUS;
+  const status = sp.status && statusLabels[sp.status] ? sp.status : undefined;
+  const q = sp.q?.trim().slice(0, 80) || undefined;
+  const createdFrom = sp.createdFrom && isValidDate(sp.createdFrom) ? sp.createdFrom : undefined;
+  const createdTo = sp.createdTo && isValidDate(sp.createdTo) ? sp.createdTo : undefined;
+  const hasFilters = Boolean(status || q || createdFrom || createdTo);
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
-  const pkgName = (id: string | null) => packages.find((p) => p.id === id)?.name ?? "не выбран";
+  let leads: RequestItem[] = [];
+  let loadError = false;
+  let packages: Awaited<ReturnType<typeof listPackages>> = [];
+  let rooms: Awaited<ReturnType<typeof listRooms>> = [];
+  let slots: Awaited<ReturnType<typeof listSlots>> = [];
+
+  if (unified) {
+    try {
+      const requestId = randomUUID();
+      const actor = await fastApiActorForStaff({ id: user.id, email: user.email }, { requestId });
+      const response = await new FastApiCrmClient(actor).listLeads({ status, q, createdFrom, createdTo });
+      leads = response.items.map((lead) => ({
+        id: lead.id,
+        label: `ID ${lead.id.slice(0, 8)}`,
+        status: lead.status,
+        name: lead.customerName,
+        phone: lead.phone,
+        createdAt: new Date(lead.createdAt),
+        requestedDate: lead.requestedDate,
+        packageName: lead.package?.name ?? "не выбран",
+        children: lead.guestCount,
+        packageId: lead.package?.id ?? null,
+        roomId: null,
+        slotId: null,
+        reservationId: null,
+        source: lead.source,
+        branch: lead.branch?.name,
+        summary: lead.summary,
+      }));
+    } catch {
+      loadError = true;
+    }
+  } else {
+    const actor = { id: user.id, role: user.role };
+    const pool = getPool();
+    const [legacyLeads, loadedPackages, loadedRooms, loadedSlots] = await Promise.all([
+      listLeads(pool, actor, { status, q, createdFrom, createdTo }), listPackages(pool), listRooms(pool), listSlots(pool),
+    ]);
+    packages = loadedPackages;
+    rooms = loadedRooms;
+    slots = loadedSlots;
+    leads = legacyLeads.map((lead) => ({
+      id: lead.id,
+      label: `№${lead.seq}`,
+      status: lead.status,
+      name: lead.name,
+      phone: lead.phone,
+      createdAt: new Date(lead.createdAt),
+      requestedDate: lead.requestedDate,
+      packageName: packages.find((item) => item.id === lead.packageId)?.name ?? "не выбран",
+      children: lead.children,
+      packageId: lead.packageId,
+      roomId: lead.roomId,
+      slotId: lead.slotId,
+      reservationId: lead.reservationId,
+    }));
+  }
+
+  function statusHref(nextStatus?: string) {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (createdFrom) params.set("createdFrom", createdFrom);
+    if (createdTo) params.set("createdTo", createdTo);
+    if (nextStatus) params.set("status", nextStatus);
+    const query = params.toString();
+    return query ? `/requests?${query}` : "/requests";
+  }
 
   return (
-    <div className="grid min-w-0 gap-5">
-      <h1 className="text-3xl font-black tracking-tight text-grape-800">Заявки</h1>
-      <p className="text-sm text-muted">Заявка не занимает слот. Слот занимает только подтверждение. Цена фиксируется в момент подтверждения.</p>
-      {sp.notice && NOTICES[sp.notice] ? <p role="status" className="rounded-2xl bg-grape-100 p-3 text-sm font-bold text-grape-900">{NOTICES[sp.notice]}</p> : null}
-      {sp.error ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{ERRORS[sp.error] ?? "Не удалось выполнить действие."}</p> : null}
-      <nav aria-label="Фильтр" className="flex flex-wrap gap-2">
-        <Link href="/requests" className={btnGhost + " flex items-center"}>Все</Link>
-        {Object.entries(STATUS).map(([k, v]) => <Link key={k} href={`/requests?status=${k}`} className={btnGhost + " flex items-center"}>{v}</Link>)}
+    <div className="crm-page crm-requests-page">
+      <header className="crm-requests-heading">
+        <div>
+          <p className="crm-eyebrow">Входящий поток</p>
+          <h1 className="crm-page-title">Заявки</h1>
+          <p className="crm-page-subtitle">{unified ? "Актуальные обращения из FastAPI." : "Рабочая очередь обращений филиала."}</p>
+        </div>
+        <p className="crm-requests-count" aria-live="polite">Показано: <strong>{loadError ? "—" : leads.length}</strong></p>
+      </header>
+
+      <p className="crm-requests-note">
+        {unified
+          ? "Открой карточку, чтобы обработать заявку, записать фактически полученную предоплату и подтвердить бронь."
+          : "Заявка не занимает слот. Слот занимает только подтверждение. Цена фиксируется в момент подтверждения."}
+      </p>
+      {loadError ? <p role="alert" className="crm-requests-message crm-requests-message-error">FastAPI CRM недоступна. Данные из старой базы не показаны.</p> : null}
+      {sp.notice && NOTICES[sp.notice] ? <p role="status" className="crm-requests-message crm-requests-message-success">{NOTICES[sp.notice]}</p> : null}
+      {sp.error ? <p role="alert" className="crm-requests-message crm-requests-message-error">{ERRORS[sp.error] ?? "Не удалось выполнить действие."}</p> : null}
+
+      <nav className="crm-requests-tabs" aria-label="Фильтр заявок по статусу">
+        <Link href={statusHref()} aria-current={!status ? "page" : undefined}>Все</Link>
+        {Object.entries(statusLabels).map(([key, label]) => (
+          <Link key={key} href={statusHref(key)} aria-current={status === key ? "page" : undefined}>{label}</Link>
+        ))}
       </nav>
-      <ul className="grid gap-3">
-        {leads.map((l) => {
-          const open = l.status === "new" || l.status === "in_progress";
-          return (
-            <li key={l.id} className="min-w-0 rounded-3xl border border-line bg-white p-5" data-lead={l.seq}>
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="break-words text-base font-black text-grape-800">№{l.seq} · {l.name}</h2>
-                <span className="text-xs font-bold text-muted">{STATUS[l.status]}</span>
-              </div>
-              <p className="mt-1 text-sm">{l.phone} · {fmt.format(l.createdAt)}</p>
-              <p className="text-sm text-muted">На {l.requestedDate} · пакет: {pkgName(l.packageId)}{l.children != null ? ` · детей: ${l.children}` : ""}</p>
-              {l.reservationId ? <p className="mt-1 text-sm"><Link href={`/bookings?date=${l.requestedDate}`} className="font-extrabold text-grape-700 underline">Показать в календаре</Link></p> : null}
-              {open ? (
-                <>
-                  <form action={confirmLeadAction} className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <input type="hidden" name="id" value={l.id} />
-                    <input type="date" name="date" defaultValue={l.requestedDate} required className={input} aria-label="Дата" />
-                    <select name="slotId" defaultValue={l.slotId ?? ""} required className={input} aria-label="Слот">
-                      <option value="" disabled>Слот</option>
-                      {slots.map((s) => <option key={s.id} value={s.id}>{s.startsAt}–{s.endsAt}</option>)}
-                    </select>
-                    <select name="roomId" defaultValue={l.roomId ?? ""} required className={input} aria-label="Комната">
-                      <option value="" disabled>Комната</option>
-                      {rooms.filter((r) => r.isActive).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                    </select>
-                    <select name="packageId" defaultValue={l.packageId ?? ""} required className={input} aria-label="Пакет">
-                      <option value="" disabled>Пакет</option>
-                      {packages.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <button type="submit" className={btn + " sm:col-span-2 sm:justify-self-start"}>Подтвердить бронь</button>
-                  </form>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {l.status === "new" ? <form action={leadStatusAction}><input type="hidden" name="id" value={l.id} /><input type="hidden" name="status" value="in_progress" /><button type="submit" className={btnGhost}>В работу</button></form> : null}
-                    <form action={leadStatusAction}><input type="hidden" name="id" value={l.id} /><input type="hidden" name="status" value="cancelled" /><button type="submit" className={btnGhost}>Отклонить</button></form>
-                  </div>
-                </>
-              ) : null}
-            </li>
-          );
-        })}
-        {leads.length === 0 ? <li className="rounded-3xl border border-line bg-white p-5 text-sm text-muted">Заявок нет.</li> : null}
-      </ul>
+
+      <form method="get" className="crm-requests-filters">
+        {status ? <input type="hidden" name="status" value={status} /> : null}
+        <label className="crm-requests-search">
+          <span>Поиск</span>
+          <input name="q" defaultValue={q ?? ""} placeholder="Имя или телефон" maxLength={80} className={input} />
+        </label>
+        <label>
+          <span>С даты заявки</span>
+          <DatePicker key={`${createdFrom ?? ""}:${createdTo ?? ""}`} name="createdFrom" label="С даты заявки" defaultValue={createdFrom ?? ""} />
+        </label>
+        <label>
+          <span>По дату заявки</span>
+          <DatePicker key={`${createdFrom ?? ""}:${createdTo ?? ""}`} name="createdTo" label="По дату заявки" defaultValue={createdTo ?? ""} />
+        </label>
+        <div className="crm-requests-filter-actions">
+          <button type="submit" className={btn}><FlaticonIcon name="search" size={15} className="crm-action-icon" />Найти заявки</button>
+          <Link href="/requests" className={btnGhost}>Сбросить</Link>
+        </div>
+      </form>
+
+      <section className="crm-requests-queue" aria-label="Очередь заявок">
+        <table className="crm-requests-table">
+          <caption className="crm-requests-sr-only">Список заявок</caption>
+          <thead>
+            <tr>
+              <th scope="col">Клиент</th>
+              <th scope="col">Детали заявки</th>
+              <th scope="col">Создана</th>
+              <th scope="col">Статус</th>
+              <th scope="col"><span className="crm-requests-sr-only">Действия</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {leads.map((lead) => {
+              const open = lead.status === "new" || lead.status === "in_progress";
+              return (
+                <tr key={lead.id}>
+                  <td>
+                    <span className="crm-requests-mobile-label">Клиент</span>
+                    <div className="crm-requests-contact">
+                      <strong>{lead.name}</strong>
+                      <span>{lead.phone}</span>
+                      <small>{lead.label}</small>
+                    </div>
+                  </td>
+                  <td>
+                    <span className="crm-requests-mobile-label">Детали заявки</span>
+                    <div className="crm-requests-details">
+                      <span>Дата: {lead.requestedDate ?? "не указана"}</span>
+                      <span>Пакет: {lead.packageName}</span>
+                      {lead.children != null ? <span>Гостей: {lead.children}</span> : null}
+                      {lead.source ? <span>Источник: {lead.source}</span> : null}
+                      {lead.branch ? <span>Филиал: {lead.branch}</span> : null}
+                      {lead.summary ? <span className="crm-requests-summary">{lead.summary}</span> : null}
+                      {lead.reservationId && lead.requestedDate ? <Link href={`/bookings?date=${lead.requestedDate}`}>Показать в календаре</Link> : null}
+                    </div>
+                  </td>
+                  <td>
+                    <span className="crm-requests-mobile-label">Создана</span>
+                    <time dateTime={lead.createdAt.toISOString()}>{fmt.format(lead.createdAt)}</time>
+                  </td>
+                  <td>
+                    <span className="crm-requests-mobile-label">Статус</span>
+                    <span className="crm-requests-status" data-status={lead.status}>{statusLabels[lead.status] ?? lead.status}</span>
+                  </td>
+                  <td className="crm-requests-actions-cell">
+                    <span className="crm-requests-mobile-label">Действия</span>
+                    {unified ? (
+                      <Link href={`/requests/${encodeURIComponent(lead.id)}`} className="crm-requests-action">Открыть карточку</Link>
+                    ) : open ? (
+                      <div className="crm-requests-row-actions">
+                        <form action={confirmLeadAction} className="crm-requests-confirm-form">
+                          <input type="hidden" name="id" value={lead.id} />
+                          <DatePicker name="date" label={`Дата брони для заявки ${lead.label}`} defaultValue={lead.requestedDate ?? ""} required allowClear={false} />
+                          <label className="crm-requests-sr-only" htmlFor={`slot-${lead.id}`}>Время для заявки {lead.label}</label>
+                          <select id={`slot-${lead.id}`} name="slotId" defaultValue={lead.slotId ?? ""} required className={input}>
+                            <option value="" disabled>Слот</option>
+                            {slots.map((slot) => <option key={slot.id} value={slot.id}>{slot.startsAt}–{slot.endsAt}</option>)}
+                          </select>
+                          <label className="crm-requests-sr-only" htmlFor={`room-${lead.id}`}>Комната для заявки {lead.label}</label>
+                          <select id={`room-${lead.id}`} name="roomId" defaultValue={lead.roomId ?? ""} required className={input}>
+                            <option value="" disabled>Комната</option>
+                            {rooms.filter((room) => room.isActive).map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
+                          </select>
+                          <label className="crm-requests-sr-only" htmlFor={`package-${lead.id}`}>Пакет для заявки {lead.label}</label>
+                          <select id={`package-${lead.id}`} name="packageId" defaultValue={lead.packageId ?? ""} required className={input}>
+                            <option value="" disabled>Пакет</option>
+                            {packages.filter((item) => item.isActive).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                          </select>
+                          <button type="submit" className={btn}>Подтвердить бронь</button>
+                        </form>
+                        <div className="crm-requests-status-actions">
+                          {lead.status === "new" ? <form action={leadStatusAction}><input type="hidden" name="id" value={lead.id} /><input type="hidden" name="status" value="in_progress" /><button type="submit" className={btnGhost}>В работу</button></form> : null}
+                          <form action={leadStatusAction}><input type="hidden" name="id" value={lead.id} /><input type="hidden" name="status" value="cancelled" /><button type="submit" className={btnGhost}>Отклонить</button></form>
+                        </div>
+                      </div>
+                    ) : <span className="crm-requests-no-action">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {leads.length === 0 && !loadError ? (
+          <div className="crm-requests-empty" role="status">
+            <Image src="/illustrations/milano-asking-question.svg" alt="" width={96} height={96} />
+            <p>{hasFilters ? "По этим условиям заявок нет. Измените фильтры или сбросьте поиск." : "Заявок пока нет. Новые обращения появятся здесь."}</p>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { listContacts, type ContactFilters } from "@/core/crm";
+import { FlaticonIcon } from "@/components/flaticon-icon";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { DatePicker } from "@/components/date-picker";
 
 export const metadata: Metadata = { title: "Клиенты" };
 
@@ -19,13 +22,14 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
   const { user } = await requirePermission("contacts.view");
   const sp = await searchParams;
   const filters: ContactFilters = {
-    q: sp.q?.slice(0, 80),
+    q: sp.q?.trim().slice(0, 80) || undefined,
     source: pick(sp.source, ["qr", "birthday_form", "manual"] as const),
     verification: pick(sp.verification, ["unverified", "verified"] as const),
     from: date(sp.from),
     to: date(sp.to),
     leadStatus: pick(sp.status, ["new", "in_progress", "confirmed", "cancelled", "completed"] as const),
   };
+  const hasFilters = Object.values(filters).some(Boolean);
   const page = Math.max(Number.parseInt(sp.page ?? "1", 10) || 1, 1);
   const { rows, total, pageSize } = await listContacts(getPool(), { id: user.id, role: user.role }, filters, page);
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
@@ -53,14 +57,14 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
         <select name="verification" defaultValue={filters.verification ?? ""} className={input} aria-label="Подтверждение телефона">
           <option value="">Телефон: любой</option><option value="unverified">не подтверждён</option><option value="verified">подтверждён</option>
         </select>
-        <label className="grid gap-1 text-xs font-bold text-muted">С даты регистрации<input type="date" name="from" defaultValue={filters.from ?? ""} className={input} /></label>
-        <label className="grid gap-1 text-xs font-bold text-muted">По дату<input type="date" name="to" defaultValue={filters.to ?? ""} className={input} /></label>
+        <label className="grid gap-1 text-xs font-bold text-muted">С даты регистрации<DatePicker key={`${filters.from ?? ""}:${filters.to ?? ""}`} name="from" label="С даты регистрации" defaultValue={filters.from ?? ""} /></label>
+        <label className="grid gap-1 text-xs font-bold text-muted">По дату<DatePicker key={`${filters.from ?? ""}:${filters.to ?? ""}`} name="to" label="По дату" defaultValue={filters.to ?? ""} /></label>
         <div className="flex gap-2 sm:col-span-2 lg:col-span-3">
-          <button type="submit" className={btn}>Найти</button>
+          <button type="submit" className={`${btn} inline-flex items-center gap-2`}><FlaticonIcon name="search" size={15} className="crm-action-icon" />Найти</button>
           <Link href="/contacts" className="flex h-11 items-center rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700">Сбросить</Link>
         </div>
       </form>
-      <p className="text-sm text-muted">Найдено: {total}. Регистрация по QR не означает визит.</p>
+      {total > 0 ? <p className="text-sm text-muted">Найдено: {total}. Регистрация по QR не означает визит.</p> : null}
       <ul className="grid gap-3">
         {rows.map((c) => (
           <li key={c.id}>
@@ -76,7 +80,12 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
             </Link>
           </li>
         ))}
-        {rows.length === 0 ? <li className="rounded-3xl border border-line bg-white p-5 text-sm text-muted">Никого не найдено.</li> : null}
+        {rows.length === 0 ? (
+          <li className="crm-empty-state crm-contact-empty rounded-3xl border border-line bg-white p-5 text-sm text-muted">
+            <Image src="/illustrations/milano-empty-state-no-user-found.svg" alt="" width={88} height={88} />
+            <span>{hasFilters ? <>По этим условиям клиентов нет. <Link href="/contacts" className="font-bold text-grape-700 underline">Сбросить фильтры</Link></> : "База клиентов пока пуста."}</span>
+          </li>
+        ) : null}
       </ul>
       <nav className="flex items-center gap-3" aria-label="Страницы">
         {page > 1 ? <Link href={qs(page - 1)} className="font-extrabold text-grape-700">← Назад</Link> : null}

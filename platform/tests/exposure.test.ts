@@ -167,7 +167,7 @@ describe("Exposure: the proxy cannot be skipped by a header the client chooses",
   });
 
   it("static assets are classified like admin pages, so role, host and network rules apply to them too", () => {
-    for (const p of ["/_next/static/chunks/app.js", "/_next/image", "/favicon.ico"]) {
+    for (const p of ["/_next/static/chunks/app.js", "/_next/image", "/favicon.ico", "/icons/flaticon/dashboard.png", "/illustrations/milano-hello.svg"]) {
       assert.equal(classifyPath(p), "admin", p);
       assert.deepEqual(decideExposure(admin, { pathname: p, host: "panel.example.test", realIp: "203.0.113.9" }), { allow: false, status: 404, reason: "network" }, p);
       assert.deepEqual(decideExposure(api, { pathname: p, host: "api.example.test", realIp: "203.0.113.9" }), { allow: false, status: 404, reason: "role" }, p);
