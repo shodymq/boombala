@@ -3,6 +3,7 @@
 # nginx/DNS change. Run before every up/migrate/backup. Read-only.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_env
+load_secrets
 
 fail() { echo "GUARD FAILED: $*" >&2; exit 1; }
 
