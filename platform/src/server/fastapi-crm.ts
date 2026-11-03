@@ -110,6 +110,7 @@ const bookingTimeline = z.object({
   date: z.string(),
   timezone: z.literal("Asia/Almaty"),
   bufferMinutes: z.number().int().nonnegative(),
+  bufferStatus: z.enum(["test_only", "approval_required", "production_approved"]),
   rooms: z.array(z.object({ id: z.string(), name: z.string() })),
   reservations: z.array(z.object({
     id: z.string(),
@@ -134,7 +135,7 @@ const bookingTimeline = z.object({
   })),
 });
 const bookingCatalog = z.object({
-  branches: z.array(z.object({ id: z.string(), name: z.string(), city: z.string(), workingHours: z.string(), bufferMinutes: z.number().int().nonnegative() })),
+  branches: z.array(z.object({ id: z.string(), name: z.string(), city: z.string(), workingHours: z.string(), bufferMinutes: z.number().int().nonnegative(), bufferStatus: z.enum(["test_only", "approval_required", "production_approved"]) })),
   rooms: z.array(z.object({ id: z.string(), branchId: z.string(), name: z.string() })),
   packages: z.array(z.object({ id: z.string(), branchId: z.string(), name: z.string(), priceFrom: z.number().int().nonnegative(), priceLabel: z.string(), guestCapacityLabel: z.string() })),
 });
@@ -236,6 +237,7 @@ export type BookingTimeline = {
   date: string;
   timezone: "Asia/Almaty";
   bufferMinutes: number;
+  bufferStatus: "test_only" | "approval_required" | "production_approved";
   rooms: BookingTimelineRoom[];
   reservations: BookingTimelineReservation[];
 };

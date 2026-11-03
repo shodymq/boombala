@@ -141,7 +141,7 @@ describe("FastAPI CRM adapter", () => {
           }), { status: 200 });
         }
         return new Response(JSON.stringify({
-          branchId: "branch-1", date: "2026-11-15", timezone: "Asia/Almaty", bufferMinutes: 30,
+          branchId: "branch-1", date: "2026-11-15", timezone: "Asia/Almaty", bufferMinutes: 30, bufferStatus: "test_only",
           rooms: [{ id: "room-1", name: "Комната" }],
           reservations: [{
             id: "reservation-1", kind: "booking", status: "confirmed", roomId: "room-1",
@@ -344,13 +344,13 @@ describe("FastAPI CRM adapter", () => {
         paths.push(path);
         if (path.endsWith("/catalog")) {
           return new Response(JSON.stringify({
-            branches: [{ id: "branch-1", slug: "almaty", name: "Алматы", city: "Алматы", workingHours: "10:00–22:00", bufferMinutes: 30 }],
+            branches: [{ id: "branch-1", slug: "almaty", name: "Алматы", city: "Алматы", workingHours: "10:00–22:00", bufferMinutes: 30, bufferStatus: "test_only" }],
             rooms: ["room-1", "room-2", "room-3", "room-4"].map((id) => ({ id, branchId: "branch-1", name: id })),
             packages: [{ id: "package-1", branchId: "branch-1", name: "Party", priceFrom: 40000, priceLabel: "от 40 000 ₸", guestCapacityLabel: "до 12 гостей" }],
           }), { status: 200 });
         }
         return new Response(JSON.stringify({
-          branchId: "branch-1", date: "2026-11-01", timezone: "Asia/Almaty", bufferMinutes: 30,
+          branchId: "branch-1", date: "2026-11-01", timezone: "Asia/Almaty", bufferMinutes: 30, bufferStatus: "test_only",
           rooms: [{ id: "room-1", name: "Roblox Room" }],
           reservations: [{
             id: "reservation-1", kind: "booking", status: "confirmed", roomId: "room-1",
@@ -370,6 +370,7 @@ describe("FastAPI CRM adapter", () => {
     assert.equal(hasSingleBranchFourRoomSetup({ ...catalog, branches: [...catalog.branches, { ...catalog.branches[0], id: "branch-2" }] }), false);
     assert.equal(catalog.packages[0].priceFrom, 40000);
     assert.equal(timeline.bufferMinutes, 30);
+    assert.equal(timeline.bufferStatus, "test_only");
     assert.equal(timeline.reservations[0].occupiedEndsAt, "2026-11-01T14:30:00+05:00");
     assert.equal(timeline.reservations[0].paymentStatus, "prepaid");
     assert.deepEqual(paths, ["/api/v1/admin/birthday-bookings/catalog", "/api/v1/admin/birthday-bookings/timeline"]);
@@ -513,7 +514,7 @@ describe("FastAPI CRM adapter", () => {
       customerPhone: null, createdByAdminId: "staff-1", createdByName: "Менеджер",
     });
     const timeline = (date: string, item: ReturnType<typeof reservation>) => ({
-      branchId: "branch-1", date, timezone: "Asia/Almaty", bufferMinutes: 30,
+      branchId: "branch-1", date, timezone: "Asia/Almaty", bufferMinutes: 30, bufferStatus: "test_only",
       rooms: [{ id: item.roomId, name: "Комната" }], reservations: [item],
     });
     const responses = [
@@ -563,7 +564,7 @@ describe("FastAPI CRM adapter", () => {
         call += 1;
         const body = call === 1
           ? { id: "booking-2", kind: "booking", status: "confirmed" }
-          : { branchId: "branch-1", date: "2026-11-04", timezone: "Asia/Almaty", bufferMinutes: 30, rooms: [{ id: "room-1", name: "Комната" }], reservations: [] };
+          : { branchId: "branch-1", date: "2026-11-04", timezone: "Asia/Almaty", bufferMinutes: 30, bufferStatus: "test_only", rooms: [{ id: "room-1", name: "Комната" }], reservations: [] };
         return new Response(JSON.stringify(body), { status: 200 });
       },
     });

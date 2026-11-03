@@ -20,7 +20,7 @@ const ERRORS: Record<string, string> = {
   slot_taken: "Этот слот уже занят (кто-то успел раньше). Данные обновлены.",
   invalid: "Проверьте введённые данные (дата, пакет, имя, телефон; прошедший слот занять нельзя).",
   conflict: "Действие уже выполнено или недоступно.",
-  buffer_required: "Не настроен обязательный буфер уборки. Обратись к владельцу.",
+  buffer_required: "Буфер уборки не утверждён владельцем или настроен неверно; новые брони заблокированы.",
   buffer_reconciliation_required: "Занятости не сверены с буфером уборки; новые изменения бронирования заблокированы.",
   room_setup_invalid: "Изменения заблокированы: настройка должна содержать один филиал и ровно четыре комнаты.",
   forbidden: "Недостаточно прав.",
@@ -167,7 +167,7 @@ async function UnifiedBookingsPage({ user, date, notice, error, requestKey, retr
   let loadError = false;
   try {
     const requestId = randomUUID();
-    const actor = await fastApiActorForStaff({ id: user.id, email: user.email }, { requestId });
+    const actor = await fastApiActorForStaff({ id: user.id, email: user.email, role: user.role }, { requestId });
     const client = new FastApiCrmClient(actor);
     catalog = await client.getBookingCatalog();
     if (catalog.branches.length === 1) timeline = await client.getBookingTimeline(catalog.branches[0].id, date);
@@ -220,6 +220,8 @@ async function UnifiedBookingsPage({ user, date, notice, error, requestKey, retr
 
       {branch && catalog && timeline && hasFourRooms ? (
         <>
+          {timeline.bufferStatus === "test_only" ? <p className="crm-detail-message crm-detail-message-error" role="status">Буфер {timeline.bufferMinutes} минут действует только для тестирования. Для production нужно подтверждение владельца.</p> : null}
+          {timeline.bufferStatus === "approval_required" ? <p className="crm-detail-message crm-detail-message-error" role="alert">Владелец не утвердил буфер уборки; новые брони заблокированы.</p> : null}
           <div className="crm-fastapi-calendar-summary" aria-label="Сводка календаря">
             <span><strong>{bookings}</strong> активных броней</span>
             <span><strong>{blocks}</strong> блокировок</span>

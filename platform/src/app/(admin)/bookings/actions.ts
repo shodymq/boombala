@@ -31,6 +31,7 @@ function failure(date: string, error: unknown, retryKey?: { name: string; value:
     else if (error.status === 409 && error.code === "branch_room_setup_invalid") code = "room_setup_invalid";
     else if (error.status === 409 && error.code === "booking_buffer_required") code = "buffer_required";
     else if (error.status === 409 && error.code === "booking_buffer_reconciliation_required") code = "buffer_reconciliation_required";
+    else if (error.status === 503 && ["booking_buffer_approval_required", "booking_test_buffer_misconfigured"].includes(error.code)) code = "buffer_required";
     else if (error.status === 409 && ["time_conflict", "slot_taken"].includes(error.code)) code = "slot_taken";
     else if (error.status === 409) code = "conflict";
     else if (error.status >= 500) code = "fastapi_unavailable";
@@ -48,7 +49,7 @@ function failure(date: string, error: unknown, retryKey?: { name: string; value:
   return back(date, params.toString());
 }
 
-async function fastApiClient(user: { id: string; email: string }) {
+async function fastApiClient(user: Parameters<typeof fastApiActorForStaff>[0]) {
   const requestId = randomUUID();
   const actor = await fastApiActorForStaff(user, { requestId });
   return new FastApiCrmClient(actor);

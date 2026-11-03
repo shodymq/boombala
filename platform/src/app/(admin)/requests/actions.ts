@@ -31,6 +31,7 @@ function detailError(id: string, error: unknown, retryKey?: { name: string; valu
     else if (error.status === 409 && error.code === "birthday_prepayment_required") code = "prepayment_required";
     else if (error.status === 409 && error.code === "booking_buffer_required") code = "buffer_required";
     else if (error.status === 409 && error.code === "booking_buffer_reconciliation_required") code = "buffer_reconciliation_required";
+    else if (error.status === 503 && ["booking_buffer_approval_required", "booking_test_buffer_misconfigured"].includes(error.code)) code = "buffer_required";
     else if (error.status === 409 && error.code === "birthday_refund_exceeds_paid") code = "refund_exceeds_paid";
     else if (error.status === 409 && error.code === "birthday_booking_cancellation_required") code = "cancel_booking_first";
     else if (error.status === 422 && error.code === "invalid_lead_status_transition") code = "transition";
@@ -50,7 +51,7 @@ function detailError(id: string, error: unknown, retryKey?: { name: string; valu
   redirect(`/requests/${encodeURIComponent(id)}?${params.toString()}`);
 }
 
-async function fastApiClient(user: { id: string; email: string }) {
+async function fastApiClient(user: Parameters<typeof fastApiActorForStaff>[0]) {
   const requestId = randomUUID();
   const actor = await fastApiActorForStaff(user, { requestId });
   return new FastApiCrmClient(actor);

@@ -34,7 +34,7 @@ function result(code: string): never {
   redirect(`/catalog?notice=${code}`);
 }
 
-async function clientFor(user: { id: string; email: string }) {
+async function clientFor(user: Parameters<typeof fastApiActorForStaff>[0]) {
   const actor = await fastApiActorForStaff(user, { requestId: randomUUID() });
   return new FastApiCrmClient(actor);
 }

@@ -1,6 +1,13 @@
 import "server-only";
 import { createHmac } from "node:crypto";
+import type { Role } from "../core/rbac.ts";
 import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmActor } from "./fastapi-crm.ts";
+
+const API_ROLE_BY_PLATFORM_ROLE: Record<Role, string | null> = {
+  owner: "super_admin",
+  manager: "sales_manager",
+  editor: null,
+};
 
 /**
  * Server-to-server staff bridge. The Platform has already authenticated the staff member through its own database
@@ -12,9 +19,11 @@ import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmActor } f
  * - Every failure is fail-closed: the caller gets an error and performs no FastAPI write.
  */
 export async function fastApiActorForStaff(
-  staff: { id: string; email: string },
+  staff: { id: string; email: string; role: Role },
   options: { requestId: string; fetchImpl?: typeof fetch; timeoutMs?: number },
 ): Promise<FastApiCrmActor> {
+  const expectedApiRole = API_ROLE_BY_PLATFORM_ROLE[staff.role];
+  if (!expectedApiRole) throw new FastApiCrmError(403, "staff_role_mismatch", options.requestId);
   const serviceToken = (process.env.CRM_SERVICE_TOKEN ?? "").trim();
   const assertionSecret = (process.env.CRM_STAFF_ASSERTION_SECRET ?? "").trim();
   if (serviceToken.length < 32 || assertionSecret.length < 32) throw new FastApiCrmConfigurationError("crm_actor_missing");
@@ -51,8 +60,19 @@ export async function fastApiActorForStaff(
     body = null;
   }
   if (!response.ok) throw new FastApiCrmError(response.status, errorCode(body), options.requestId);
-  const accessToken = (body as { access_token?: unknown } | null)?.access_token;
+  const tokenResponse = body as {
+    access_token?: unknown;
+    user?: { email?: unknown; role?: unknown } | null;
+  } | null;
+  const accessToken = tokenResponse?.access_token;
   if (typeof accessToken !== "string" || accessToken.length === 0) throw new FastApiCrmError(502, "staff_token_missing", options.requestId);
+  if (
+    typeof tokenResponse?.user?.email !== "string" ||
+    tokenResponse.user.email.trim().toLowerCase() !== email ||
+    tokenResponse.user.role !== expectedApiRole
+  ) {
+    throw new FastApiCrmError(403, "staff_role_mismatch", options.requestId);
+  }
   return { accessToken, requestId: options.requestId };
 }
 

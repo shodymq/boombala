@@ -32,7 +32,7 @@ const ERRORS: Record<string, string> = {
   not_found: "Заявка не найдена или недоступна этой роли.",
   slot_taken: "Это время уже занято. Выбери другое время и повтори подтверждение.",
   prepayment_required: "Для бронирования требуется фактически внесённая предоплата не менее 10 000 ₸.",
-  buffer_required: "Не настроен обязательный буфер уборки. Обратись к владельцу до подтверждения брони.",
+  buffer_required: "Буфер уборки не утверждён владельцем или настроен неверно; подтверждение брони заблокировано.",
   buffer_reconciliation_required: "Занятости комнаты не сверены с буфером уборки. Подтверждение брони временно заблокировано.",
   refund_exceeds_paid: "Сумма фактических возвратов не может превышать сумму зафиксированных ручных платежей.",
   cancel_booking_first: "Сначала отмените бронь в календаре. После освобождения комнаты можно записать фактически проведённый возврат.",
@@ -126,7 +126,7 @@ export default async function RequestDetailPage({ params, searchParams }: {
   let catalog: Awaited<ReturnType<FastApiCrmClient["getBookingCatalog"]>> | null = null;
   let loadError = false;
   try {
-    const actor = await fastApiActorForStaff({ id: user.id, email: user.email }, { requestId });
+    const actor = await fastApiActorForStaff({ id: user.id, email: user.email, role: user.role }, { requestId });
     const client = new FastApiCrmClient(actor);
     lead = await client.getLead(id);
     if (lead.type === "birthday_request") {

@@ -36,8 +36,8 @@ describe("staff token bridge (server only)", () => {
   it("asks FastAPI for a token for the given staff email with the service secret in a header", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const actor = await fastApiActorForStaff(
-      { id: "platform-staff-1", email: " Manager-A@BoomBala.kz " },
-      { requestId: "req-1", fetchImpl: stub(200, { access_token: "bridge-token", token_type: "bearer", expires_in_seconds: 900, user: {} }, calls) },
+      { id: "platform-staff-1", email: " Manager-A@BoomBala.kz ", role: "manager" },
+      { requestId: "req-1", fetchImpl: stub(200, { access_token: "bridge-token", token_type: "bearer", expires_in_seconds: 900, user: { email: "manager-a@boombala.kz", role: "sales_manager" } }, calls) },
     );
     assert.equal(actor.accessToken, "bridge-token");
     assert.equal(calls.length, 1);
@@ -60,18 +60,26 @@ describe("staff token bridge (server only)", () => {
 
   it("returns only the access token, never a refresh token or the service secret", async () => {
     const actor = await fastApiActorForStaff(
-      { id: "platform-staff-2", email: "manager-a@boombala.kz" },
-      { requestId: "req-2", fetchImpl: stub(200, { access_token: "bridge-token", refresh_token: "must-not-leak" }, []) },
+      { id: "platform-staff-2", email: "manager-a@boombala.kz", role: "manager" },
+      { requestId: "req-2", fetchImpl: stub(200, { access_token: "bridge-token", refresh_token: "must-not-leak", user: { email: "manager-a@boombala.kz", role: "sales_manager" } }, []) },
     );
     assert.deepEqual(Object.keys(actor).sort(), ["accessToken", "requestId"]);
     assert.ok(!JSON.stringify(actor).includes("must-not-leak"));
     assert.ok(!JSON.stringify(actor).includes(TOKEN));
   });
 
+  it("accepts the matching FastAPI owner role for a local owner", async () => {
+    const actor = await fastApiActorForStaff(
+      { id: "platform-owner-1", email: "owner@boombala.kz", role: "owner" },
+      { requestId: "req-owner", fetchImpl: stub(200, { access_token: "owner-token", user: { email: "owner@boombala.kz", role: "super_admin" } }, []) },
+    );
+    assert.equal(actor.accessToken, "owner-token");
+  });
+
   it("fails closed when the service secret is missing or short", async () => {
     process.env.CRM_SERVICE_TOKEN = "short";
     await assert.rejects(
-      fastApiActorForStaff({ id: "staff-1", email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, []) }),
+      fastApiActorForStaff({ id: "staff-1", email: "a@b.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, []) }),
       (error: Error) => error.message === "crm_actor_missing",
     );
   });
@@ -80,7 +88,7 @@ describe("staff token bridge (server only)", () => {
     delete process.env.CRM_STAFF_ASSERTION_SECRET;
     const calls: Array<{ url: string; init: RequestInit }> = [];
     await assert.rejects(
-      fastApiActorForStaff({ id: "platform-staff-3", email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, calls) }),
+      fastApiActorForStaff({ id: "platform-staff-3", email: "a@b.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, calls) }),
       (error: Error) => error.message === "crm_actor_missing",
     );
     assert.equal(calls.length, 0);
@@ -88,15 +96,39 @@ describe("staff token bridge (server only)", () => {
 
   it("fails closed when FastAPI refuses the staff member (unlinked, inactive, or bad secret)", async () => {
     await assert.rejects(
-      fastApiActorForStaff({ id: "staff-2", email: "ghost@boombala.kz" }, { requestId: "r", fetchImpl: stub(403, { error: { code: "staff_not_linked" } }, []) }),
+      fastApiActorForStaff({ id: "staff-2", email: "ghost@boombala.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(403, { error: { code: "staff_not_linked" } }, []) }),
       (error: Error & { code?: string; status?: number }) => error.code === "staff_not_linked" && error.status === 403,
     );
   });
 
   it("fails closed on a response without a token", async () => {
     await assert.rejects(
-      fastApiActorForStaff({ id: "staff-3", email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { ok: true }, []) }),
+      fastApiActorForStaff({ id: "staff-3", email: "a@b.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(200, { ok: true }, []) }),
       (error: Error & { code?: string }) => error.code === "staff_token_missing",
     );
+  });
+
+  it("fails closed when a local manager is linked to a FastAPI owner account", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    await assert.rejects(
+      fastApiActorForStaff(
+        { id: "staff-4", email: "manager-a@boombala.kz", role: "manager" },
+        { requestId: "r-role", fetchImpl: stub(200, { access_token: "bridge-token", user: { email: "manager-a@boombala.kz", role: "super_admin" } }, calls) },
+      ),
+      (error: Error & { code?: string; status?: number }) => error.code === "staff_role_mismatch" && error.status === 403,
+    );
+    assert.equal(calls.length, 1);
+  });
+
+  it("does not request a FastAPI token for an editor account", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    await assert.rejects(
+      fastApiActorForStaff(
+        { id: "staff-5", email: "editor@boombala.kz", role: "editor" },
+        { requestId: "r-editor", fetchImpl: stub(200, { access_token: "bridge-token", user: { email: "editor@boombala.kz", role: "sales_manager" } }, calls) },
+      ),
+      (error: Error & { code?: string; status?: number }) => error.code === "staff_role_mismatch" && error.status === 403,
+    );
+    assert.equal(calls.length, 0);
   });
 });

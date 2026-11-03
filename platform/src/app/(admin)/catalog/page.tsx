@@ -62,7 +62,7 @@ export default async function CatalogPage({ searchParams }: {
   let packages: Awaited<ReturnType<FastApiCrmClient["getAdminBirthdayPackage"]>>[] = [];
   let unavailable = false;
   try {
-    const actor = await fastApiActorForStaff({ id: user.id, email: user.email }, { requestId: randomUUID() });
+    const actor = await fastApiActorForStaff({ id: user.id, email: user.email, role: user.role }, { requestId: randomUUID() });
     const client = new FastApiCrmClient(actor);
     const catalog = await client.getBookingCatalog();
     if (catalog.branches.length !== 1) throw new Error("single_branch_required");

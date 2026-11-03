@@ -220,7 +220,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   if (crmEnabled) {
     try {
       const requestId = randomUUID();
-      const actor = await fastApiActorForStaff({ id: user.id, email: user.email }, { requestId });
+      const actor = await fastApiActorForStaff({ id: user.id, email: user.email, role: user.role }, { requestId });
       crmAudit = await new FastApiCrmClient(actor).listBirthdayBookingAudit();
     } catch {
       crmAuditError = true;
