@@ -172,6 +172,46 @@ describe("FastAPI CRM adapter", () => {
     else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
   });
 
+  it("does not acknowledge a booking when only additional payments reach the deposit amount", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async (url) => {
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith("/birthday-bookings/confirm")) {
+          return new Response(JSON.stringify({ id: "reservation-1", kind: "booking", status: "confirmed" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          id: "request-1", status: "booked", source: "website", customerName: "Parent", phone: "+77070000000",
+          contactMethod: "phone", branch: { id: "branch-1", name: "Алматы", shortLabel: "ALM" },
+          manualPaymentFacts: [{
+            id: "payment-1", amountKzt: 10000, paymentKind: "additional", method: "cash",
+            receivedAt: "2026-10-31T10:00:00Z", recordedByAdminId: "staff-1", recordedByAdminName: "Manager",
+            note: null, source: "manager_manual", createdAt: "2026-10-31T10:00:00Z",
+          }],
+          manualRefundFacts: [], manualRefundFactAmountKzt: 0, netManualPaymentAmountKzt: 10000,
+          netInitialDepositKzt: 0, manualPaymentFactAmountKzt: 10000,
+          manualPaymentFactStatus: "prepaid", createdAt: "2026-10-31T10:00:00Z",
+        }), { status: 200 });
+      },
+    });
+
+    await assert.rejects(
+      () => client.confirmBookingAndRead({
+        requestId: "request-1", bookingDate: "2026-11-15", roomId: "room-1", startTime: "10:00",
+        packageId: "package-1", agreedPriceKzt: 180000, idempotencyKey: "confirm-additional-only",
+      }),
+      (error) => error instanceof FastApiCrmError && error.code === "booking_readback_mismatch",
+    );
+
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
   it("does not acknowledge a manual payment missing from the saved lead facts", async () => {
     const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
     const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
@@ -183,7 +223,7 @@ describe("FastAPI CRM adapter", () => {
         call += 1;
         if (call === 1) {
           return new Response(JSON.stringify({
-            id: "payment-1", requestId: "request-1", amountKzt: 10000, method: "cash",
+            id: "payment-1", requestId: "request-1", amountKzt: 10000, paymentKind: "initial_deposit", method: "cash",
             receivedAt: "2026-10-31T10:00:00Z", source: "manager_manual", idempotencyKey: "payment-1",
           }), { status: 200 });
         }
@@ -198,9 +238,92 @@ describe("FastAPI CRM adapter", () => {
 
     await assert.rejects(
       () => client.recordManualPaymentAndRead("request-1", {
-        amountKzt: 10000, method: "cash", idempotencyKey: "payment-1",
+        amountKzt: 10000, paymentKind: "initial_deposit", method: "cash", idempotencyKey: "payment-1",
       }),
       (error) => error instanceof FastApiCrmError && error.code === "payment_readback_mismatch",
+    );
+
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("does not acknowledge a payment when the saved payment kind differs", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    let call = 0;
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => {
+        call += 1;
+        if (call === 1) {
+          return new Response(JSON.stringify({
+            id: "payment-1", requestId: "request-1", amountKzt: 10000, paymentKind: "initial_deposit",
+            method: "cash", receivedAt: "2026-10-31T10:00:00Z", source: "manager_manual", idempotencyKey: "payment-1",
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          id: "request-1", status: "new", source: "website", customerName: "Parent", phone: "+77070000000",
+          contactMethod: "phone", manualPaymentFacts: [{
+            id: "payment-1", amountKzt: 10000, paymentKind: "additional", method: "cash",
+            receivedAt: "2026-10-31T10:00:00Z", recordedByAdminId: "staff-1", recordedByAdminName: "Manager",
+            note: null, source: "manager_manual", createdAt: "2026-10-31T10:00:00Z",
+          }], manualRefundFacts: [], manualRefundFactAmountKzt: 0,
+          netManualPaymentAmountKzt: 10000, netInitialDepositKzt: 0, manualPaymentFactAmountKzt: 10000,
+          manualPaymentFactStatus: "prepaid", createdAt: "2026-10-31T10:00:00Z",
+        }), { status: 200 });
+      },
+    });
+
+    await assert.rejects(
+      () => client.recordManualPaymentAndRead("request-1", {
+        amountKzt: 10000, paymentKind: "initial_deposit", method: "cash", idempotencyKey: "payment-1",
+      }),
+      (error) => error instanceof FastApiCrmError && error.code === "payment_readback_mismatch",
+    );
+
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("does not acknowledge a refund linked to a different payment fact", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    let call = 0;
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => {
+        call += 1;
+        if (call === 1) {
+          return new Response(JSON.stringify({
+            id: "refund-1", requestId: "request-1", paymentFactId: "payment-1", amountKzt: 5000,
+            method: "bank_transfer", refundedAt: "2026-10-31T09:00:00Z", recordedByAdminId: "staff-1",
+            reason: "Event cancelled", source: "manager_manual", idempotencyKey: "refund-1", createdAt: "2026-10-31T10:00:00Z",
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          id: "request-1", status: "cancelled", source: "website", customerName: "Parent", phone: "+77070000000",
+          contactMethod: "phone", manualPaymentFacts: [], manualRefundFacts: [{
+            id: "refund-1", requestId: "request-1", paymentFactId: "payment-2", amountKzt: 5000,
+            method: "bank_transfer", refundedAt: "2026-10-31T09:00:00Z", recordedByAdminId: "staff-1",
+            reason: "Event cancelled", source: "manager_manual", idempotencyKey: "refund-1", createdAt: "2026-10-31T10:00:00Z",
+          }], manualRefundFactAmountKzt: 5000, netManualPaymentAmountKzt: 0, netInitialDepositKzt: 0,
+          manualPaymentFactAmountKzt: 0, manualPaymentFactStatus: "unpaid", createdAt: "2026-10-31T10:00:00Z",
+        }), { status: 200 });
+      },
+    });
+
+    await assert.rejects(
+      () => client.recordManualRefundAndRead("request-1", {
+        amountKzt: 5000, paymentFactId: "payment-1", method: "bank_transfer", reason: "Event cancelled",
+        idempotencyKey: "refund-1",
+      }),
+      (error) => error instanceof FastApiCrmError && error.code === "refund_readback_mismatch",
     );
 
     if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;

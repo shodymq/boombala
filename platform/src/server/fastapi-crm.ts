@@ -175,6 +175,7 @@ const paymentResult = z.object({
   id: z.string(),
   requestId: z.string(),
   amountKzt: z.number().int().positive(),
+  paymentKind: z.enum(["initial_deposit", "additional"]).nullable(),
   method: z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]),
   receivedAt: z.string(),
   source: z.literal("manager_manual"),
@@ -469,7 +470,13 @@ export class FastApiCrmClient {
     const payment = await this.recordManualPayment(requestId, body);
     const lead = await this.getBirthdayLead(requestId);
     const savedFact = lead.manualPaymentFacts.find((fact) => fact.id === payment.id);
-    if (!savedFact || savedFact.amountKzt !== payment.amountKzt || savedFact.source !== payment.source) {
+    if (
+      !savedFact ||
+      savedFact.amountKzt !== payment.amountKzt ||
+      savedFact.paymentKind !== payment.paymentKind ||
+      payment.paymentKind !== body.paymentKind ||
+      savedFact.source !== payment.source
+    ) {
       throw new FastApiCrmError(502, "payment_readback_mismatch", this.requestId);
     }
     return { payment, lead };
@@ -479,7 +486,13 @@ export class FastApiCrmClient {
     const refund = await this.recordManualRefund(requestId, body);
     const lead = await this.getBirthdayLead(requestId);
     const savedFact = lead.manualRefundFacts.find((fact) => fact.id === refund.id);
-    if (!savedFact || savedFact.amountKzt !== refund.amountKzt || savedFact.source !== refund.source) {
+    if (
+      !savedFact ||
+      savedFact.amountKzt !== refund.amountKzt ||
+      savedFact.paymentFactId !== refund.paymentFactId ||
+      refund.paymentFactId !== body.paymentFactId ||
+      savedFact.source !== refund.source
+    ) {
       throw new FastApiCrmError(502, "refund_readback_mismatch", this.requestId);
     }
     return { refund, lead };
@@ -493,7 +506,7 @@ export class FastApiCrmClient {
     const startTime = typeof body.startTime === "string" ? body.startTime : "";
     if (!requestId || !bookingDate || !roomId || !startTime) throw new FastApiCrmConfigurationError("crm_actor_missing");
     const lead = await this.getBirthdayLead(requestId);
-    if (lead.status !== "booked" || lead.netManualPaymentAmountKzt < 10_000 || !lead.branch?.id) {
+    if (lead.status !== "booked" || lead.netInitialDepositKzt < 10_000 || !lead.branch?.id) {
       throw new FastApiCrmError(502, "booking_readback_mismatch", this.requestId);
     }
     await this.assertReservationReadback(booking, lead.branch.id, bookingDate, { roomId, startTime });
