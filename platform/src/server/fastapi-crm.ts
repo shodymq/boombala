@@ -39,6 +39,7 @@ const leadDetail = z.object({
 const refundFact = z.object({
   id: z.string(),
   requestId: z.string(),
+  paymentFactId: z.string().nullable().optional(),
   amountKzt: z.number().int().positive(),
   method: z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]),
   refundedAt: z.string(),
@@ -51,6 +52,7 @@ const refundFact = z.object({
 const paymentFact = z.object({
   id: z.string(),
   amountKzt: z.number().int().positive(),
+  paymentKind: z.enum(["initial_deposit", "additional"]).nullable().optional(),
   method: z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]),
   receivedAt: z.string(),
   recordedByAdminId: z.string(),
@@ -95,8 +97,9 @@ const birthdayLead = z.object({
   manualRefundFacts: z.array(refundFact),
   manualRefundFactAmountKzt: z.number().int().nonnegative(),
   netManualPaymentAmountKzt: z.number().int().nonnegative(),
+  netInitialDepositKzt: z.number().int().nonnegative(),
   manualPaymentFactAmountKzt: z.number().int().nonnegative(),
-  manualPaymentFactStatus: z.enum(["unpaid", "prepaid"]),
+  manualPaymentFactStatus: z.enum(["unpaid", "prepaid", "unreconciled"]),
   lostReason: z.string().nullable().optional(),
   comment: z.string().nullable().optional(),
   adminNote: z.string().nullable().optional(),
@@ -121,7 +124,7 @@ const bookingTimeline = z.object({
     priceKzt: z.number().nullable(),
     priceSource: z.string().nullable(),
     paidKzt: z.number().int().nonnegative(),
-    paymentStatus: z.enum(["unpaid", "prepaid"]),
+    paymentStatus: z.enum(["unpaid", "prepaid", "unreconciled"]),
     note: z.string().nullable(),
     requestId: z.string().nullable(),
     customerName: z.string().nullable(),
@@ -187,6 +190,14 @@ export type FastApiAdminBirthdayPackage = z.infer<typeof adminBirthdayPackage>;
 export type FastApiAdminBirthdayPackageSummary = z.infer<typeof adminBirthdayPackageSummary>;
 export type FastApiBirthdayBookingAuditEvent = z.infer<typeof bookingAuditEvent>;
 
+export function hasSingleBranchFourRoomSetup(catalog: BirthdayBookingCatalog, branchId?: string): boolean {
+  const branch = catalog.branches[0];
+  return catalog.branches.length === 1
+    && (!branchId || branch.id === branchId)
+    && catalog.rooms.length === 4
+    && catalog.rooms.every((room) => room.branchId === branch.id);
+}
+
 export type FastApiCrmActor = {
   /** A short-lived FastAPI admin access token for the same staff actor. */
   accessToken: string;
@@ -209,7 +220,7 @@ export type BookingTimelineReservation = {
   priceKzt: number | null;
   priceSource: string | null;
   paidKzt: number;
-  paymentStatus: "unpaid" | "prepaid";
+  paymentStatus: "unpaid" | "prepaid" | "unreconciled";
   note: string | null;
   requestId: string | null;
   /** Null unless the staff role may see client data (super_admin, sales_manager). */

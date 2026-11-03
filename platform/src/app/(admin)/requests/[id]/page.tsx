@@ -4,7 +4,7 @@ import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { DatePicker } from "@/components/date-picker";
 import { requirePermission } from "@/server/dal";
-import { FastApiCrmClient, unifiedFastapiCrmEnabled, type FastApiLeadDetail, type FastApiLeadStatus } from "@/server/fastapi-crm";
+import { FastApiCrmClient, hasSingleBranchFourRoomSetup, unifiedFastapiCrmEnabled, type FastApiLeadDetail, type FastApiLeadStatus } from "@/server/fastapi-crm";
 import { fastApiActorForStaff } from "@/server/fastapi-staff";
 import { confirmLeadAction, leadStatusAction, recordManualPaymentAction, recordManualRefundAction, saveLeadNoteAction } from "../actions";
 
@@ -35,6 +35,8 @@ const ERRORS: Record<string, string> = {
   buffer_required: "Не настроен обязательный буфер уборки. Обратись к владельцу до подтверждения брони.",
   buffer_reconciliation_required: "Занятости комнаты не сверены с буфером уборки. Подтверждение брони временно заблокировано.",
   refund_exceeds_paid: "Сумма фактических возвратов не может превышать сумму зафиксированных ручных платежей.",
+  cancel_booking_first: "Сначала отмените бронь в календаре. После освобождения комнаты можно записать фактически проведённый возврат.",
+  room_setup_invalid: "Подтверждение заблокировано: настройка должна содержать один филиал и ровно четыре комнаты.",
   transition: "Такой переход статуса недоступен.",
   conflict: "Заявка или бронь уже изменена. Обнови карточку и проверь текущее состояние.",
   invalid: "Проверь поля формы.",
@@ -129,7 +131,7 @@ export default async function RequestDetailPage({ params, searchParams }: {
     lead = await client.getLead(id);
     if (lead.type === "birthday_request") {
       birthday = await client.getBirthdayLead(id);
-      if (lead.branch?.id) catalog = await client.getBookingCatalog(lead.branch.id);
+      catalog = await client.getBookingCatalog();
     }
   } catch {
     loadError = true;
@@ -162,8 +164,23 @@ export default async function RequestDetailPage({ params, searchParams }: {
   const statuses = loadError ? [] : allowedStatusActions(lead);
   const activeRooms = catalog?.rooms.filter((room) => room.branchId === lead.branch?.id) ?? [];
   const activePackages = catalog?.packages.filter((item) => item.branchId === lead.branch?.id) ?? [];
+  const hasFourRooms = Boolean(lead.branch?.id && catalog && hasSingleBranchFourRoomSetup(catalog, lead.branch.id));
   const canConfirm = birthday !== null && !["booked", "paid", "completed", "confirmed", "cancelled", "lost", "closed"].includes(lead.status);
-  const hasMinimumPrepayment = (birthday?.netManualPaymentAmountKzt ?? 0) >= 10_000;
+  const paymentNeedsReconciliation = birthday?.manualPaymentFactStatus === "unreconciled";
+  const hasMinimumPrepayment = birthday !== null && birthday.manualPaymentFactStatus !== "unreconciled" && birthday.netInitialDepositKzt >= 10_000;
+  const hasInitialDeposit = birthday?.manualPaymentFacts.some((payment) => payment.paymentKind === "initial_deposit") ?? false;
+  const refundsByPayment = new Map<string, number>();
+  birthday?.manualRefundFacts.forEach((refund) => {
+    if (!refund.paymentFactId) return;
+    refundsByPayment.set(refund.paymentFactId, (refundsByPayment.get(refund.paymentFactId) ?? 0) + refund.amountKzt);
+  });
+  const refundablePayments = birthday?.manualPaymentFacts.flatMap((payment) => {
+    if (!payment.paymentKind) return [];
+    const remaining = payment.amountKzt - (refundsByPayment.get(payment.id) ?? 0);
+    return remaining > 0 ? [{ ...payment, remaining }] : [];
+  }) ?? [];
+  const refundMustWaitForCancellation = ["booked", "paid", "confirmed"].includes(lead.status);
+  const hasUnallocatedRefund = birthday?.manualRefundFacts.some((refund) => !refund.paymentFactId) ?? false;
 
   return (
     <div className="crm-page crm-detail-page">
@@ -198,14 +215,14 @@ export default async function RequestDetailPage({ params, searchParams }: {
               <dl className="crm-detail-money-summary">
                 <div><dt>Получено вручную</dt><dd>{money.format(birthday.manualPaymentFactAmountKzt)} ₸</dd></div>
                 <div><dt>Возвращено</dt><dd>−{money.format(birthday.manualRefundFactAmountKzt)} ₸</dd></div>
-                <div><dt>Остаток предоплаты</dt><dd>{money.format(birthday.netManualPaymentAmountKzt)} ₸</dd></div>
+                <div><dt>Остаток предоплаты</dt><dd>{money.format(birthday.netInitialDepositKzt)} ₸</dd></div>
               </dl>
               <p className="crm-detail-help">Платёж и возврат записываются только после фактического движения денег. Запись не переводит деньги и не отменяет бронь.</p>
               {birthday.manualPaymentFacts.length ? (
                 <ol className="crm-detail-refund-list" aria-label="История фактических оплат">
                   {birthday.manualPaymentFacts.map((payment) => (
                     <li key={payment.id}>
-                      <strong>+{money.format(payment.amountKzt)} ₸ · {PAYMENT_METHOD_LABELS[payment.method] ?? payment.method}</strong>
+                      <strong>+{money.format(payment.amountKzt)} ₸ · {payment.paymentKind === "initial_deposit" ? "Предоплата" : payment.paymentKind === "additional" ? "Доплата" : "Тип не сверен"} · {PAYMENT_METHOD_LABELS[payment.method] ?? payment.method}</strong>
                       <span>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Almaty" }).format(new Date(payment.receivedAt))} · {payment.recordedByAdminName}</span>
                       {payment.note ? <span>{payment.note}</span> : null}
                     </li>
@@ -227,25 +244,35 @@ export default async function RequestDetailPage({ params, searchParams }: {
                 <form action={recordManualPaymentAction} className="crm-detail-form">
                   <input type="hidden" name="id" value={lead.id} />
                   <input type="hidden" name="idempotencyKey" value={sp.paymentKey ?? ""} />
+                  <label className="crm-detail-field"><span>Тип платежа</span><select name="paymentKind" required defaultValue=""><option value="" disabled>Выбрать тип</option><option value="initial_deposit" disabled={hasInitialDeposit || paymentNeedsReconciliation}>Предоплата · 10 000 ₸</option><option value="additional">Доплата</option></select></label>
                   <label className="crm-detail-field"><span>Получено, ₸</span><input name="amountKzt" type="number" min="1" max="10000000" step="1" required placeholder="Например, 10 000" /></label>
                   <label className="crm-detail-field"><span>Способ</span><select name="method" required defaultValue=""><option value="" disabled>Выбрать способ</option>{PAYMENT_METHODS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                   <label className="crm-detail-field"><span>Примечание</span><input name="note" maxLength={300} placeholder="Необязательно" /></label>
                   <button type="submit" className="crm-detail-button">Записать факт получения</button>
                 </form>
               ) : null}
-              {!loadError && birthday.netManualPaymentAmountKzt > 0 ? (
+              {!loadError && refundablePayments.length > 0 ? (
+                refundMustWaitForCancellation ? (
+                  <p className="crm-detail-refund-warning" role="status">Сначала отмените бронь в календаре. После освобождения комнаты можно записать фактически проведённый возврат.</p>
+                ) : hasUnallocatedRefund ? (
+                  <p className="crm-detail-refund-warning" role="status">Сначала сверьте ранее записанный возврат с конкретным платежом.</p>
+                ) : (
                 <form action={recordManualRefundAction} className="crm-detail-form crm-detail-refund-form">
                   <input type="hidden" name="id" value={lead.id} />
                   <input type="hidden" name="idempotencyKey" value={sp.refundKey ?? ""} />
                   <p className="crm-detail-refund-warning">Укажи возврат, который уже был фактически проведён. Эта форма не возвращает деньги.</p>
-                  <label className="crm-detail-field"><span>Возвращено, ₸</span><input name="amountKzt" type="number" min="1" max={Math.min(10_000_000, birthday.netManualPaymentAmountKzt)} step="1" required placeholder="Например, 10 000" /></label>
+                  <label className="crm-detail-field"><span>Платёж для возврата</span><select name="paymentFactId" required defaultValue=""><option value="" disabled>Выбрать платёж</option>{refundablePayments.map((payment) => <option key={payment.id} value={payment.id}>{payment.paymentKind === "initial_deposit" ? "Предоплата" : "Доплата"} · остаток {money.format(payment.remaining)} ₸ · {new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Almaty" }).format(new Date(payment.receivedAt))}</option>)}</select></label>
+                  <label className="crm-detail-field"><span>Возвращено, ₸</span><input name="amountKzt" type="number" min="1" max="10000000" step="1" required placeholder="Например, 10 000" /></label>
                   <label className="crm-detail-field"><span>Способ возврата</span><select name="method" required defaultValue=""><option value="" disabled>Выбрать способ</option>{PAYMENT_METHODS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                   <label className="crm-detail-field"><span>Дата возврата</span><DatePicker name="refundDate" label="Дата возврата" required allowClear={false} /></label>
                   <label className="crm-detail-field"><span>Время возврата, Алматы</span><input name="refundTime" type="time" required /></label>
                   <label className="crm-detail-field crm-detail-refund-reason"><span>Причина возврата</span><input name="reason" required minLength={1} maxLength={300} placeholder="Например: мероприятие отменено клиентом" /></label>
                   <button type="submit" className="crm-detail-button crm-detail-button-secondary">Записать факт возврата</button>
                 </form>
+                )
               ) : null}
+              {!loadError && hasUnallocatedRefund && refundablePayments.length === 0 ? <p className="crm-detail-refund-warning" role="status">Сначала сверьте ранее записанный возврат с конкретным платежом.</p> : null}
+              {!loadError && birthday.manualPaymentFacts.some((payment) => !payment.paymentKind) && refundablePayments.length === 0 ? <p className="crm-detail-refund-warning" role="status">Платёж должен быть сверен перед возвратом.</p> : null}
             </div>
           ) : null}
         </section>
@@ -254,8 +281,8 @@ export default async function RequestDetailPage({ params, searchParams }: {
       {canConfirm ? (
         <section className="crm-detail-panel" aria-label="Подтверждение брони">
           <div className="crm-detail-panel-heading"><div><p className="crm-eyebrow">Следующий шаг</p><h2>Подтвердить бронь</h2></div><span className="crm-detail-deposit-state" data-ready={hasMinimumPrepayment}>{hasMinimumPrepayment ? "Предоплата достаточна" : "Ожидается предоплата"}</span></div>
-          {!hasMinimumPrepayment ? <p className="crm-detail-help">Для подтверждения необходимо, чтобы фактически полученная сумма за вычетом зафиксированных возвратов составляла не менее 10 000 ₸. Заявка до подтверждения не занимает комнату.</p> : null}
-          {catalog && activeRooms.length && activePackages.length && birthday?.branch?.id ? (
+          {!hasMinimumPrepayment ? <p className="crm-detail-help">{paymentNeedsReconciliation ? "Сначала сверь нераспределённые исторические платежи и возвраты." : "Для подтверждения нужна фактически полученная предоплата 10 000 ₸. Доплаты её не заменяют."} Заявка до подтверждения не занимает комнату.</p> : null}
+          {catalog && hasFourRooms && activePackages.length && birthday?.branch?.id ? (
             <form action={confirmLeadAction} className="crm-detail-form crm-detail-booking-form">
               <input type="hidden" name="id" value={lead.id} />
               <input type="hidden" name="idempotencyKey" value={sp.bookingKey ?? ""} />
@@ -267,7 +294,7 @@ export default async function RequestDetailPage({ params, searchParams }: {
               <p className="crm-detail-help crm-detail-booking-note">Цена «от» в каталоге справочная. Здесь укажи сумму, согласованную с клиентом. FastAPI проверит доступность комнаты и буфер.</p>
               <button type="submit" className="crm-detail-button" disabled={!hasMinimumPrepayment}>Подтвердить бронь</button>
             </form>
-          ) : <p className="crm-detail-message crm-detail-message-error">Для брони нужны подтверждённая филиальная привязка и каталог комнат/пакетов FastAPI.</p>}
+          ) : <p className="crm-detail-message crm-detail-message-error">Для брони нужны один подтверждённый филиал, ровно четыре комнаты и каталог пакетов FastAPI.</p>}
         </section>
       ) : null}
     </div>

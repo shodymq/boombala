@@ -8,7 +8,7 @@ import { almatyToday, isValidDate } from "@/core/dates";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { DatePicker } from "@/components/date-picker";
-import { FastApiCrmClient, unifiedFastapiCrmEnabled, type BookingTimeline, type BirthdayBookingCatalog } from "@/server/fastapi-crm";
+import { FastApiCrmClient, hasSingleBranchFourRoomSetup, unifiedFastapiCrmEnabled, type BookingTimeline, type BirthdayBookingCatalog } from "@/server/fastapi-crm";
 import { fastApiActorForStaff } from "@/server/fastapi-staff";
 import type { SessionUser } from "@/core/session";
 import { blockAction, manualBookingAction, releaseAction, rescheduleAction } from "./actions";
@@ -22,6 +22,7 @@ const ERRORS: Record<string, string> = {
   conflict: "Действие уже выполнено или недоступно.",
   buffer_required: "Не настроен обязательный буфер уборки. Обратись к владельцу.",
   buffer_reconciliation_required: "Занятости не сверены с буфером уборки; новые изменения бронирования заблокированы.",
+  room_setup_invalid: "Изменения заблокированы: настройка должна содержать один филиал и ровно четыре комнаты.",
   forbidden: "Недостаточно прав.",
   fastapi_unavailable: "FastAPI CRM временно недоступна. Повторите действие через несколько секунд.",
 };
@@ -175,6 +176,7 @@ async function UnifiedBookingsPage({ user, date, notice, error, requestKey, retr
   }
 
   const branch = catalog?.branches.length === 1 ? catalog.branches[0] : null;
+  const hasFourRooms = branch !== null && timeline?.rooms.length === 4 && catalog !== null && hasSingleBranchFourRoomSetup(catalog, branch.id);
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const stableRequestKey = requestKey && uuidPattern.test(requestKey) ? requestKey : randomUUID();
   if (!loadError && branch && stableRequestKey !== requestKey) {
@@ -207,6 +209,7 @@ async function UnifiedBookingsPage({ user, date, notice, error, requestKey, retr
       {error ? <p className="crm-detail-message crm-detail-message-error" role="alert">{ERRORS[error] ?? "Не удалось выполнить действие."}</p> : null}
       {loadError ? <p className="crm-detail-message crm-detail-message-error" role="alert">FastAPI CRM недоступна. Календарь из старой базы не подменяет данные FastAPI.</p> : null}
       {!loadError && !branch ? <p className="crm-detail-message crm-detail-message-error" role="alert">В учётной записи доступно не ровно одно отделение. Автоматический выбор отключён до проверки филиальной привязки.</p> : null}
+      {!loadError && branch && timeline && !hasFourRooms ? <p className="crm-detail-message crm-detail-message-error" role="alert">В каталоге должно быть ровно четыре комнаты. Изменения календаря заблокированы до проверки настройки.</p> : null}
 
       <nav aria-label="Дата календаря" className="crm-date-controls crm-fastapi-date-controls">
         <Link href={`/bookings?date=${shift(date, -1)}`} className={btnGhost} aria-label="Предыдущий день">←</Link>
@@ -215,7 +218,7 @@ async function UnifiedBookingsPage({ user, date, notice, error, requestKey, retr
         <Link href="/bookings" className="crm-calendar-today">Сегодня</Link>
       </nav>
 
-      {branch && catalog && timeline ? (
+      {branch && catalog && timeline && hasFourRooms ? (
         <>
           <div className="crm-fastapi-calendar-summary" aria-label="Сводка календаря">
             <span><strong>{bookings}</strong> активных броней</span>

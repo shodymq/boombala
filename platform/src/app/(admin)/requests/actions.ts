@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { confirmLead, setLeadStatus } from "../../../core/bookings.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
-import { canRetryWithSameIdempotencyKey, FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
+import { canRetryWithSameIdempotencyKey, FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, hasSingleBranchFourRoomSetup, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
 import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
@@ -17,6 +17,7 @@ const leadId = z.string().min(1).max(32);
 const str = (f: FormData, k: string) => String(f.get(k) ?? "");
 const fastApiStatus = z.enum(["contacted", "qualified", "lost", "completed", "in_progress", "closed"]);
 const paymentMethod = z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]);
+const paymentKind = z.enum(["initial_deposit", "additional"]);
 const lostReasons = new Set(["too_expensive", "date_unavailable", "no_answer", "competitor", "changed_mind", "other_branch", "later", "other", "price", "no_response", "chose_competitor", "changed_plans", "duplicate"]);
 
 function detailError(id: string, error: unknown, retryKey?: { name: string; value: string }): never {
@@ -25,11 +26,13 @@ function detailError(id: string, error: unknown, retryKey?: { name: string; valu
   if (error instanceof FastApiCrmError) {
     if (error.status === 403) code = "forbidden";
     else if (error.status === 404) code = "not_found";
+    else if (error.status === 409 && error.code === "branch_room_setup_invalid") code = "room_setup_invalid";
     else if (error.status === 409 && ["time_conflict", "slot_taken"].includes(error.code)) code = "slot_taken";
     else if (error.status === 409 && error.code === "birthday_prepayment_required") code = "prepayment_required";
     else if (error.status === 409 && error.code === "booking_buffer_required") code = "buffer_required";
     else if (error.status === 409 && error.code === "booking_buffer_reconciliation_required") code = "buffer_reconciliation_required";
     else if (error.status === 409 && error.code === "birthday_refund_exceeds_paid") code = "refund_exceeds_paid";
+    else if (error.status === 409 && error.code === "birthday_booking_cancellation_required") code = "cancel_booking_first";
     else if (error.status === 422 && error.code === "invalid_lead_status_transition") code = "transition";
     else if (error.status === 409) code = "conflict";
     else if (error.status === 422) code = "invalid";
@@ -78,6 +81,10 @@ export async function confirmLeadAction(formData: FormData): Promise<void> {
     }
     try {
       const client = await fastApiClient(user);
+      const catalog = await client.getBookingCatalog();
+      if (!hasSingleBranchFourRoomSetup(catalog) || !catalog.rooms.some((room) => room.id === roomId)) {
+        throw new FastApiCrmError(409, "branch_room_setup_invalid", randomUUID());
+      }
       await client.confirmBookingAndRead({ requestId: id.data, bookingDate, roomId, startTime, packageId, agreedPriceKzt, idempotencyKey: idempotencyKey.data });
     } catch (error) {
       return detailError(id.data, error, { name: "bookingKey", value: idempotencyKey.data });
@@ -156,6 +163,7 @@ export async function recordManualPaymentAction(formData: FormData): Promise<voi
   const { user } = await requirePermission("bookings.manage");
   const id = leadId.safeParse(formData.get("id"));
   const amountKzt = Number(str(formData, "amountKzt"));
+  const kind = paymentKind.safeParse(str(formData, "paymentKind"));
   const method = paymentMethod.safeParse(str(formData, "method"));
   const note = str(formData, "note").trim();
   const idempotencyKey = uuid.safeParse(formData.get("idempotencyKey"));
@@ -163,13 +171,13 @@ export async function recordManualPaymentAction(formData: FormData): Promise<voi
     if (id.success) return detailError(id.data, new FastApiCrmConfigurationError("crm_flag_disabled"));
     return failure(new ValidationError({ id: "bad" }));
   }
-  if (!id.success || !Number.isInteger(amountKzt) || amountKzt <= 0 || amountKzt > 10_000_000 || !method.success || note.length > 300 || !idempotencyKey.success) {
+  if (!id.success || !Number.isInteger(amountKzt) || amountKzt <= 0 || amountKzt > 10_000_000 || !kind.success || (kind.data === "initial_deposit" && amountKzt !== 10_000) || !method.success || note.length > 300 || !idempotencyKey.success) {
     if (id.success) return detailError(id.data, new ValidationError({ payment: "invalid" }));
     return failure(new ValidationError({ id: "bad" }));
   }
   try {
     const client = await fastApiClient(user);
-    await client.recordManualPaymentAndRead(id.data, { amountKzt, method: method.data, idempotencyKey: idempotencyKey.data, ...(note ? { note } : {}) });
+    await client.recordManualPaymentAndRead(id.data, { amountKzt, paymentKind: kind.data, method: method.data, idempotencyKey: idempotencyKey.data, ...(note ? { note } : {}) });
   } catch (error) {
     return detailError(id.data, error, { name: "paymentKey", value: idempotencyKey.data });
   }
@@ -180,6 +188,7 @@ export async function recordManualRefundAction(formData: FormData): Promise<void
   const { user } = await requirePermission("bookings.manage");
   const id = leadId.safeParse(formData.get("id"));
   const amountKzt = Number(str(formData, "amountKzt"));
+  const paymentFactId = z.string().min(1).max(32).safeParse(formData.get("paymentFactId"));
   const method = paymentMethod.safeParse(str(formData, "method"));
   const reason = str(formData, "reason").trim();
   const refundDate = str(formData, "refundDate");
@@ -189,7 +198,7 @@ export async function recordManualRefundAction(formData: FormData): Promise<void
     if (id.success) return detailError(id.data, new FastApiCrmConfigurationError("crm_flag_disabled"));
     return failure(new ValidationError({ id: "bad" }));
   }
-  if (!id.success || !Number.isInteger(amountKzt) || amountKzt <= 0 || amountKzt > 10_000_000 || !method.success || reason.length < 1 || reason.length > 300 || !isValidDate(refundDate) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(refundTime) || !idempotencyKey.success) {
+  if (!id.success || !paymentFactId.success || !Number.isInteger(amountKzt) || amountKzt <= 0 || amountKzt > 10_000_000 || !method.success || reason.length < 1 || reason.length > 300 || !isValidDate(refundDate) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(refundTime) || !idempotencyKey.success) {
     if (id.success) return detailError(id.data, new ValidationError({ refund: "invalid" }));
     return failure(new ValidationError({ id: "bad" }));
   }
@@ -209,6 +218,7 @@ export async function recordManualRefundAction(formData: FormData): Promise<void
     const client = await fastApiClient(user);
     await client.recordManualRefundAndRead(id.data, {
       amountKzt,
+      paymentFactId: paymentFactId.data,
       method: method.data,
       refundedAt,
       reason,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { z } from "zod";
-import { canRetryWithSameIdempotencyKey, FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../src/server/fastapi-crm.ts";
+import { canRetryWithSameIdempotencyKey, FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, hasSingleBranchFourRoomSetup, unifiedFastapiCrmEnabled } from "../src/server/fastapi-crm.ts";
 
 describe("FastAPI CRM adapter", () => {
   it("keeps an idempotency key when a write outcome is unknown", () => {
@@ -135,7 +135,7 @@ describe("FastAPI CRM adapter", () => {
             id: "request-1", status: "booked", source: "website", customerName: "Parent", phone: "+77070000000",
             contactMethod: "phone", branch: { id: "branch-1", name: "Алматы", shortLabel: "ALM" },
             manualPaymentFacts: [], manualRefundFacts: [], manualRefundFactAmountKzt: 0,
-            netManualPaymentAmountKzt: 10000, manualPaymentFactAmountKzt: 10000,
+            netManualPaymentAmountKzt: 10000, netInitialDepositKzt: 10000, manualPaymentFactAmountKzt: 10000,
             manualPaymentFactStatus: "prepaid", createdAt: "2026-10-31T10:00:00Z",
             agreedAmountTenge: 180000,
           }), { status: 200 });
@@ -190,7 +190,7 @@ describe("FastAPI CRM adapter", () => {
         return new Response(JSON.stringify({
           id: "request-1", status: "new", source: "website", customerName: "Parent", phone: "+77070000000",
           contactMethod: "phone", manualPaymentFacts: [], manualRefundFacts: [], manualRefundFactAmountKzt: 0,
-          netManualPaymentAmountKzt: 0, manualPaymentFactAmountKzt: 0,
+          netManualPaymentAmountKzt: 0, netInitialDepositKzt: 0, manualPaymentFactAmountKzt: 0,
           manualPaymentFactStatus: "unpaid", createdAt: "2026-10-31T10:00:00Z",
         }), { status: 200 });
       },
@@ -222,7 +222,7 @@ describe("FastAPI CRM adapter", () => {
         if (path.endsWith("/catalog")) {
           return new Response(JSON.stringify({
             branches: [{ id: "branch-1", slug: "almaty", name: "Алматы", city: "Алматы", workingHours: "10:00–22:00", bufferMinutes: 30 }],
-            rooms: [{ id: "room-1", branchId: "branch-1", name: "Roblox Room" }],
+            rooms: ["room-1", "room-2", "room-3", "room-4"].map((id) => ({ id, branchId: "branch-1", name: id })),
             packages: [{ id: "package-1", branchId: "branch-1", name: "Party", priceFrom: 40000, priceLabel: "от 40 000 ₸", guestCapacityLabel: "до 12 гостей" }],
           }), { status: 200 });
         }
@@ -242,6 +242,9 @@ describe("FastAPI CRM adapter", () => {
     const catalog = await client.getBookingCatalog();
     const timeline = await client.getBookingTimeline("branch-1", "2026-11-01");
     assert.equal(catalog.branches.length, 1);
+    assert.equal(hasSingleBranchFourRoomSetup(catalog, "branch-1"), true);
+    assert.equal(hasSingleBranchFourRoomSetup(catalog, "branch-2"), false);
+    assert.equal(hasSingleBranchFourRoomSetup({ ...catalog, branches: [...catalog.branches, { ...catalog.branches[0], id: "branch-2" }] }), false);
     assert.equal(catalog.packages[0].priceFrom, 40000);
     assert.equal(timeline.bufferMinutes, 30);
     assert.equal(timeline.reservations[0].occupiedEndsAt, "2026-11-01T14:30:00+05:00");

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { createBlock, createManualBooking, releaseReservation } from "../../../core/bookings.ts";
 import { isValidDate } from "../../../core/dates.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
-import { canRetryWithSameIdempotencyKey, FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
+import { canRetryWithSameIdempotencyKey, FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, hasSingleBranchFourRoomSetup, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
 import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
@@ -28,6 +28,7 @@ function failure(date: string, error: unknown, retryKey?: { name: string; value:
   else if (error instanceof FastApiCrmConfigurationError) code = "fastapi_unavailable";
   else if (error instanceof FastApiCrmError) {
     if (error.status === 403) code = "forbidden";
+    else if (error.status === 409 && error.code === "branch_room_setup_invalid") code = "room_setup_invalid";
     else if (error.status === 409 && error.code === "booking_buffer_required") code = "buffer_required";
     else if (error.status === 409 && error.code === "booking_buffer_reconciliation_required") code = "buffer_reconciliation_required";
     else if (error.status === 409 && ["time_conflict", "slot_taken"].includes(error.code)) code = "slot_taken";
@@ -72,6 +73,9 @@ export async function manualBookingAction(formData: FormData): Promise<void> {
     let requestId = "";
     try {
       const client = await fastApiClient(user);
+      if (!hasSingleBranchFourRoomSetup(await client.getBookingCatalog(), branchId.data)) {
+        throw new FastApiCrmError(409, "branch_room_setup_invalid", randomUUID());
+      }
       const request = await client.createStaffBirthdayRequest({
         branchId: branchId.data,
         packageId: packageId.data,
@@ -125,6 +129,10 @@ export async function blockAction(formData: FormData): Promise<void> {
     }
     try {
       const client = await fastApiClient(user);
+      const catalog = await client.getBookingCatalog();
+      if (!hasSingleBranchFourRoomSetup(catalog, branchId.data) || !catalog.rooms.some((room) => room.id === roomId.data)) {
+        throw new FastApiCrmError(409, "branch_room_setup_invalid", randomUUID());
+      }
       await client.blockBookingSlotAndRead({ branchId: branchId.data, bookingDate: date, roomId: roomId.data, startTime: startTime.data, reason: reason.data, idempotencyKey: idempotencyKey.data });
     } catch (error) {
       return failure(date, error, { name: "blockKey", value: idempotencyKey.data, action: "block", target: roomId.data });
@@ -183,6 +191,10 @@ export async function rescheduleAction(formData: FormData): Promise<void> {
   }
   try {
     const client = await fastApiClient(user);
+    const catalog = await client.getBookingCatalog();
+    if (!hasSingleBranchFourRoomSetup(catalog, branchId.data) || !catalog.rooms.some((room) => room.id === roomId.data)) {
+      throw new FastApiCrmError(409, "branch_room_setup_invalid", randomUUID());
+    }
     await client.rescheduleReservationAndRead(id.data, branchId.data, { bookingDate, startTime: startTime.data, roomId: roomId.data, idempotencyKey: idempotencyKey.data });
   } catch (error) {
     return failure(date, error, { name: "rescheduleKey", value: idempotencyKey.data, action: "reschedule", target: id.data });

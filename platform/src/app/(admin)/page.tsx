@@ -10,6 +10,7 @@ import { can, canExport, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermission } from "@/server/dal";
 import { FlaticonIcon, type FlaticonIconName } from "@/components/flaticon-icon";
+import { unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
 
 export const metadata: Metadata = { title: "Обзор" };
 
@@ -82,18 +83,19 @@ function formatCount(value: number) {
 export default async function DashboardPage() {
   const { user } = await requirePermission("dashboard.view");
   const pool = getPool();
+  const unifiedCrm = unifiedFastapiCrmEnabled();
   const today = almatyToday();
   const weekStart = shiftDate(today, -6);
   const hasAttendance = can(user.role, "attendance.manage") && await attendanceSchemaReady(pool);
   const [migrations, summary, outbox, attendance, requests, bookings, requestTrend, bookingTrend, recentRequests, attendanceTrend] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
-    can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
+    can(user.role, "catalog.view") && !unifiedCrm ? catalogSummary(pool) : Promise.resolve(null),
     can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
     hasAttendance ? dayFigures(pool, { id: user.id, role: user.role }, today) : Promise.resolve(can(user.role, "attendance.manage") ? "outdated" as const : null),
-    can(user.role, "requests.manage")
+    can(user.role, "requests.manage") && !unifiedCrm
       ? pool.query<{ status: string; total: number }>("SELECT status, count(*)::int AS total FROM bb.lead_requests GROUP BY status")
       : Promise.resolve(null),
-    can(user.role, "bookings.manage")
+    can(user.role, "bookings.manage") && !unifiedCrm
       ? pool.query<{ booked: number; blocked: number; capacity: number }>(
           `SELECT count(*) FILTER (WHERE kind = 'booking')::int AS booked,
                   count(*) FILTER (WHERE kind = 'block')::int AS blocked,
@@ -102,7 +104,7 @@ export default async function DashboardPage() {
           [today],
         )
       : Promise.resolve(null),
-    can(user.role, "requests.manage")
+    can(user.role, "requests.manage") && !unifiedCrm
       ? pool.query<TrendRow>(
           `SELECT to_char(g.day, 'YYYY-MM-DD') AS date, COALESCE(r.total, 0)::int AS total
              FROM generate_series($1::date, $2::date, interval '1 day') AS g(day)
@@ -116,7 +118,7 @@ export default async function DashboardPage() {
           [weekStart, today],
         )
       : Promise.resolve(null),
-    can(user.role, "bookings.manage")
+    can(user.role, "bookings.manage") && !unifiedCrm
       ? pool.query<TrendRow>(
           `SELECT to_char(g.day, 'YYYY-MM-DD') AS date, COALESCE(r.total, 0)::int AS total
              FROM generate_series($1::date, $2::date, interval '1 day') AS g(day)
@@ -129,7 +131,7 @@ export default async function DashboardPage() {
           [weekStart, today],
         )
       : Promise.resolve(null),
-    can(user.role, "requests.manage")
+    can(user.role, "requests.manage") && !unifiedCrm
       ? pool.query<RequestRow>(
           `SELECT l.id, l.status, c.name, c.phone_e164 AS phone, l.created_at AS "createdAt",
                   p.name AS "packageName", l.children
@@ -197,6 +199,8 @@ export default async function DashboardPage() {
           {can(user.role, "requests.manage") ? <Link className="button button-primary" href="/requests">Все заявки</Link> : null}
         </div>
       </header>
+
+      {unifiedCrm ? <p role="status" className="so-alert">Заявки и бронирования ведутся в FastAPI CRM. Сводные цифры старой базы скрыты; откройте разделы «Заявки» и «Календарь» для актуальных записей.</p> : null}
 
       {metrics.length ? (
         <>
