@@ -222,6 +222,7 @@ async function UnifiedBookingsPage({ user, date, notice, error, requestKey, retr
         <>
           {timeline.bufferStatus === "test_only" ? <p className="crm-detail-message crm-detail-message-error" role="status">Буфер {timeline.bufferMinutes} минут действует только для тестирования. Для production нужно подтверждение владельца.</p> : null}
           {timeline.bufferStatus === "approval_required" ? <p className="crm-detail-message crm-detail-message-error" role="alert">Владелец не утвердил буфер уборки; новые брони заблокированы.</p> : null}
+          {timeline.bufferStatus === "production_approved" ? <p className="crm-detail-help" role="status">Буфер уборки утверждён для production.</p> : null}
           <div className="crm-fastapi-calendar-summary" aria-label="Сводка календаря">
             <span><strong>{bookings}</strong> активных броней</span>
             <span><strong>{blocks}</strong> блокировок</span>
