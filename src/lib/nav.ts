@@ -28,6 +28,12 @@ export const infoLinks: readonly (NavLink & { primary: boolean })[] = [
   { label: "Вопросы", href: "/#faq", primary: false },
 ];
 
+export const legalLinks: readonly NavLink[] = [
+  { label: "Правила посещения", href: "/rules" },
+  { label: "Согласие на обработку ПДн", href: "/personal-data-consent" },
+  { label: "Политика конфиденциальности", href: "/privacy" },
+];
+
 /** Is `href` (a page link) the page the visitor is on? */
 export const isCurrentPage = (href: string, pathname: string): boolean =>
   href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
