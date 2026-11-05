@@ -60,14 +60,18 @@ for (const prof of PROFILES) {
   ok((await kidsField.count()) === 1 && (await kidsField.inputValue()) === "1" && /Сколько детей с вами/.test(main), "the page asks ONE thing about the children: how many (input[name=childrenCount], default 1)");
   ok(!/имена? детей|дат[аы] рождения детей|ИИН/i.test(main.replace(/Нужно только количество[^.]*\./, "")), "no field or label asks for a child's name, birth date or ID number");
   ok((await page.locator("form").count()) === 1 && (await page.locator('input[name="name"]').count()) === 1, "the working form is shown (not the non-collecting preview)");
-  const cards = await page.locator("details[data-doc-kind]").evaluateAll((ds) => ds.map((d) => ({ kind: d.dataset.docKind, head: d.querySelector("summary")?.textContent ?? "" })));
-  ok(cards.length >= 2 && cards.every((c) => /редакция \d+/.test(c.head)), `every document card shows its title and edition (${cards.map((c) => c.kind).join(", ")})`);
-  const versions = Object.fromEntries(cards.map((c) => [c.kind, Number(/редакция (\d+)/.exec(c.head)[1])]));
+  const rulesLink = page.locator('[data-testid="consent-rules-link"]');
+  const personalDataLink = page.locator('[data-testid="consent-personal-data-link"]');
+  const rulesText = await rulesLink.innerText();
+  const rulesVersion = Number(/редакция (\d+)/.exec(rulesText)?.[1] ?? 0);
+  const dataVersion = Number((await page.locator('[data-testid="consent-personal-data-version"]').innerText()).match(/(\d+)\s*$/)?.[1] ?? 0);
+  const versions = { visit_rules: rulesVersion, personal_data_consent: dataVersion };
+  ok(await rulesLink.count() === 1 && await personalDataLink.count() === 1 && rulesVersion > 0 && dataVersion > 0, `the two separate legal links show their editions (rules ${rulesVersion}, personal data ${dataVersion})`);
+  ok(await rulesLink.getAttribute("href") === "/rules" && await personalDataLink.getAttribute("href") === "/personal-data-consent", "the two legal links target the full legal pages");
+  ok(await rulesLink.getAttribute("target") === "_blank" && await personalDataLink.getAttribute("target") === "_blank", "opening a legal page does not navigate away from the filled form");
+  ok(!/(^|\n)#{2,3}\s/m.test(main) && !/\*ПРАВИЛА ПОСЕЩЕНИЯ\*/.test(main), "the consent form does not expose raw Markdown");
   const fieldLabels = await page.locator("form label, form [role=group] > span").allInnerTexts();
   ok(/Имя сопровождающего/.test(fieldLabels.join("|")) && /Телефон/.test(fieldLabels.join("|")) && /Сколько детей с вами/.test(fieldLabels.join("|")), "the main form has the name, the optional phone and the number of children");
-  const docRows = await page.locator("details[data-doc-kind]").evaluateAll((ds) => ds.map((d) => d.querySelector("summary").innerText.replace(/\s+/g, " ").trim()));
-  ok(docRows.some((t) => /^Правила посещения/.test(t)) && docRows.some((t) => /^Согласие на обработку персональных данных/.test(t)), `two compact collapsible documents: ${docRows.join(" | ")}`);
-  ok((await page.locator('details[data-doc-kind] [role="region"]').evaluateAll((rs) => rs.every((r) => getComputedStyle(r).display !== "none" || !r.closest("details").open))), "document texts stay collapsed until opened");
   ok((await page.locator('form input[type="checkbox"]').count()) === 2, "two SEPARATE confirmations: rules and personal-data consent");
   ok(/необязательно/i.test(await page.locator("form").innerText()) && !(await page.locator('input[type="tel"]').evaluate((e) => e.required)), "the phone is optional");
   ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no sideways scroll");
@@ -84,14 +88,6 @@ for (const prof of PROFILES) {
   await minus.click();
   ok((await kids.inputValue()) === "1", "− back to 1");
   ok(!/имена детей|даты рождения детей/i.test(await page.locator("form label").allInnerTexts().then((t) => t.join(" "))), "no field for the children's names or birth dates");
-
-  // the full text of a document opens and is readable
-  const first = page.locator("details[data-doc-kind]").first();
-  await first.locator("summary").click();
-  const region = first.locator('[role="region"]');
-  ok((await region.isVisible()) && (await region.innerText()).trim().length > 0, "the full document text opens in the card");
-  ok((await region.evaluate((e) => e.getBoundingClientRect().right <= innerWidth + 1)), "the opened text stays inside the screen");
-  await first.locator("summary").click();
 
   // controls are big enough
   const small = await page.evaluate(() =>
@@ -140,7 +136,7 @@ for (const prof of PROFILES) {
   ok(posts[1].childrenCount === 1 && typeof posts[1].childrenCount === "number", "the request carries the number of children");
   ok(posts[1].documentVersions && Object.keys(versions).every((k) => posts[1].documentVersions[k] === versions[k]), "the request names the editions that were shown");
   const done = await page.locator("main").innerText();
-  ok(Object.keys(versions).every((k) => cards.find((c) => c.kind === k) && done.includes(`редакция ${versions[k]}`)) && /не бронирование и не отметка о посещении/.test(done), "the confirmation lists the accepted editions and says it is not a visit");
+  ok(Object.keys(versions).every((k) => done.includes(`редакция ${versions[k]}`)) && /не бронирование и не отметка о посещении/.test(done), "the confirmation lists the accepted editions and says it is not a visit");
   ok(errs.length === 0, "no JavaScript errors");
   await ctx.close();
 }
@@ -184,7 +180,10 @@ console.log("## double tap, changed documents, server-side edition check");
     if (r.method() === "POST" && r.url().endsWith("/api/consent")) posts.push(JSON.parse(r.postData() || "{}"));
   });
   await page.goto(BASE + "/consent", { waitUntil: "networkidle" });
-  const versions = await page.locator("details[data-doc-kind]").evaluateAll((ds) => Object.fromEntries(ds.map((d) => [d.dataset.docKind, Number(/редакция (\d+)/.exec(d.querySelector("summary").textContent)[1])])));
+  const versions = {
+    visit_rules: Number(/редакция (\d+)/.exec(await page.locator('[data-testid="consent-rules-link"]').innerText())?.[1] ?? 0),
+    personal_data_consent: Number((await page.locator('[data-testid="consent-personal-data-version"]').innerText()).match(/(\d+)\s*$/)?.[1] ?? 0),
+  };
   await page.locator('input[name="name"]').fill(`ТЕСТ QR форма дубль ${run}`);
   await page.locator('input[name="acceptRules"]').check();
   await page.locator('input[name="acceptPersonalData"]').check();

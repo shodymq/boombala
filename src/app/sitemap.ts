@@ -9,6 +9,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${site}/birthdays`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${site}/attractions`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${site}/menu`, changeFrequency: "weekly", priority: 0.7 },
+    { url: `${site}/rules`, changeFrequency: "monthly", priority: 0.3 },
+    { url: `${site}/personal-data-consent`, changeFrequency: "monthly", priority: 0.2 },
     { url: `${site}/privacy`, changeFrequency: "yearly", priority: 0.2 },
   ];
   if (!newsEnabled()) return base;

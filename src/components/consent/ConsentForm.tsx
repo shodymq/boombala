@@ -141,25 +141,6 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
 
   const err = (k: string) => (errors[k] ? <p id={`${uid}-${k}-err`} className="mt-1.5 text-sm font-semibold text-[#b3261e]">{errors[k]}</p> : null);
   const inv = (k: string) => (errors[k] ? { "aria-invalid": true as const, "aria-describedby": `${uid}-${k}-err`, "data-consent-invalid": true } : {});
-  const DOC_LABEL: Record<string, string> = {
-    visit_rules: "Правила посещения",
-    companion_duties: "Обязанности сопровождающего",
-    personal_data_consent: "Согласие на обработку персональных данных",
-  };
-  const docLabel = (d: Doc) => DOC_LABEL[d.kind] ?? d.title;
-  // A compact, collapsible row: the full text of the edition the visitor sees (and consents to) opens in place.
-  const docCard = (d: Doc) => (
-    <details key={d.kind} className="rounded-xl border border-grape-200 bg-white" data-doc-kind={d.kind}>
-      <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-sm">
-        <span className="font-bold text-grape-800 underline decoration-grape-300 underline-offset-4">{docLabel(d)}</span>
-        <span className="shrink-0 rounded-full bg-grape-50 px-2.5 py-0.5 text-xs font-bold text-grape-700">редакция {d.version}</span>
-      </summary>
-      <div tabIndex={0} role="region" aria-label={`${docLabel(d)}, полный текст`} className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-grape-100 px-3 py-3 text-sm leading-relaxed text-grape-900">
-        {d.body}
-      </div>
-    </details>
-  );
-
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={busy} className="grid gap-5">
       <fieldset disabled={busy} className="grid gap-5 border-0 p-0">
@@ -234,23 +215,27 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
             <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
               <input type="checkbox" name="acceptRules" checked={rules} onChange={(e) => setRulesSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptRules")} />
               <span>
-                Я ознакомился(-ась) с Правилами посещения Boom Bala{rulesDocs.find((d) => d.kind === "visit_rules") ? ` (редакция ${rulesDocs.find((d) => d.kind === "visit_rules")?.version})` : ""}{rulesDocs.length > 1 ? " и обязанностями сопровождающего" : ""} и обязуюсь соблюдать их.
+                Я ознакомился(-ась) с{" "}
+                <a href="/rules" target="_blank" rel="noopener noreferrer" data-testid="consent-rules-link" onClick={(event) => event.stopPropagation()} className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">
+                  Правилами посещения Boom Bala{rulesDocs.find((d) => d.kind === "visit_rules") ? ` (редакция ${rulesDocs.find((d) => d.kind === "visit_rules")?.version})` : ""}
+                </a>{rulesDocs.length > 1 ? " и обязанностями сопровождающего" : ""} и обязуюсь соблюдать их.
                 <span lang="kk" className="mt-1 block text-xs leading-relaxed text-muted">Мен Boom Bala келу қағидаларымен таныстым және оларды сақтауға келісемін.</span>
               </span>
             </label>
-            <div className="ml-9 mt-1 grid gap-2">{rulesDocs.map(docCard)}</div>
             {err("acceptRules")}
           </div>
           <div>
             <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
               <input type="checkbox" name="acceptPersonalData" checked={data} onChange={(e) => setDataSig(e.target.checked ? sig : null)} className="mt-0.5 h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptPersonalData")} />
               <span className="text-sm leading-relaxed">
-                Я даю ИП «АМАНОВ» согласие на обработку введённого мной имени, номера телефона (если указан), количества детей, записи о согласии и необходимых технических данных (хеш IP-адреса, сведения о браузере) в целях оформления посещения и связи при происшествии. Мне доступна{" "}
-                <a href="/privacy" target="_blank" rel="noopener" className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">Политика обработки персональных данных</a>; я понимаю право отзыва в предусмотренных законом пределах.
+                Я даю ИП «АМАНОВ» согласие на обработку введённого мной имени, номера телефона (если указан), количества детей, записи о согласии и необходимых технических данных (хеш IP-адреса, сведения о браузере) в целях оформления посещения и связи при происшествии. Мне доступны{" "}
+                <a href="/personal-data-consent" target="_blank" rel="noopener noreferrer" data-testid="consent-personal-data-link" onClick={(event) => event.stopPropagation()} className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">полное согласие на обработку персональных данных</a>{" "}
+                и{" "}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">Политика обработки персональных данных</a>; я понимаю право отзыва в предусмотренных законом пределах.
                 <span lang="kk" className="mt-1 block text-xs leading-relaxed text-muted">Мен «АМАНОВ» ЖК-не өзім енгізген атымды, телефон нөмірімді (егер көрсетсем), балалар санын, келісім жазбасын және қажетті техникалық деректерді (IP-мекенжай хэші, браузер туралы мәлімет) келуді рәсімдеу әрі оқиға кезінде байланысу үшін өңдеуге келісім беремін. Дербес деректерді өңдеу саясаты маған қолжетімді; заңда көзделген шектерде келісімді қайтарып ала алатынымды түсінемін.</span>
               </span>
             </label>
-            {dataDoc ? <div className="ml-9 mt-1 grid gap-2">{docCard(dataDoc)}</div> : null}
+            {dataDoc ? <p className="ml-9 mt-1 text-xs text-muted" data-testid="consent-personal-data-version">Актуальная редакция полного согласия: {dataDoc.version}</p> : null}
             {err("acceptPersonalData")}
           </div>
         </div>

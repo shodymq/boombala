@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { InstagramLogo } from "@phosphor-icons/react/dist/ssr";
 import { siteConfig } from "@/services/config";
-import { homeLink, infoLinks, pageLinks } from "@/lib/nav";
+import { homeLink, infoLinks, legalLinks, pageLinks } from "@/lib/nav";
 import { Container } from "@/components/ui/Container";
 
 export function Footer() {
@@ -28,7 +28,7 @@ export function Footer() {
           </address>
         </div>
 
-        <div className="grid grid-cols-2 gap-8 min-[1200px]:grid-cols-3">
+        <div className="grid grid-cols-2 gap-8 min-[1200px]:grid-cols-4">
           <nav aria-label="Страницы сайта">
             <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Страницы</p>
             <ul className="grid gap-1">
@@ -46,6 +46,19 @@ export function Footer() {
             <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Информация</p>
             <ul className="grid gap-1">
               {infoLinks.map((item) => (
+                <li key={item.href}>
+                  <Link href={item.href} className="inline-block py-1.5 text-base transition-colors hover:text-white">
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          <nav aria-label="Юридические документы">
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Документы</p>
+            <ul className="grid gap-1">
+              {legalLinks.map((item) => (
                 <li key={item.href}>
                   <Link href={item.href} className="inline-block py-1.5 text-base transition-colors hover:text-white">
                     {item.label}
