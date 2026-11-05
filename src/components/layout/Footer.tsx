@@ -1,15 +1,33 @@
 import Image from "next/image";
 import Link from "next/link";
-import { InstagramLogo } from "@phosphor-icons/react/dist/ssr";
+import type { Icon } from "@phosphor-icons/react";
+import {
+  ArrowSquareOut,
+  Clock,
+  EnvelopeSimple,
+  InstagramLogo,
+  MapPin,
+  Phone,
+  ThreadsLogo,
+  TiktokLogo,
+  WhatsappLogo,
+} from "@phosphor-icons/react/dist/ssr";
 import { siteConfig } from "@/services/config";
 import { homeLink, infoLinks, legalLinks, pageLinks } from "@/lib/nav";
 import { Container } from "@/components/ui/Container";
+
+const socialLinks: Array<{ label: string; href: string; icon: Icon }> = [
+  { label: "Instagram", href: siteConfig.contacts.instagram, icon: InstagramLogo },
+  { label: "TikTok", href: siteConfig.contacts.tiktok, icon: TiktokLogo },
+  { label: "Threads", href: siteConfig.contacts.threads, icon: ThreadsLogo },
+  { label: "WhatsApp", href: `https://wa.me/${siteConfig.contacts.whatsapp}`, icon: WhatsappLogo },
+];
 
 export function Footer() {
   return (
     <footer className="bg-grape-900 text-grape-100">
       <Container className="grid gap-10 py-12 md:grid-cols-[1.2fr_2fr] md:py-16">
-        <div>
+        <div className="min-w-0">
           <Image
             src="/brand/logo.webp"
             alt="Boom Bala"
@@ -19,16 +37,50 @@ export function Footer() {
             className="-ml-2 h-auto w-[168px] select-none"
           />
           <p className="mt-5 max-w-[34ch] text-base leading-relaxed text-grape-200">
-            Бум Бала (Boom Bala) — детский игровой и развлекательный центр в {siteConfig.city}.
+            Boom Bala — детский игровой и развлекательный центр в {siteConfig.city}.
           </p>
           <address className="mt-4 text-base not-italic leading-relaxed text-grape-200">
-            Адрес: {siteConfig.location.street}
-            <br />
-            {siteConfig.location.mall}, {siteConfig.location.floor}
+            <span className="flex items-start gap-2">
+              <MapPin size={20} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 text-sun-400" />
+              <span>
+                г. {siteConfig.location.city}, {siteConfig.location.street}, {siteConfig.location.mall}, 3-й этаж.
+              </span>
+            </span>
+            <span className="mt-3 flex items-start gap-2">
+              <Clock size={20} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 text-sun-400" />
+              <span>
+                <span className="block">Ежедневно: 10:00–22:00</span>
+                <span className="block">Последний вход: 21:00</span>
+              </span>
+            </span>
+            <a
+              href={`tel:${siteConfig.contacts.phone.tel}`}
+              className="mt-3 inline-flex min-h-11 items-center gap-2 transition-colors hover:text-white focus-visible:text-white"
+            >
+              <Phone size={20} weight="bold" aria-hidden="true" className="shrink-0 text-sun-400" />
+              {siteConfig.contacts.phone.display}
+            </a>
+            <a
+              href={`mailto:${siteConfig.contacts.email}`}
+              className="flex min-h-11 items-center gap-2 break-all transition-colors hover:text-white focus-visible:text-white"
+            >
+              <EnvelopeSimple size={20} weight="bold" aria-hidden="true" className="shrink-0 text-sun-400" />
+              {siteConfig.contacts.email}
+            </a>
           </address>
+          <a
+            href={siteConfig.location.mapUrl ?? "https://go.2gis.com/glADK"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full border border-sun-400/70 px-4 py-2 font-display text-sm font-extrabold text-sun-400 transition-colors hover:bg-sun-400 hover:text-grape-900 focus-visible:bg-sun-400 focus-visible:text-grape-900"
+          >
+            <MapPin size={19} weight="bold" aria-hidden="true" />
+            Открыть в 2GIS
+            <ArrowSquareOut size={17} weight="bold" aria-hidden="true" />
+          </a>
         </div>
 
-        <div className="grid grid-cols-2 gap-8 min-[1200px]:grid-cols-4">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-9 min-[1200px]:grid-cols-4">
           <nav aria-label="Страницы сайта">
             <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Страницы</p>
             <ul className="grid gap-1">
@@ -68,26 +120,30 @@ export function Footer() {
             </ul>
           </nav>
 
-          <div className="col-span-2 min-[1200px]:col-span-1">
+          <nav aria-label="Мы в социальных сетях" className="col-span-2 min-[1200px]:col-span-1">
             <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Мы в соцсетях</p>
-            <a
-              href={siteConfig.contacts.instagram}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 py-1.5 text-base transition-colors hover:text-white"
-            >
-              <InstagramLogo size={22} weight="bold" aria-hidden="true" />
-              {siteConfig.contacts.instagramHandle}
-            </a>
-          </div>
+            <ul className="grid gap-1 sm:grid-cols-2 min-[1200px]:grid-cols-1">
+              {socialLinks.map(({ label, href, icon: SocialIcon }) => (
+                <li key={label}>
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Boom Bala в ${label}`}
+                    className="inline-flex min-h-11 items-center gap-2 py-1.5 text-base transition-colors hover:text-white focus-visible:text-white"
+                  >
+                    <SocialIcon size={22} weight="bold" aria-hidden="true" />
+                    <span>{label}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
       </Container>
       <div className="border-t border-white/10">
         <Container className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pb-24 pt-5 text-sm text-grape-200 min-[1080px]:pb-5">
           <span>© 2026 Boom Bala, {siteConfig.city}</span>
-          <Link href="/privacy" className="py-1 underline decoration-grape-200/50 underline-offset-4 transition-colors hover:text-white">
-            Политика конфиденциальности
-          </Link>
         </Container>
       </div>
     </footer>
