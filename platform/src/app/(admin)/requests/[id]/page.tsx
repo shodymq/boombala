@@ -179,26 +179,26 @@ export default async function RequestDetailPage({ params, searchParams }: {
     const remaining = payment.amountKzt - (refundsByPayment.get(payment.id) ?? 0);
     return remaining > 0 ? [{ ...payment, remaining }] : [];
   }) ?? [];
-  const bookingNeedsCancellationForRefund = birthday?.bookingReservationState === "active"
+  const depositRefundNeedsCancellation = birthday?.bookingReservationState === "active"
     || ["booked", "paid", "confirmed"].includes(lead.status)
     || (!birthday?.bookingReservationState && lead.status === "completed");
-  const refundablePaymentsForRequest = bookingNeedsCancellationForRefund
-    ? []
+  const refundablePaymentsForRequest = depositRefundNeedsCancellation
+    ? refundablePayments.filter((payment) => payment.paymentKind === "additional")
     : refundablePayments;
   const hasUnallocatedRefund = birthday?.manualRefundFacts.some((refund) => !refund.paymentFactId) ?? false;
-  let noRefundablePaymentMessage = "Для возврата сначала отмените бронь в календаре и убедитесь, что комната освобождена.";
-  if (lead.status === "completed" && bookingNeedsCancellationForRefund) {
+  let noRefundablePaymentMessage = "Для возврата предоплаты сначала отмените бронь и освободите комнату.";
+  if (lead.status === "completed" && depositRefundNeedsCancellation) {
     noRefundablePaymentMessage = "Не удалось подтвердить освобождение комнаты. Обновите карточку после синхронизации брони.";
   } else if (birthday?.bookingReservationState === "active") {
-    noRefundablePaymentMessage = "Сначала освободите бронь в календаре. После этого можно записать фактически проведённый возврат.";
+    noRefundablePaymentMessage = "Предоплату можно вернуть после отмены брони и освобождения комнаты. Возврат доплаты записывается отдельно.";
   }
   let refundFormMessage = "Укажи возврат, который уже был фактически проведён.";
-  if (lead.status === "completed" && bookingNeedsCancellationForRefund) {
+  if (birthday?.bookingReservationState === "active") {
+    refundFormMessage = "Можно записать фактический возврат доплаты без отмены брони. Предоплату можно вернуть только после отмены и освобождения комнаты.";
+  } else if (lead.status === "completed" && depositRefundNeedsCancellation) {
     refundFormMessage = "Не удалось подтвердить освобождение комнаты. Обновите карточку после синхронизации брони.";
-  } else if (birthday?.bookingReservationState === "active") {
-    refundFormMessage = "Бронь ещё занимает комнату: сначала отмените её и освободите комнату. После этого можно записать фактически проведённый возврат.";
-  } else if (bookingNeedsCancellationForRefund) {
-    refundFormMessage = "На активной брони возврат не записывается. Сначала отмените бронь и освободите комнату.";
+  } else if (depositRefundNeedsCancellation) {
+    refundFormMessage = "Для возврата предоплаты сначала отмените бронь и освободите комнату.";
   }
 
   return (

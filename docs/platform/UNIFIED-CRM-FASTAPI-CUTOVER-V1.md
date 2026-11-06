@@ -93,15 +93,13 @@ environment.
    booking. Confirmation requires the unreimbursed initial deposit to remain
    at least 10,000 KZT; additional payments cannot replace it. Notes and legacy
    payment aggregates do not count.
-3. A refund against either payment kind is blocked while a booking reservation
-   is active. A `booked`, `confirmed`, or legacy `paid` request without a live
-   reservation must be cancelled before any refund. After a booking is
-   completed and its room released, an actually completed refund may be
-   recorded. Requests without a live reservation and without those active
-   booking statuses can also record an actually completed refund without
-   cancellation. The manager records the real amount, time, method, reason,
-   actor, and audit. Recording a refund never moves money or changes
-   booking/request state.
+3. A refund against the required initial deposit is blocked while a booking
+   reservation is active; a `booked`, `confirmed`, or legacy `paid` request
+   must be cancelled and its room released first. A refund against a separate
+   additional payment may be recorded while a booking remains active because
+   it does not reduce the initial-deposit fact or change booking/request state.
+   The manager records only an already completed refund with its real amount,
+   time, method, reason, actor, and audit. The CRM never moves money.
 4. Manager supplies an agreed final price. A catalog `price_from` value is not
    accepted as the final price. The booking stores the agreed amount and
    `manager_agreed` price source; later catalog edits do not rewrite bookings.
@@ -175,7 +173,7 @@ If the boundary cannot guarantee one writer, the cutover is blocked.
 - one website lead visible in the existing CRM through the approved link;
 - one manager manual payment fact with actor, method, amount and timestamp;
 - one owner package/price edit is reflected by the FastAPI catalog read and public site while existing booking price snapshots remain unchanged;
-- every refund is blocked while its room is actively reserved; a `booked`, `confirmed`, or legacy `paid` request must be cancelled and released first; a completed booking can record an actually completed refund after its room is released; all refunds stay linked to the selected payment fact, support retries, and reject over-refunds;
+- an initial-deposit refund is blocked until the booking is cancelled and its room released; an additional-payment refund can leave an active booking and its room reservation intact while preserving the 10,000 KZT deposit; completed refunds stay linked to the selected payment fact, support retries, and reject over-refunds;
 - net initial deposit remains at least 10,000 KZT for confirmation; additional payments do not substitute for it;
 - refund and cancellation/release remain separate operations, and payment/refund facts agree across CRM and API;
 - one agreed-price confirmation and one occupied slot;
