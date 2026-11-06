@@ -179,8 +179,27 @@ export default async function RequestDetailPage({ params, searchParams }: {
     const remaining = payment.amountKzt - (refundsByPayment.get(payment.id) ?? 0);
     return remaining > 0 ? [{ ...payment, remaining }] : [];
   }) ?? [];
-  const refundMustWaitForCancellation = ["booked", "paid", "confirmed"].includes(lead.status);
+  const bookingNeedsCancellationForRefund = birthday?.bookingReservationState === "active"
+    || ["booked", "paid", "confirmed"].includes(lead.status)
+    || (!birthday?.bookingReservationState && lead.status === "completed");
+  const refundablePaymentsForRequest = bookingNeedsCancellationForRefund
+    ? []
+    : refundablePayments;
   const hasUnallocatedRefund = birthday?.manualRefundFacts.some((refund) => !refund.paymentFactId) ?? false;
+  let noRefundablePaymentMessage = "Для возврата сначала отмените бронь в календаре и убедитесь, что комната освобождена.";
+  if (lead.status === "completed" && bookingNeedsCancellationForRefund) {
+    noRefundablePaymentMessage = "Не удалось подтвердить освобождение комнаты. Обновите карточку после синхронизации брони.";
+  } else if (birthday?.bookingReservationState === "active") {
+    noRefundablePaymentMessage = "Сначала освободите бронь в календаре. После этого можно записать фактически проведённый возврат.";
+  }
+  let refundFormMessage = "Укажи возврат, который уже был фактически проведён.";
+  if (lead.status === "completed" && bookingNeedsCancellationForRefund) {
+    refundFormMessage = "Не удалось подтвердить освобождение комнаты. Обновите карточку после синхронизации брони.";
+  } else if (birthday?.bookingReservationState === "active") {
+    refundFormMessage = "Бронь ещё занимает комнату: сначала отмените её и освободите комнату. После этого можно записать фактически проведённый возврат.";
+  } else if (bookingNeedsCancellationForRefund) {
+    refundFormMessage = "На активной брони возврат не записывается. Сначала отмените бронь и освободите комнату.";
+  }
 
   return (
     <div className="crm-page crm-detail-page">
@@ -252,16 +271,16 @@ export default async function RequestDetailPage({ params, searchParams }: {
                 </form>
               ) : null}
               {!loadError && refundablePayments.length > 0 ? (
-                refundMustWaitForCancellation ? (
-                  <p className="crm-detail-refund-warning" role="status">Сначала отмените бронь в календаре. После освобождения комнаты можно записать фактически проведённый возврат.</p>
-                ) : hasUnallocatedRefund ? (
+                hasUnallocatedRefund ? (
                   <p className="crm-detail-refund-warning" role="status">Сначала сверьте ранее записанный возврат с конкретным платежом.</p>
+                ) : refundablePaymentsForRequest.length === 0 ? (
+                  <p className="crm-detail-refund-warning" role="status">{noRefundablePaymentMessage}</p>
                 ) : (
                 <form action={recordManualRefundAction} className="crm-detail-form crm-detail-refund-form">
                   <input type="hidden" name="id" value={lead.id} />
                   <input type="hidden" name="idempotencyKey" value={sp.refundKey ?? ""} />
-                  <p className="crm-detail-refund-warning">Укажи возврат, который уже был фактически проведён. Эта форма не возвращает деньги.</p>
-                  <label className="crm-detail-field"><span>Платёж для возврата</span><select name="paymentFactId" required defaultValue=""><option value="" disabled>Выбрать платёж</option>{refundablePayments.map((payment) => <option key={payment.id} value={payment.id}>{payment.paymentKind === "initial_deposit" ? "Предоплата" : "Доплата"} · остаток {money.format(payment.remaining)} ₸ · {new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Almaty" }).format(new Date(payment.receivedAt))}</option>)}</select></label>
+                  <p className="crm-detail-refund-warning">{refundFormMessage} Эта форма не переводит деньги.</p>
+                  <label className="crm-detail-field"><span>Платёж для возврата</span><select name="paymentFactId" required defaultValue=""><option value="" disabled>Выбрать платёж</option>{refundablePaymentsForRequest.map((payment) => <option key={payment.id} value={payment.id}>{payment.paymentKind === "initial_deposit" ? "Предоплата" : "Доплата"} · остаток {money.format(payment.remaining)} ₸ · {new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Almaty" }).format(new Date(payment.receivedAt))}</option>)}</select></label>
                   <label className="crm-detail-field"><span>Возвращено, ₸</span><input name="amountKzt" type="number" min="1" max="10000000" step="1" required placeholder="Например, 10 000" /></label>
                   <label className="crm-detail-field"><span>Способ возврата</span><select name="method" required defaultValue=""><option value="" disabled>Выбрать способ</option>{PAYMENT_METHODS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                   <label className="crm-detail-field"><span>Дата возврата</span><DatePicker name="refundDate" label="Дата возврата" required allowClear={false} /></label>

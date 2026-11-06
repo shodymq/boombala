@@ -85,6 +85,7 @@ const birthdayLead = z.object({
   childName: z.string().nullable().optional(),
   roomId: z.string().nullable().optional(),
   slotId: z.string().nullable().optional(),
+  bookingReservationState: z.enum(["none", "active", "released"]).optional(),
   requestedDate: z.string().nullable().optional(),
   guestCount: z.number().nullable().optional(),
   branch: branchSummary.nullable().optional(),
