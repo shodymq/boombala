@@ -17,6 +17,12 @@ const plus = (days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
+describe("business calendar date", () => {
+  it("uses Almaty time when local midnight differs from UTC", () => {
+    assert.equal(almatyToday(new Date("2026-11-06T19:30:00Z")), "2026-11-07");
+  });
+});
+
 describe("Stage 3: bookings, blocks and double-booking protection", () => {
   let db: TestDb;
   let owner: Awaited<ReturnType<typeof makeUser>>;

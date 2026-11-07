@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FlaticonIcon } from "@/components/flaticon-icon";
+import { almatyToday } from "@/core/dates";
 
 type DateParts = { year: number; month: number; day: number };
 
@@ -16,11 +17,6 @@ function parseDate(value: string): DateParts | null {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
     ? { year, month: month - 1, day }
     : null;
-}
-
-function todayValue(): string {
-  const today = new Date();
-  return [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-");
 }
 
 function dateValue(year: number, month: number, day: number): string {
@@ -75,7 +71,7 @@ export function DatePicker({
   const [activeDate, setActiveDate] = useState("");
   const [placement, setPlacement] = useState<"top" | "bottom">("bottom");
   const root = useRef<HTMLDivElement>(null);
-  const today = todayValue();
+  const today = almatyToday();
   const selected = parseDate(value);
   const month = visibleMonth ?? selected ?? parseDate(today)!;
   const monthName = new Intl.DateTimeFormat("ru-RU", { month: "long", timeZone: "UTC" })
