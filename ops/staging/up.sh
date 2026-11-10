@@ -2,9 +2,9 @@
 # Starts the isolated staging stack on 127.0.0.1: PostgreSQL, FastAPI, Platform. Records the SHAs it runs.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_env
+load_secrets
 "$HERE/guard.sh" >/dev/null
 ensure_checkouts
-load_secrets
 "$HERE/pg.sh" start || { echo "PostgreSQL did not start; not starting the services" >&2; exit 1; }
 assert_staging_cluster
 
