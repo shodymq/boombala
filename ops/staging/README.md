@@ -79,8 +79,9 @@ before it (`restore-test.sh` proves the dump is usable; restoring into the live 
 
 ## Synthetic data only
 
-`seed/` holds the synthetic seed: branches `stg-almaty` and `stg-shymkent`, rooms, packages, FastAPI admins (`stg-owner-a`,
-`stg-owner-b`, `stg-manager-a`, `stg-manager-b`, an operator), and Platform staff linked explicitly to them. `seed_calendar.py`
+`seed/` holds the synthetic release-candidate seed: one branch (`stg-almaty`), four private rooms, a 30-minute cleaning
+buffer, two four-hour catalog slots, packages, FastAPI admins (`stg-owner-a`, `stg-owner-b`, `stg-manager-a`,
+`stg-manager-b`, an operator), and Platform staff linked explicitly to them. `seed_calendar.py`
 truncates the staging admin tables; it refuses nothing by itself, so run it only through `seed.sh`, which runs `guard.sh` first.
 The seeded `password_hash` values are placeholders: the bridge does not check them. Platform passwords come from
 `STAGING_TEST_PASSWORD`, which is test-only and must never be a real credential.
