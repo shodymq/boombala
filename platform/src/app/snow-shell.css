@@ -1,0 +1,137 @@
+.snow-shell {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: 254px minmax(0, 1fr);
+  background: #faf8f6;
+  color: #2a1810;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+.snow-sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  height: 100dvh;
+  min-width: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  border-right: 1px solid #eee9e3;
+  background: #fff;
+  padding: 27px 16px 18px;
+}
+
+.snow-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 10px 28px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.snow-brand-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px;
+  transform: rotate(-8deg);
+}
+
+.snow-brand-mark span {
+  border-radius: 5px 2px;
+  background: #3b1e78;
+}
+
+.snow-brand-mark span:nth-child(2) { border-radius: 2px 5px; background: #b8a5dc; }
+.snow-brand-mark span:nth-child(3) { border-radius: 2px 5px; background: #ddd4ed; }
+.snow-brand-mark span:nth-child(4) { background: #7656ae; }
+.snow-brand-name { display: block; font-family: var(--font-heading), sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .08em; line-height: 1; }
+.snow-brand-caption { display: block; margin-top: 5px; color: #ada29c; font-size: 8px; font-weight: 600; letter-spacing: .08em; line-height: 1.15; text-transform: uppercase; }
+
+.snow-nav {
+  position: relative;
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 18px;
+}
+
+.snow-nav-toggle {
+  display: none;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #eee9e3;
+  border-radius: 10px;
+  background: #fff;
+  color: #3b1e78;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.snow-nav-sections { display: grid; align-content: start; gap: 18px; }
+.snow-nav-section { min-width: 0; }
+.snow-sidebar-label { margin: 0 12px 10px; color: #a79b94; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.snow-nav-list { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.snow-nav-list li { min-width: 0; }
+.snow-nav-link { display: flex; min-height: 42px; align-items: center; gap: 12px; border-radius: 12px; padding: 0 12px; color: #81766f; font-size: 13px; font-weight: 500; text-decoration: none; transition: color .2s ease, background .2s ease, transform .2s ease; }
+.snow-nav-link:hover { transform: translateX(2px); background: #f7f4fb; color: #3b1e78; }
+.snow-nav-link[aria-current="page"] { background: #3b1e78; color: #fff; box-shadow: 0 8px 18px rgba(59, 30, 120, .16); }
+.snow-nav-icon { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+
+.snow-sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: auto; border-top: 1px solid #eee9e3; padding: 17px 10px 0; }
+.snow-avatar { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border: 1px solid #e4dcef; border-radius: 10px; background: #f5f1fa; color: #3b1e78; font-family: var(--font-heading), sans-serif; font-size: 10px; font-weight: 800; }
+.snow-sidebar-user { min-width: 0; }
+.snow-sidebar-user strong, .snow-sidebar-user span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snow-sidebar-user strong { color: #2a1810; font-size: 12px; font-weight: 600; }
+.snow-sidebar-user span { margin-top: 3px; color: #ada29c; font-size: 10px; }
+
+.snow-content { min-width: 0; }
+.snow-topbar { position: relative; z-index: 10; display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #eee9e3; background: rgba(255, 255, 255, .92); padding: 0 38px; }
+.snow-breadcrumbs { display: flex; min-width: 0; align-items: center; gap: 10px; color: #8b807a; font-size: 12px; }
+.snow-breadcrumbs strong { overflow: hidden; color: #2a1810; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.snow-breadcrumb-divider { color: #c5bfca; }
+.snow-topbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; }
+.snow-topbar-user { display: flex; align-items: center; gap: 9px; }
+.snow-topbar-user-copy { display: grid; min-width: 0; }
+.snow-topbar-user-copy strong { max-width: 180px; overflow: hidden; color: #2a1810; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.snow-topbar-user-copy span { margin-top: 2px; color: #8b807a; font-size: 10px; }
+.snow-logout { min-height: 36px; border: 1px solid #e4dcef; border-radius: 10px; background: #fff; padding: 0 13px; color: #3b1e78; font-size: 12px; font-weight: 600; transition: background .2s ease, border-color .2s ease; }
+.snow-logout:hover { border-color: #cbbde1; background: #f7f4fb; }
+.snow-main { width: 100%; max-width: 1440px; min-width: 0; margin: 0 auto; padding: 41px 42px; }
+
+@media (max-width: 820px) {
+  .snow-shell { grid-template-columns: minmax(0, 1fr); }
+  .snow-sidebar { position: sticky; height: auto; min-height: 62px; overflow: visible; border-right: 0; border-bottom: 1px solid #eee9e3; padding: 14px 16px; }
+  .snow-brand { padding: 0 0 0 2px; }
+  .snow-brand-mark { width: 27px; height: 27px; }
+  .snow-nav { flex: 0 0 auto; }
+  .snow-nav-toggle { position: absolute; top: -31px; right: 0; display: inline-flex; padding: 0 12px; }
+  .snow-nav-sections { display: none; margin-top: 14px; }
+  .snow-nav[data-open="true"] .snow-nav-sections { display: grid; }
+  .snow-nav[data-open="true"] { padding-bottom: 2px; }
+  .snow-sidebar-label { margin-top: 2px; }
+  .snow-sidebar-footer { display: none; }
+  .snow-topbar { min-height: 64px; padding: 0 18px; }
+  .snow-main { padding: 28px 20px; }
+}
+
+@media (max-width: 480px) {
+  .snow-topbar { gap: 10px; padding: 0 14px; }
+  .snow-breadcrumbs { gap: 7px; font-size: 10px; }
+  .snow-topbar-actions { gap: 8px; }
+  .snow-topbar-user { gap: 7px; }
+  .snow-topbar-user .snow-avatar { width: 28px; height: 28px; }
+  .snow-topbar-user-copy strong { max-width: 90px; font-size: 11px; }
+  .snow-topbar-user-copy span { display: none; }
+  .snow-logout { min-height: 32px; padding: 0 9px; font-size: 11px; }
+  .snow-main { padding: 22px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snow-nav-link, .snow-logout { transition: none; }
+}

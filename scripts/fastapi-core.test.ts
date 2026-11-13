@@ -14,6 +14,7 @@ import {
   parseFastapiConfig,
   parseWebsiteLeadConfig,
   postBirthdayLead,
+  postWebsiteBirthdayLead,
   postContactLead,
   redact,
   requestOtp,
@@ -110,7 +111,7 @@ test("website lead mode is disabled unless its separate flag is exactly 1", () =
   );
 });
 
-test("enabled website lead mode refuses missing branch or consent catalog configuration", () => {
+test("enabled website lead mode refuses missing branch, credentials, consent, or catalog mapping", () => {
   assert.throws(
     () => parseWebsiteLeadConfig({ UNIFIED_FASTAPI_WEBSITE_LEADS: "1", FASTAPI_FEATURES: "leads", FASTAPI_BASE_URL: BASE }),
     (e: unknown) => e instanceof FastapiError && e.kind === "not_configured",
@@ -120,9 +121,14 @@ test("enabled website lead mode refuses missing branch or consent catalog config
 test("website lead payload carries explicit source, branch, UTM and consent provenance", () => {
   const config = parseWebsiteLeadConfig({
     UNIFIED_FASTAPI_WEBSITE_LEADS: "1",
-    UNIFIED_FASTAPI_BRANCH_ID: "branch-approved-by-owner",
+    UNIFIED_FASTAPI_BRANCH_ID: "branch-api-1",
+    UNIFIED_FASTAPI_WEBSITE_SERVICE_ID: "boombala-site",
+    UNIFIED_FASTAPI_WEBSITE_SERVICE_SECRET: "s".repeat(40),
     UNIFIED_FASTAPI_CONSENT_DOCUMENT_KIND: "personal_data_consent",
     UNIFIED_FASTAPI_CONSENT_DOCUMENT_VERSION: "3",
+    UNIFIED_FASTAPI_PACKAGE_MAP: JSON.stringify({ "wow-party": "package-api-1", undecided: null }),
+    UNIFIED_FASTAPI_ROOM_MAP: JSON.stringify({ "roblox-room": "room-api-1" }),
+    UNIFIED_FASTAPI_SLOT_MAP: JSON.stringify({ "1": "slot-api-1" }),
     FASTAPI_FEATURES: "leads",
     FASTAPI_BASE_URL: BASE,
   });
@@ -149,19 +155,18 @@ test("website lead payload carries explicit source, branch, UTM and consent prov
     {
       name: "Айжан",
       phone: "+77071234567",
-      branchId: "branch-approved-by-owner",
+      branchId: "branch-api-1",
       preferredDate: "2027-01-20",
       guestCount: 4,
-      packageId: "wow-party",
-      roomId: "roblox-room",
-      slotId: "1",
+      packageId: "package-api-1",
+      roomId: "room-api-1",
+      slotId: "slot-api-1",
       source: "website",
       sourcePage: "/birthdays",
       sourceReferrer: "https://example.test/",
       utmSource: "instagram",
       utmMedium: "social",
       utmCampaign: "birthday-v1",
-      idempotencyKey: "9f4f6f9e-6e20-4e7d-8cf3-0b8ad8e6a9e0",
       consent: true,
       consentDocumentKind: "personal_data_consent",
       consentDocumentVersion: 3,
@@ -202,6 +207,27 @@ test("birthday lead: POST to the real route, correlation header, parsed response
   assert.equal((calls[0].init.headers as Record<string, string>)["x-request-id"], "generated-request-id-001");
   assert.equal(logs[0].outcome, "ok");
   assert.equal(logs[0].route, "/mobile/leads/birthday");
+});
+
+test("website birthday lead sends the signed raw body to the public service route", async () => {
+  const { calls, fetchImpl } = stubFetch(201, LEAD_OK);
+  const body = JSON.stringify({ name: "Test Lead", source: "website" });
+  const headers = {
+    "X-Service-Id": "boombala-site",
+    "X-Request-Timestamp": "1793440800",
+    "X-Request-Nonce": "nonce-1",
+    "X-Request-Signature": "signed-value",
+    "Idempotency-Key": "9f4f6f9e-6e20-4e7d-8cf3-0b8ad8e6a9e0",
+  };
+  const requestId = "9f4f6f9e-6e20-4e7d-8cf3-0b8ad8e6a9e0";
+  await postWebsiteBirthdayLead(clientWith(fetchImpl), { rawBody: body, headers }, requestId);
+  assert.equal(calls[0].url, `${BASE}/public/leads/birthday`);
+  assert.equal(calls[0].init.body, body);
+  const sentHeaders = new Headers(calls[0].init.headers);
+  assert.equal(sentHeaders.get("x-service-id"), "boombala-site");
+  assert.equal(sentHeaders.get("x-request-signature"), "signed-value");
+  assert.equal(sentHeaders.get("idempotency-key"), "9f4f6f9e-6e20-4e7d-8cf3-0b8ad8e6a9e0");
+  assert.equal(sentHeaders.get("x-request-id"), requestId);
 });
 
 test("contact lead: POST to /mobile/leads/contact and parse LeadCreatedResponse", async () => {

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { listEnrolledUserIds } from "@/core/mfa";
 import { ROLES } from "@/core/rbac";
 import { listUsers } from "@/core/users";
@@ -43,13 +44,18 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
 
   return (
-    <div className="grid gap-6">
-      <h1 className="text-3xl font-black tracking-tight text-grape-800">Сотрудники</h1>
+    <div className="crm-page">
+      <header>
+        <p className="crm-eyebrow">Доступ к CRM</p>
+        <h1 className="crm-page-title">Сотрудники</h1>
+        <p className="crm-page-subtitle">Роли, доступ к клиентским данным и состояние входа.</p>
+      </header>
       {notice && NOTICES[notice] ? <p role="status" className="rounded-2xl bg-grape-100 p-3 text-sm font-bold text-grape-900">{NOTICES[notice]}</p> : null}
       {error ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{errorText(error)}</p> : null}
 
-      <section aria-labelledby="new" className="rounded-3xl border border-line bg-white p-5">
-        <h2 id="new" className="text-lg font-black text-grape-800">Добавить сотрудника</h2>
+      <section aria-labelledby="new" className="crm-panel">
+        <h2 id="new" className="text-lg font-black text-grape-800">Создать учётную запись</h2>
+        <p className="mt-1 text-xs text-muted">Задайте начальный пароль не короче 12 символов. Приглашение по e-mail в CRM не подключено.</p>
         <form action={createUserAction} className="mt-3 grid gap-3 sm:grid-cols-2">
           <input name="name" placeholder="Имя" required maxLength={120} autoComplete="off" className={input} aria-label="Имя" />
           <input name="email" type="email" placeholder="E-mail" required maxLength={254} autoComplete="off" className={input} aria-label="E-mail" />
@@ -58,20 +64,21 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
               <option key={r} value={r}>{ROLE_LABEL[r]}</option>
             ))}
           </select>
-          <input name="password" type="password" placeholder="Пароль (минимум 12 символов)" required minLength={12} maxLength={128} autoComplete="new-password" className={input} aria-label="Пароль" />
+          <label className="grid gap-1 text-xs font-bold text-muted">Начальный пароль (12+ символов)<input name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" className={input} aria-label="Начальный пароль" /></label>
           <button type="submit" className={`${btn} sm:col-span-2 sm:justify-self-start`}>Создать</button>
         </form>
       </section>
 
       <section aria-label="Список сотрудников" className="grid gap-3">
         {users.map((u) => (
-          <article key={u.id} className={`rounded-3xl border border-line bg-white p-5 ${u.isActive ? "" : "opacity-70"}`}>
+          <article key={u.id} className={`crm-panel ${u.isActive ? "" : "opacity-70"}`}>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-base font-black text-grape-800">{u.name}</h3>
-              <span className="text-xs font-bold text-muted">{u.isActive ? "активен" : "отключён"}</span>
+              <span className={`crm-status-badge ${u.isActive ? "" : "opacity-80"}`}>{u.isActive ? "Активен" : "Отключён"}</span>
             </div>
             <p className="text-sm text-muted">{u.email}</p>
-            <p className="mt-1 text-xs text-muted">Последний вход: {u.lastLoginAt ? fmt.format(u.lastLoginAt) : "ещё не входил"}</p>
+            <p className="mt-1 text-xs text-muted">Роль: {ROLE_LABEL[u.role]} · Второй фактор: {enrolled.has(u.id) ? "включён" : "не включён"}</p>
+            <p className="mt-1 text-xs text-muted">Последний вход: {u.lastLoginAt ? fmt.format(u.lastLoginAt) : "ещё не входил"} · <Link href={`/audit?userId=${encodeURIComponent(u.id)}`} className="font-bold text-grape-700 underline">Действия в журнале</Link></p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <form action={changeRoleAction} className="flex items-center gap-2">
                 <input type="hidden" name="id" value={u.id} />
@@ -89,24 +96,21 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
               </form>
             </div>
             {u.role === "manager" ? (
-              <form action={setCanExportAction} className="mt-3 flex flex-wrap items-center gap-2">
+              <form action={setCanExportAction} className="crm-user-permission mt-3">
                 <input type="hidden" name="id" value={u.id} />
                 <input type="hidden" name="allowed" value={u.canExport ? "0" : "1"} />
-                <span className="text-sm text-muted">Выгрузка клиентской базы: {u.canExport ? "разрешена" : "запрещена"}</span>
-                <button type="submit" className={btnGhost}>{u.canExport ? "Запретить" : "Разрешить"}</button>
+                <div><strong className="text-sm text-grape-800">Выгрузка клиентской базы: {u.canExport ? "разрешена" : "запрещена"}</strong><p>Даёт доступ к файлу с персональными данными.</p></div>
+                <button type="submit" className={btnGhost}>{u.canExport ? "Запретить выгрузку" : "Разрешить выгрузку"}</button>
               </form>
             ) : u.role === "owner" ? (
-              <p className="mt-3 text-sm text-muted">Выгрузка клиентской базы: всегда разрешена</p>
+              <div className="crm-user-permission mt-3"><div><strong className="text-sm text-grape-800">Выгрузка клиентской базы: разрешена владельцу</strong><p>Это право закреплено за ролью владельца.</p></div></div>
             ) : null}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-sm text-muted">Второй фактор: {enrolled.has(u.id) ? "включён" : "не включён"}</span>
-              {enrolled.has(u.id) && u.id !== user.id ? (
-                <form action={resetMfaAction}>
-                  <input type="hidden" name="id" value={u.id} />
-                  <button type="submit" className={btnGhost}>Сбросить второй фактор</button>
-                </form>
-              ) : null}
-            </div>
+            {enrolled.has(u.id) && u.id !== user.id ? (
+              <form action={resetMfaAction} className="mt-3">
+                <input type="hidden" name="id" value={u.id} />
+                <button type="submit" className={btnGhost}>Сбросить второй фактор</button>
+              </form>
+            ) : null}
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-extrabold text-grape-700">Задать новый пароль</summary>
               <form action={resetPasswordAction} className="mt-2 flex flex-wrap items-center gap-2">

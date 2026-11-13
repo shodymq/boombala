@@ -3,9 +3,10 @@
  * correlation, PII-safe logging and the HTTP call itself. No "server-only" import here so that
  * scripts/fastapi-core.test.ts can run it under node; the server entry point is ./index.ts.
  *
- * Contract source: BoomBalaApp backend (FastAPI), routers under the /api/v1 prefix:
- *   POST /mobile/leads/contact, POST /mobile/leads/birthday, POST /mobile/auth/request-otp,
- *   POST /mobile/auth/verify-otp. Mirrors the schemas in backend/app/modules/ at BoomBalaApp 9b65ae5.
+ * Contract source: BoomBalaApp backend modules under the /api/v1 prefix; the
+ * website route is implemented on the local codex/website-lead-api branch:
+ *   POST /mobile/leads/contact, POST /public/leads/birthday, POST /mobile/auth/request-otp,
+ *   POST /mobile/auth/verify-otp.
  */
 
 // ── Feature flags ───────────────────────────────────────────────────────────────────────────────
@@ -153,6 +154,39 @@ export interface WebsiteLeadConfig {
   branchId: string;
   consentDocumentKind: string;
   consentDocumentVersion: number;
+  packageMap: Record<string, string | null>;
+  roomMap: Record<string, string>;
+  slotMap: Record<string, string>;
+}
+
+function parseCatalogMap(raw: string | undefined, allowNull: true): Record<string, string | null> | null;
+function parseCatalogMap(raw: string | undefined, allowNull: false): Record<string, string> | null;
+function parseCatalogMap(raw: string | undefined, allowNull: boolean): Record<string, string | null> | null {
+  if (!raw) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isObject(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length === 0) return null;
+  const mapped: Record<string, string | null> = {};
+  for (const [key, id] of entries) {
+    if (!key.trim() || (typeof id !== "string" && !(allowNull && id === null))) return null;
+    if (typeof id === "string" && !id.trim()) return null;
+    mapped[key] = typeof id === "string" ? id.trim() : null;
+  }
+  if (!allowNull) {
+    const stringMap: Record<string, string> = {};
+    for (const [key, id] of Object.entries(mapped)) {
+      if (id === null) return null;
+      stringMap[key] = id;
+    }
+    return stringMap;
+  }
+  return mapped;
 }
 
 /** Website lead writes are opt-in separately from the generic FastAPI client. */
@@ -161,12 +195,23 @@ export function parseWebsiteLeadConfig(env: Record<string, string | undefined>):
   const clientConfig = parseFastapiConfig(env);
   if (!clientConfig?.features.has("leads")) throw new FastapiError("not_configured");
   const branchId = (env.UNIFIED_FASTAPI_BRANCH_ID ?? "").trim();
+  const serviceId = (env.UNIFIED_FASTAPI_WEBSITE_SERVICE_ID ?? "").trim();
+  const serviceSecret = (env.UNIFIED_FASTAPI_WEBSITE_SERVICE_SECRET ?? "").trim();
   const consentDocumentKind = (env.UNIFIED_FASTAPI_CONSENT_DOCUMENT_KIND ?? "").trim();
   const consentDocumentVersion = Number(env.UNIFIED_FASTAPI_CONSENT_DOCUMENT_VERSION ?? "");
-  if (!branchId || !consentDocumentKind || !Number.isInteger(consentDocumentVersion) || consentDocumentVersion < 1) {
+  const packageMap = parseCatalogMap(env.UNIFIED_FASTAPI_PACKAGE_MAP, true);
+  const roomMap = parseCatalogMap(env.UNIFIED_FASTAPI_ROOM_MAP, false);
+  const slotMap = parseCatalogMap(env.UNIFIED_FASTAPI_SLOT_MAP, false);
+  if (!branchId || !serviceId || serviceSecret.length < 32 || !consentDocumentKind || !Number.isInteger(consentDocumentVersion) || consentDocumentVersion < 1 || !packageMap || !roomMap || !slotMap) {
     throw new FastapiError("not_configured");
   }
-  return { branchId, consentDocumentKind, consentDocumentVersion };
+  return { branchId, consentDocumentKind, consentDocumentVersion, packageMap, roomMap, slotMap };
+}
+
+function mappedId(id: string | null, ids: Record<string, string | null>): string | null {
+  if (id === null) return null;
+  if (!Object.prototype.hasOwnProperty.call(ids, id)) throw new FastapiError("not_configured");
+  return ids[id];
 }
 
 export function buildWebsiteBirthdayLead(input: WebsiteLeadInput, config: WebsiteLeadConfig): BirthdayLeadCreate {
@@ -176,16 +221,15 @@ export function buildWebsiteBirthdayLead(input: WebsiteLeadInput, config: Websit
     branchId: config.branchId,
     preferredDate: input.date,
     guestCount: input.children,
-    packageId: input.packageId,
-    roomId: input.roomId,
-    slotId: input.slotId,
+    packageId: mappedId(input.packageId, config.packageMap),
+    roomId: mappedId(input.roomId, config.roomMap),
+    slotId: mappedId(input.slotId, config.slotMap),
     source: "website",
     sourcePage: input.page,
     sourceReferrer: input.referrer,
     utmSource: input.utmSource,
     utmMedium: input.utmMedium,
     utmCampaign: input.utmCampaign,
-    idempotencyKey: input.idempotencyKey,
     consent: true,
     consentDocumentKind: config.consentDocumentKind,
     consentDocumentVersion: config.consentDocumentVersion,
@@ -333,6 +377,8 @@ export interface CallOptions {
   method: "GET" | "POST";
   route: string;
   body?: unknown;
+  rawBody?: string;
+  headers?: Record<string, string>;
   feature: FastapiFeature;
   requestId?: string;
 }
@@ -382,10 +428,11 @@ export function createFastapiClient(deps: FastapiClientDeps): FastapiClient {
           method: options.method,
           headers: {
             accept: "application/json",
+            ...options.headers,
             "x-request-id": requestId,
-            ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+            ...(options.body !== undefined || options.rawBody !== undefined ? { "content-type": "application/json" } : {}),
           },
-          body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+          body: options.rawBody ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
           signal: AbortSignal.timeout(config.timeoutMs),
           cache: "no-store",
           redirect: "error",
@@ -426,6 +473,7 @@ export function createFastapiClient(deps: FastapiClientDeps): FastapiClient {
 export const ENDPOINTS = {
   contactLead: "/mobile/leads/contact",
   birthdayLead: "/mobile/leads/birthday",
+  publicBirthdayLead: "/public/leads/birthday",
   requestOtp: "/mobile/auth/request-otp",
   verifyOtp: "/mobile/auth/verify-otp",
 } as const;
@@ -434,9 +482,24 @@ export function postContactLead(client: FastapiClient, body: ContactLeadCreate, 
   return client.call({ method: "POST", route: ENDPOINTS.contactLead, body, feature: "leads", requestId }, parseLeadCreated);
 }
 
-export function postBirthdayLead(client: FastapiClient, body: BirthdayLeadCreate, requestId?: string) {
+export function postBirthdayLead(
+  client: FastapiClient,
+  body: BirthdayLeadCreate,
+  requestId?: string,
+) {
   return client.call(
     { method: "POST", route: ENDPOINTS.birthdayLead, body, feature: "leads", requestId },
+    parseBirthdayLeadSubmitted,
+  );
+}
+
+export function postWebsiteBirthdayLead(
+  client: FastapiClient,
+  auth: { headers: Record<string, string>; rawBody: string },
+  requestId?: string,
+) {
+  return client.call(
+    { method: "POST", route: ENDPOINTS.publicBirthdayLead, ...auth, feature: "leads", requestId },
     parseBirthdayLeadSubmitted,
   );
 }
