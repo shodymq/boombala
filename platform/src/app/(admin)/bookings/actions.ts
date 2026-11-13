@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { birthdayStartTimes, hasBirthdayDuration } from "../../../core/birthday-booking-time.ts";
+import { birthdayStartTimes, hasBirthdayDuration, hasBirthdayStart } from "../../../core/birthday-booking-time.ts";
 import type { Role } from "../../../core/rbac.ts";
 import { isValidDate } from "../../../core/dates.ts";
 import { ForbiddenError, ValidationError } from "../../../core/errors.ts";
@@ -78,7 +78,7 @@ export async function blockAction(formData: FormData): Promise<void> {
       reservation.status !== "blocked" ||
       reservation.bookingDate !== input.data.date ||
       reservation.roomId !== input.data.roomId ||
-      !reservation.startsAt?.startsWith(`${input.data.date}T${input.data.startTime}`) ||
+      !hasBirthdayStart(reservation.startsAt, input.data.date, input.data.startTime) ||
       !hasBirthdayDuration(reservation.startsAt, reservation.endsAt)
     ) {
       throw new FastApiCrmError(502, "block_response_mismatch", "crm-action");

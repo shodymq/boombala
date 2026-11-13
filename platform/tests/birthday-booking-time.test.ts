@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { birthdayStartTimes, hasBirthdayDuration } from "../src/core/birthday-booking-time.ts";
+import { birthdayStartTimes, hasBirthdayDuration, hasBirthdayStart } from "../src/core/birthday-booking-time.ts";
 
 describe("birthday booking start times", () => {
   it("offers every full hour that fits a four-hour party in branch hours", () => {
@@ -37,5 +37,11 @@ describe("birthday booking start times", () => {
   it("accepts only a four-hour interval", () => {
     assert.equal(hasBirthdayDuration("2026-11-10T12:00:00+06:00", "2026-11-10T16:00:00+06:00"), true);
     assert.equal(hasBirthdayDuration("2026-11-10T12:00:00+06:00", "2026-11-10T16:30:00+06:00"), false);
+  });
+
+  it("matches the exact whole-hour start, including seconds", () => {
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:00.000+06:00", "2026-11-10", "12:00"), true);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:30+06:00", "2026-11-10", "12:00"), false);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:00.500+06:00", "2026-11-10", "12:00"), false);
   });
 });

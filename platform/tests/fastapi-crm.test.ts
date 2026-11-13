@@ -193,7 +193,7 @@ describe("FastAPI CRM adapter", () => {
       },
     });
     await assert.rejects(
-      () => client.confirmBookingAndRead({ requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "12:00", packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0001" }),
+      () => client.confirmBookingAndRead({ requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "12:00", packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0001" }, { workingHours: "10:00-22:00", bufferMinutes: 0 }),
       (error) => error instanceof FastApiCrmError && error.status === 409 && error.code === "slot_taken",
     );
     assert.deepEqual(paths, ["/api/v1/admin/birthday-bookings/confirm", "/api/v1/admin/leads/lead-1/birthday"]);
@@ -233,7 +233,7 @@ describe("FastAPI CRM adapter", () => {
     await assert.doesNotReject(() => client.confirmBookingAndRead({
       requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "12:00",
       packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0001",
-    }));
+    }, { workingHours: "10:00-22:00", bufferMinutes: 0 }));
 
     const extendedReservation = { ...reservation, occupiedEndsAt: "2026-11-10T16:30:00+06:00" };
     const invalidResponses = [booking, lead, {
@@ -247,8 +247,26 @@ describe("FastAPI CRM adapter", () => {
       () => invalidClient.confirmBookingAndRead({
         requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "12:00",
         packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0002",
-      }),
+      }, { workingHours: "10:00-22:00", bufferMinutes: 0 }),
       (error) => error instanceof FastApiCrmError && error.code === "booking_timeline_readback_mismatch",
+    );
+
+    const invalidBookingClient = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => { throw new Error("booking request must not be sent"); },
+    });
+    await assert.rejects(
+      () => invalidBookingClient.confirmBookingAndRead({
+        requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "15:30",
+        packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0003",
+      }, { workingHours: "10:00-22:00", bufferMinutes: 0 }),
+      (error) => error instanceof FastApiCrmError && error.code === "booking_time_outside_working_hours",
+    );
+    await assert.rejects(
+      () => invalidBookingClient.confirmBookingAndRead({
+        requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "10:00",
+        packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0004",
+      }, { workingHours: "10:00-22:00", bufferMinutes: 30 }),
+      (error) => error instanceof FastApiCrmError && error.code === "booking_buffer_required",
     );
 
     if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;

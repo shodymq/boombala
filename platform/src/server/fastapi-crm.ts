@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { hasBirthdayDuration } from "../core/birthday-booking-time.ts";
+import { birthdayStartTimes, hasBirthdayDuration, hasBirthdayStart } from "../core/birthday-booking-time.ts";
 
 export type FastApiCrmActor = {
   /** A short-lived FastAPI admin access token for the same staff actor. */
@@ -422,7 +422,17 @@ export class FastApiCrmClient {
     return { refund, lead };
   }
 
-  async confirmBookingAndRead(body: FastApiBirthdayBookingConfirmInput): Promise<{ booking: FastApiBirthdayReservation; lead: FastApiBirthdayLeadDetail }> {
+  async confirmBookingAndRead(
+    body: FastApiBirthdayBookingConfirmInput,
+    branch: Pick<FastApiBirthdayBookingCatalog["branches"][number], "workingHours" | "bufferMinutes">,
+  ): Promise<{ booking: FastApiBirthdayReservation; lead: FastApiBirthdayLeadDetail }> {
+    if (branch.bufferMinutes !== 0) {
+      throw new FastApiCrmError(409, "booking_buffer_required", this.requestId);
+    }
+    if (!birthdayStartTimes(branch.workingHours).includes(body.startTime)) {
+      throw new FastApiCrmError(409, "booking_time_outside_working_hours", this.requestId);
+    }
+
     const booking = await this.confirmBooking(body);
     if (
       booking.kind !== "booking" ||
@@ -433,7 +443,7 @@ export class FastApiCrmClient {
       booking.packageId !== body.packageId ||
       booking.priceKzt !== body.agreedPriceKzt ||
       booking.priceSource !== "manager_agreed" ||
-      !booking.startsAt?.startsWith(`${body.bookingDate}T${body.startTime}`) ||
+      !hasBirthdayStart(booking.startsAt, body.bookingDate, body.startTime) ||
       !hasBirthdayDuration(booking.startsAt, booking.endsAt)
     ) {
       throw new FastApiCrmError(502, "booking_response_mismatch", this.requestId);
@@ -453,7 +463,7 @@ export class FastApiCrmClient {
       reservation.status !== "confirmed" ||
       reservation.requestId !== body.requestId ||
       reservation.roomId !== body.roomId ||
-      !reservation.startsAt.startsWith(`${body.bookingDate}T${body.startTime}`) ||
+      !hasBirthdayStart(reservation.startsAt, body.bookingDate, body.startTime) ||
       Date.parse(reservation.endsAt) !== Date.parse(booking.endsAt ?? "") ||
       !hasBirthdayDuration(reservation.startsAt, reservation.endsAt) ||
       Date.parse(reservation.occupiedEndsAt) !== Date.parse(reservation.endsAt)

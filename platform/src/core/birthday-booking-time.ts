@@ -25,3 +25,7 @@ export function hasBirthdayDuration(startsAt: string | null, endsAt: string | nu
   const end = Date.parse(endsAt ?? "");
   return Number.isFinite(start) && end === start + BIRTHDAY_DURATION_MINUTES * 60 * 1000;
 }
+
+export function hasBirthdayStart(startsAt: string | null, date: string, startTime: string): boolean {
+  return new RegExp(`^${date}T${startTime}:00(?:\\.0+)?(?:Z|[+-]\\d{2}:\\d{2})?$`).test(startsAt ?? "");
+}
