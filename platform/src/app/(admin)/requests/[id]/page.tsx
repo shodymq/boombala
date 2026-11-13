@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@/core/rbac";
+import { initialDepositRefundRequiresCancellation } from "@/core/initial-deposit-refund";
 import { birthdayStartTimes } from "@/core/birthday-booking-time";
 import { isValidDate } from "@/core/dates";
 import { DatePicker } from "@/components/date-picker";
@@ -155,7 +156,7 @@ export default async function RequestDetailPage({ params, searchParams }: {
   const canManageBookings = can(user.role, "bookings.manage");
   const initialDepositRecorded = Boolean(birthday?.manualPaymentFacts.some((fact) => fact.paymentKind === "initial_deposit"));
   const unallocatedRefund = Boolean(birthday?.manualRefundFacts.some((fact) => fact.paymentFactId === null));
-  const bookingActive = birthday?.bookingReservationState === "active";
+  const depositRefundLocked = birthday ? initialDepositRefundRequiresCancellation(lead.status, birthday.bookingReservationState) : false;
   const reconciliationNeeded = birthday?.manualPaymentFactStatus === "unreconciled" || unallocatedRefund;
   const terminalStatus = ["cancelled", "lost", "completed", "closed"].includes(lead.status);
   const canRecordPayments = canManageBookings && !terminalStatus;
@@ -163,9 +164,9 @@ export default async function RequestDetailPage({ params, searchParams }: {
     payment.source === "manager_manual" && payment.paymentKind !== null && remainingByPayment(birthday, payment.id) > 0,
   ) ?? [];
   const availableRefundChoices = refundChoices.filter((payment) =>
-    !bookingActive || payment.paymentKind !== "initial_deposit",
+    !depositRefundLocked || payment.paymentKind !== "initial_deposit",
   );
-  const lockedDepositRefund = bookingActive && refundChoices.some((payment) => payment.paymentKind === "initial_deposit");
+  const lockedDepositRefund = depositRefundLocked && refundChoices.some((payment) => payment.paymentKind === "initial_deposit");
   const branchId = birthday?.branch?.id ?? lead.branch?.id;
   const branch = catalog?.branches.length === 1 ? catalog.branches[0] : null;
   const rooms = catalog?.rooms.filter((room) => room.branchId === branchId) ?? [];

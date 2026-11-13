@@ -6,6 +6,7 @@ import { z } from "zod";
 import { setLeadStatus } from "../../../core/bookings.ts";
 import type { Role } from "../../../core/rbac.ts";
 import { birthdayStartTimes } from "../../../core/birthday-booking-time.ts";
+import { initialDepositRefundRequiresCancellation } from "../../../core/initial-deposit-refund.ts";
 import { isValidDate } from "../../../core/dates.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
 import { FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
@@ -194,7 +195,7 @@ export async function recordManualRefundAction(formData: FormData): Promise<void
     const payment = birthday.manualPaymentFacts.find((fact) => fact.id === paymentFactId.data && fact.source === "manager_manual");
     if (!payment) throw actionConflict("birthday_payment_reconciliation_required");
     if (payment.paymentKind === null || birthday.manualPaymentFactStatus === "unreconciled") throw actionConflict("birthday_payment_reconciliation_required");
-    if (birthday.bookingReservationState === "active" && payment.paymentKind === "initial_deposit") {
+    if (payment.paymentKind === "initial_deposit" && initialDepositRefundRequiresCancellation(lead.status, birthday.bookingReservationState)) {
       throw actionConflict("birthday_booking_cancellation_required");
     }
     if (birthday.manualRefundFacts.some((refund) => refund.paymentFactId === null)) throw actionConflict("birthday_payment_reconciliation_required");
