@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hasBirthdayDuration } from "../core/birthday-booking-time.ts";
 
 export type FastApiCrmActor = {
   /** A short-lived FastAPI admin access token for the same staff actor. */
@@ -16,11 +17,13 @@ export type BookingTimelineReservation = {
   roomId: string;
   startsAt: string;
   endsAt: string;
+  occupiedEndsAt: string;
   slotId: string | null;
   packageName: string | null;
   priceKzt: number | null;
   priceSource: string | null;
   paidKzt: number;
+  paymentStatus: "unpaid" | "prepaid" | "unreconciled";
   note: string | null;
   requestId: string | null;
   /** Null unless the staff role may see client data (super_admin, sales_manager). */
@@ -33,13 +36,182 @@ export type BookingTimeline = {
   branchId: string;
   date: string;
   timezone: "Asia/Almaty";
+  bufferMinutes: number;
   rooms: BookingTimelineRoom[];
   reservations: BookingTimelineReservation[];
 };
 
+export type FastApiManualPaymentMethod = "cash" | "card_terminal" | "bank_transfer" | "other_manual";
+export type FastApiBirthdayPaymentKind = "initial_deposit" | "additional";
+
+export type FastApiLeadListItem = {
+  id: string;
+  type: "birthday_request" | "contact";
+  summary: string;
+  status: string;
+  source: string;
+  customerName: string;
+  phone: string;
+  guestCount: number | null;
+  requestedDate: string | null;
+  createdAt: string;
+  branch: { id: string; name: string; shortLabel: string } | null;
+  package: { id: string; name: string } | null;
+};
+
+export type FastApiLeadStatus = "new" | "contacted" | "qualified" | "booked" | "paid" | "completed" | "lost" | "in_progress" | "confirmed" | "cancelled" | "closed";
+
 export type FastApiLeadList = {
-  items: unknown[];
+  items: FastApiLeadListItem[];
   total: number;
+};
+
+export type FastApiLeadDetail = FastApiLeadListItem & {
+  email?: string | null;
+  notes?: string | null;
+  contactMethod: string;
+};
+
+export type FastApiBirthdayPayment = {
+  id: string;
+  amountKzt: number;
+  paymentKind: FastApiBirthdayPaymentKind | null;
+  method: FastApiManualPaymentMethod;
+  receivedAt: string;
+  recordedByAdminId: string;
+  recordedByAdminName: string;
+  note: string | null;
+  source: "manager_manual";
+  createdAt: string;
+};
+
+export type FastApiBirthdayManualPayment = Omit<FastApiBirthdayPayment, "recordedByAdminName" | "note"> & {
+  requestId: string;
+  idempotencyKey: string;
+};
+
+export type FastApiBirthdayManualRefund = {
+  id: string;
+  requestId: string;
+  paymentFactId: string | null;
+  amountKzt: number;
+  method: FastApiManualPaymentMethod;
+  refundedAt: string;
+  recordedByAdminId: string;
+  reason: string;
+  source: "manager_manual";
+  idempotencyKey: string;
+  createdAt: string;
+};
+
+export type FastApiBirthdayLeadDetail = {
+  id: string;
+  status: string;
+  source: string;
+  customerName: string;
+  phone: string;
+  contactMethod: string;
+  childName?: string | null;
+  childBirthDate?: string | null;
+  roomId?: string | null;
+  slotId?: string | null;
+  requestedDate: string | null;
+  guestCount: number | null;
+  branch: FastApiLeadListItem["branch"];
+  package: FastApiLeadListItem["package"];
+  packageNameSnapshot?: string | null;
+  packagePriceSnapshot?: number | null;
+  agreedAmountTenge?: number | null;
+  expectedAmountTenge?: number | null;
+  depositAmountTenge?: number | null;
+  paidAmountTenge?: number | null;
+  manualPaymentFacts: FastApiBirthdayPayment[];
+  manualRefundFacts: FastApiBirthdayManualRefund[];
+  manualRefundFactAmountKzt: number;
+  netManualPaymentAmountKzt: number;
+  netInitialDepositKzt: number;
+  manualPaymentFactAmountKzt: number;
+  manualPaymentFactStatus: "unpaid" | "prepaid" | "unreconciled";
+  lostReason?: string | null;
+  comment?: string | null;
+  adminNote?: string | null;
+  createdAt: string;
+};
+
+export type FastApiBirthdayBookingCatalog = {
+  branches: Array<{
+    id: string;
+    slug: string;
+    name: string;
+    city: string;
+    workingHours: string;
+    bufferMinutes: number;
+  }>;
+  rooms: Array<{ id: string; branchId: string; name: string }>;
+  packages: Array<{
+    id: string;
+    branchId: string;
+    name: string;
+    priceFrom: number;
+    priceLabel: string;
+    guestCapacityLabel: string;
+  }>;
+};
+
+export type FastApiBirthdayReservation = {
+  id: string;
+  kind: "booking" | "block";
+  status: "confirmed" | "blocked" | "released";
+  requestId: string | null;
+  branchId: string;
+  bookingDate: string;
+  roomId: string;
+  slotId: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  packageId: string | null;
+  priceKzt: number | null;
+  priceSource: string | null;
+  note: string | null;
+  releasedAt: string | null;
+};
+
+export type FastApiBirthdayManualRefundInput = {
+  amountKzt: number;
+  paymentFactId: string;
+  method: FastApiManualPaymentMethod;
+  refundedAt: string;
+  idempotencyKey: string;
+  reason: string;
+};
+
+export type FastApiBirthdayManualPaymentInput = {
+  amountKzt: number;
+  paymentKind: FastApiBirthdayPaymentKind;
+  method: FastApiManualPaymentMethod;
+  idempotencyKey: string;
+  note?: string;
+  receivedAt?: string;
+};
+
+export type FastApiBirthdaySlotBlockInput = {
+  branchId: string;
+  bookingDate: string;
+  roomId: string;
+  startTime: string;
+  reason: string;
+  idempotencyKey: string;
+};
+
+export type FastApiBirthdayBookingConfirmInput = {
+  requestId: string;
+  bookingDate: string;
+  roomId: string;
+  startTime: string;
+  packageId: string;
+  agreedPriceKzt: number;
+  idempotencyKey: string;
+  note?: string;
 };
 
 export type FastApiCrmClientOptions = {
@@ -137,7 +309,7 @@ export class FastApiCrmClient {
     return body as T;
   }
 
-  listLeads(query: { branchId?: string; status?: string; createdFrom?: string; createdTo?: string; awaitingContact?: boolean; sort?: "newest" | "oldest_uncontacted" } = {}): Promise<FastApiLeadList> {
+  listLeads(query: { branchId?: string; status?: string; q?: string; createdFrom?: string; createdTo?: string; awaitingContact?: boolean; sort?: "newest" | "oldest_uncontacted" } = {}): Promise<FastApiLeadList> {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined) params.set(key, String(value));
@@ -146,20 +318,39 @@ export class FastApiCrmClient {
     return this.request<FastApiLeadList>(`/admin/leads${suffix}`);
   }
 
-  getBirthdayLead(leadId: string): Promise<unknown> {
-    return this.request(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
+  getBirthdayLead(leadId: string): Promise<FastApiBirthdayLeadDetail> {
+    return this.request<FastApiBirthdayLeadDetail>(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
   }
 
-  updateLeadStatus(leadId: string, body: Record<string, unknown>): Promise<unknown> {
-    return this.request(`/admin/leads/${encodeURIComponent(leadId)}/status`, { method: "PATCH", body: JSON.stringify(body) });
+  getLead(leadId: string): Promise<FastApiLeadDetail> {
+    return this.request<FastApiLeadDetail>(`/admin/leads/${encodeURIComponent(leadId)}`);
   }
 
-  recordManualPayment(requestId: string, body: Record<string, unknown>): Promise<unknown> {
-    return this.request(`/admin/birthday-requests/${encodeURIComponent(requestId)}/manual-payments`, { method: "POST", body: JSON.stringify(body) });
+  updateLeadStatus(leadId: string, body: { status: FastApiLeadStatus; lostReason?: string; adminNote?: string }): Promise<FastApiLeadDetail> {
+    return this.request<FastApiLeadDetail>(`/admin/leads/${encodeURIComponent(leadId)}/status`, { method: "PATCH", body: JSON.stringify(body) });
   }
 
-  confirmBooking(body: Record<string, unknown>): Promise<unknown> {
-    return this.request("/admin/birthday-bookings/confirm", { method: "POST", body: JSON.stringify(body) });
+  recordManualPayment(requestId: string, body: FastApiBirthdayManualPaymentInput): Promise<FastApiBirthdayManualPayment> {
+    return this.request<FastApiBirthdayManualPayment>(`/admin/birthday-requests/${encodeURIComponent(requestId)}/manual-payments`, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  recordManualRefund(requestId: string, body: FastApiBirthdayManualRefundInput): Promise<FastApiBirthdayManualRefund> {
+    return this.request<FastApiBirthdayManualRefund>(`/admin/birthday-requests/${encodeURIComponent(requestId)}/manual-refunds`, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  getBookingCatalog(branchId?: string): Promise<FastApiBirthdayBookingCatalog> {
+    const params = new URLSearchParams();
+    if (branchId) params.set("branchId", branchId);
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return this.request<FastApiBirthdayBookingCatalog>(`/admin/birthday-bookings/catalog${suffix}`);
+  }
+
+  blockBirthdaySlot(body: FastApiBirthdaySlotBlockInput): Promise<FastApiBirthdayReservation> {
+    return this.request<FastApiBirthdayReservation>("/admin/birthday-slots/block", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  confirmBooking(body: FastApiBirthdayBookingConfirmInput): Promise<FastApiBirthdayReservation> {
+    return this.request<FastApiBirthdayReservation>("/admin/birthday-bookings/confirm", { method: "POST", body: JSON.stringify(body) });
   }
 
   getBookingTimeline(branchId: string, date: string): Promise<BookingTimeline> {
@@ -175,17 +366,95 @@ export class FastApiCrmClient {
     return this.request(`/admin/birthday-reservations/${encodeURIComponent(reservationId)}/release`, { method: "POST", body: JSON.stringify(body) });
   }
 
-  async recordManualPaymentAndRead(requestId: string, body: Record<string, unknown>): Promise<{ payment: unknown; lead: unknown }> {
+  async recordManualPaymentAndRead(requestId: string, body: FastApiBirthdayManualPaymentInput): Promise<{ payment: FastApiBirthdayManualPayment; lead: FastApiBirthdayLeadDetail }> {
     const payment = await this.recordManualPayment(requestId, body);
     const lead = await this.getBirthdayLead(requestId);
+    const savedFact = lead.manualPaymentFacts.find((fact) => fact.id === payment.id);
+    if (
+      payment.requestId !== requestId ||
+      payment.amountKzt !== body.amountKzt ||
+      payment.paymentKind !== body.paymentKind ||
+      payment.method !== body.method ||
+      payment.idempotencyKey !== body.idempotencyKey ||
+      (body.receivedAt !== undefined && Date.parse(payment.receivedAt) !== Date.parse(body.receivedAt)) ||
+      payment.source !== "manager_manual" ||
+      !savedFact ||
+      savedFact.amountKzt !== payment.amountKzt ||
+      savedFact.paymentKind !== payment.paymentKind ||
+      savedFact.method !== payment.method ||
+      Date.parse(savedFact.receivedAt) !== Date.parse(payment.receivedAt) ||
+      savedFact.source !== payment.source
+    ) {
+      throw new FastApiCrmError(502, "payment_readback_mismatch", this.requestId);
+    }
     return { payment, lead };
   }
 
-  async confirmBookingAndRead(body: Record<string, unknown>): Promise<{ booking: unknown; lead: unknown }> {
-    const booking = await this.confirmBooking(body);
-    const requestId = typeof body.requestId === "string" ? body.requestId : "";
-    if (!requestId) throw new FastApiCrmConfigurationError("crm_actor_missing");
+  async recordManualRefundAndRead(requestId: string, body: FastApiBirthdayManualRefundInput): Promise<{ refund: FastApiBirthdayManualRefund; lead: FastApiBirthdayLeadDetail }> {
+    const refund = await this.recordManualRefund(requestId, body);
     const lead = await this.getBirthdayLead(requestId);
+    const savedFact = lead.manualRefundFacts.find((fact) => fact.id === refund.id);
+    if (
+      refund.requestId !== requestId ||
+      refund.paymentFactId !== body.paymentFactId ||
+      refund.amountKzt !== body.amountKzt ||
+      refund.method !== body.method ||
+      Date.parse(refund.refundedAt) !== Date.parse(body.refundedAt) ||
+      refund.reason !== body.reason ||
+      refund.idempotencyKey !== body.idempotencyKey ||
+      refund.source !== "manager_manual" ||
+      !savedFact ||
+      savedFact.paymentFactId !== refund.paymentFactId ||
+      savedFact.amountKzt !== refund.amountKzt ||
+      savedFact.method !== refund.method ||
+      Date.parse(savedFact.refundedAt) !== Date.parse(refund.refundedAt) ||
+      savedFact.reason !== refund.reason ||
+      savedFact.idempotencyKey !== refund.idempotencyKey ||
+      savedFact.source !== refund.source
+    ) {
+      throw new FastApiCrmError(502, "refund_readback_mismatch", this.requestId);
+    }
+    return { refund, lead };
+  }
+
+  async confirmBookingAndRead(body: FastApiBirthdayBookingConfirmInput): Promise<{ booking: FastApiBirthdayReservation; lead: FastApiBirthdayLeadDetail }> {
+    const booking = await this.confirmBooking(body);
+    if (
+      booking.kind !== "booking" ||
+      booking.status !== "confirmed" ||
+      booking.requestId !== body.requestId ||
+      booking.bookingDate !== body.bookingDate ||
+      booking.roomId !== body.roomId ||
+      booking.packageId !== body.packageId ||
+      booking.priceKzt !== body.agreedPriceKzt ||
+      booking.priceSource !== "manager_agreed" ||
+      !booking.startsAt?.startsWith(`${body.bookingDate}T${body.startTime}`) ||
+      !hasBirthdayDuration(booking.startsAt, booking.endsAt)
+    ) {
+      throw new FastApiCrmError(502, "booking_response_mismatch", this.requestId);
+    }
+    const lead = await this.getBirthdayLead(body.requestId);
+    if (lead.status !== "booked" || lead.netInitialDepositKzt !== 10000 || lead.manualPaymentFactStatus === "unreconciled" || !lead.branch?.id) {
+      throw new FastApiCrmError(502, "booking_lead_readback_mismatch", this.requestId);
+    }
+    const timeline = await this.getBookingTimeline(lead.branch.id, body.bookingDate);
+    const reservation = timeline.reservations.find((item) => item.id === booking.id);
+    if (
+      timeline.branchId !== lead.branch.id ||
+      timeline.date !== body.bookingDate ||
+      timeline.bufferMinutes !== 0 ||
+      !reservation ||
+      reservation.kind !== "booking" ||
+      reservation.status !== "confirmed" ||
+      reservation.requestId !== body.requestId ||
+      reservation.roomId !== body.roomId ||
+      !reservation.startsAt.startsWith(`${body.bookingDate}T${body.startTime}`) ||
+      Date.parse(reservation.endsAt) !== Date.parse(booking.endsAt ?? "") ||
+      !hasBirthdayDuration(reservation.startsAt, reservation.endsAt) ||
+      Date.parse(reservation.occupiedEndsAt) !== Date.parse(reservation.endsAt)
+    ) {
+      throw new FastApiCrmError(502, "booking_timeline_readback_mismatch", this.requestId);
+    }
     return { booking, lead };
   }
 

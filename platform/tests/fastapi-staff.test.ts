@@ -36,7 +36,7 @@ describe("staff token bridge (server only)", () => {
   it("asks FastAPI for a token for the given staff email with the service secret in a header", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const actor = await fastApiActorForStaff(
-      { id: "platform-staff-1", email: " Manager-A@BoomBala.kz " },
+      { id: "platform-staff-1", email: " Manager-A@BoomBala.kz ", role: "manager" },
       { requestId: "req-1", fetchImpl: stub(200, { access_token: "bridge-token", token_type: "bearer", expires_in_seconds: 900, user: {} }, calls) },
     );
     assert.equal(actor.accessToken, "bridge-token");
@@ -53,6 +53,7 @@ describe("staff token bridge (server only)", () => {
     const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
     assert.equal(payload.staffId, "platform-staff-1");
     assert.equal(payload.email, "manager-a@boombala.kz");
+    assert.equal(payload.platformRole, "manager");
     assert.equal(payload.requestId, "req-1");
     assert.equal(payload.expiresAt - payload.issuedAt, 60);
     assert.deepEqual(JSON.parse(String(calls[0].init.body)), { email: "manager-a@boombala.kz", requestId: "req-1" });
@@ -60,7 +61,7 @@ describe("staff token bridge (server only)", () => {
 
   it("returns only the access token, never a refresh token or the service secret", async () => {
     const actor = await fastApiActorForStaff(
-      { id: "platform-staff-2", email: "manager-a@boombala.kz" },
+      { id: "platform-staff-2", email: "manager-a@boombala.kz", role: "manager" },
       { requestId: "req-2", fetchImpl: stub(200, { access_token: "bridge-token", refresh_token: "must-not-leak" }, []) },
     );
     assert.deepEqual(Object.keys(actor).sort(), ["accessToken", "requestId"]);
@@ -71,7 +72,7 @@ describe("staff token bridge (server only)", () => {
   it("fails closed when the service secret is missing or short", async () => {
     process.env.CRM_SERVICE_TOKEN = "short";
     await assert.rejects(
-      fastApiActorForStaff({ id: "staff-1", email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, []) }),
+      fastApiActorForStaff({ id: "staff-1", email: "a@b.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, []) }),
       (error: Error) => error.message === "crm_actor_missing",
     );
   });
@@ -80,7 +81,7 @@ describe("staff token bridge (server only)", () => {
     delete process.env.CRM_STAFF_ASSERTION_SECRET;
     const calls: Array<{ url: string; init: RequestInit }> = [];
     await assert.rejects(
-      fastApiActorForStaff({ id: "platform-staff-3", email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, calls) }),
+      fastApiActorForStaff({ id: "platform-staff-3", email: "a@b.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(200, { access_token: "x" }, calls) }),
       (error: Error) => error.message === "crm_actor_missing",
     );
     assert.equal(calls.length, 0);
@@ -88,14 +89,14 @@ describe("staff token bridge (server only)", () => {
 
   it("fails closed when FastAPI refuses the staff member (unlinked, inactive, or bad secret)", async () => {
     await assert.rejects(
-      fastApiActorForStaff({ id: "staff-2", email: "ghost@boombala.kz" }, { requestId: "r", fetchImpl: stub(403, { error: { code: "staff_not_linked" } }, []) }),
+      fastApiActorForStaff({ id: "staff-2", email: "ghost@boombala.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(403, { error: { code: "staff_not_linked" } }, []) }),
       (error: Error & { code?: string; status?: number }) => error.code === "staff_not_linked" && error.status === 403,
     );
   });
 
   it("fails closed on a response without a token", async () => {
     await assert.rejects(
-      fastApiActorForStaff({ id: "staff-3", email: "a@b.kz" }, { requestId: "r", fetchImpl: stub(200, { ok: true }, []) }),
+      fastApiActorForStaff({ id: "staff-3", email: "a@b.kz", role: "manager" }, { requestId: "r", fetchImpl: stub(200, { ok: true }, []) }),
       (error: Error & { code?: string }) => error.code === "staff_token_missing",
     );
   });

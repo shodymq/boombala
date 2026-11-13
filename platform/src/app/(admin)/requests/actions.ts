@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { setLeadStatus } from "../../../core/bookings.ts";
+import type { Role } from "../../../core/rbac.ts";
 import { birthdayStartTimes } from "../../../core/birthday-booking-time.ts";
 import { isValidDate } from "../../../core/dates.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
@@ -63,7 +64,7 @@ function detailFailure(id: string, error: unknown, retry?: Record<string, string
   redirect(`/requests/${encodeURIComponent(id)}?${params.toString()}`);
 }
 
-async function fastApiClient(user: { id: string; email: string }) {
+async function fastApiClient(user: { id: string; email: string; role: Role }) {
   const requestId = randomUUID();
   const actor = await fastApiActorForStaff(user, { requestId });
   return new FastApiCrmClient(actor);

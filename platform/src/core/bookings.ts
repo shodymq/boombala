@@ -299,14 +299,32 @@ export interface LeadRow {
   reservationId: string | null;
 }
 
-export async function listLeads(pool: Pool, actor: Actor, filter: { status?: string } = {}, limit = 100): Promise<LeadRow[]> {
+export async function listLeads(pool: Pool, actor: Actor, filter: { status?: string; q?: string; createdFrom?: string; createdTo?: string } = {}, limit = 100): Promise<LeadRow[]> {
   assertCan(actor, "requests.manage");
   const params: unknown[] = [];
-  let where = "";
+  const conditions: string[] = [];
+  const addParam = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
   if (filter.status) {
-    params.push(filter.status);
-    where = "WHERE l.status = $1";
+    conditions.push(`l.status = ${addParam(filter.status)}`);
   }
+  const search = filter.q?.trim().slice(0, 80);
+  if (search) {
+    const nameParam = addParam(search);
+    const phoneDigits = addParam(search.replace(/\D/g, ""));
+    conditions.push(`(c.name ILIKE '%' || ${nameParam} || '%' OR (${phoneDigits} <> '' AND regexp_replace(c.phone_e164, '\\D', '', 'g') LIKE '%' || ${phoneDigits} || '%'))`);
+  }
+  if (filter.createdFrom) {
+    if (!isValidDate(filter.createdFrom)) throw new ValidationError({ createdFrom: "Некорректная дата" });
+    conditions.push(`l.created_at >= (${addParam(filter.createdFrom)}::date::timestamp AT TIME ZONE 'Asia/Almaty')`);
+  }
+  if (filter.createdTo) {
+    if (!isValidDate(filter.createdTo)) throw new ValidationError({ createdTo: "Некорректная дата" });
+    conditions.push(`l.created_at < ((${addParam(filter.createdTo)}::date + 1)::timestamp AT TIME ZONE 'Asia/Almaty')`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT l.id, l.seq, l.created_at, l.status, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS requested_date,
             l.slot_id, l.room_id, l.package_id, l.children,

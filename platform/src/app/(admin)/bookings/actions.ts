@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { birthdayStartTimes, hasBirthdayDuration } from "../../../core/birthday-booking-time.ts";
+import type { Role } from "../../../core/rbac.ts";
 import { isValidDate } from "../../../core/dates.ts";
 import { ForbiddenError, ValidationError } from "../../../core/errors.ts";
 import { FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
@@ -29,7 +30,7 @@ function failure(date: string, error: unknown): never {
   return back(date, `error=${code}`);
 }
 
-async function fastApiClient(staff: { id: string; email: string }): Promise<FastApiCrmClient> {
+async function fastApiClient(staff: { id: string; email: string; role: Role }): Promise<FastApiCrmClient> {
   const requestId = randomUUID();
   return new FastApiCrmClient(await fastApiActorForStaff(staff, { requestId }));
 }

@@ -66,7 +66,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   if (unified) {
     try {
       const requestId = randomUUID();
-      const actor = await fastApiActorForStaff({ id: user.id, email: user.email }, { requestId });
+      const actor = await fastApiActorForStaff({ id: user.id, email: user.email, role: user.role }, { requestId });
       const response = await new FastApiCrmClient(actor).listLeads({ status, q, createdFrom, createdTo });
       leads = response.items.map((lead) => ({
         id: lead.id,

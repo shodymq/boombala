@@ -126,7 +126,7 @@ export default async function RequestDetailPage({ params, searchParams }: {
   let catalogFailed = false;
   let loadFailed = false;
   try {
-    const actor = await fastApiActorForStaff({ id: user.id, email: user.email }, { requestId });
+    const actor = await fastApiActorForStaff({ id: user.id, email: user.email, role: user.role }, { requestId });
     const client = new FastApiCrmClient(actor);
     lead = await client.getLead(id);
     if (lead.type === "birthday_request") {

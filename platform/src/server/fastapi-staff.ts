@@ -1,4 +1,6 @@
 import "server-only";
+import { createHmac } from "node:crypto";
+import type { Role } from "../core/rbac.ts";
 import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmActor } from "./fastapi-crm.ts";
 
 /**
@@ -11,22 +13,35 @@ import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmActor } f
  * - Every failure is fail-closed: the caller gets an error and performs no FastAPI write.
  */
 export async function fastApiActorForStaff(
-  staff: { email: string },
+  staff: { id: string; email: string; role: Role },
   options: { requestId: string; fetchImpl?: typeof fetch; timeoutMs?: number },
 ): Promise<FastApiCrmActor> {
   const serviceToken = (process.env.CRM_SERVICE_TOKEN ?? "").trim();
-  if (serviceToken.length < 32) throw new FastApiCrmConfigurationError("crm_actor_missing");
+  const assertionSecret = (process.env.CRM_STAFF_ASSERTION_SECRET ?? "").trim();
+  if (serviceToken.length < 32 || assertionSecret.length < 32) throw new FastApiCrmConfigurationError("crm_actor_missing");
   const base = fastApiBase();
   const fetchImpl = options.fetchImpl ?? fetch;
+  const email = staff.email.trim().toLowerCase();
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const encodedAssertion = Buffer.from(JSON.stringify({
+    staffId: staff.id,
+    email,
+    platformRole: staff.role,
+    requestId: options.requestId,
+    issuedAt,
+    expiresAt: issuedAt + 60,
+  })).toString("base64url");
+  const signature = createHmac("sha256", assertionSecret).update(encodedAssertion, "ascii").digest("hex");
   const response = await fetchImpl(`${base}/api/v1/admin/auth/service/staff-access-token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
       "X-CRM-Service-Token": serviceToken,
+      "X-CRM-Staff-Assertion": `v1.${encodedAssertion}.${signature}`,
       "X-Request-ID": options.requestId,
     },
-    body: JSON.stringify({ email: staff.email, requestId: options.requestId }),
+    body: JSON.stringify({ email, requestId: options.requestId }),
     cache: "no-store",
     signal: AbortSignal.timeout(Math.min(Math.max(options.timeoutMs ?? 5000, 1000), 10000)),
   });

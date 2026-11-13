@@ -80,6 +80,80 @@ describe("FastAPI CRM adapter", () => {
     else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
   });
 
+  it("fails payment readback when the saved manual method differs", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    const receivedAt = "2026-11-10T10:00:00Z";
+    const responses = [
+      {
+        id: "payment-1", requestId: "lead-1", amountKzt: 10000, paymentKind: "initial_deposit",
+        method: "cash", receivedAt, recordedByAdminId: "admin-1", source: "manager_manual",
+        idempotencyKey: "payment-0001", createdAt: receivedAt,
+      },
+      {
+        id: "lead-1", manualPaymentFacts: [{
+          id: "payment-1", amountKzt: 10000, paymentKind: "initial_deposit", method: "bank_transfer",
+          receivedAt, recordedByAdminId: "admin-1", recordedByAdminName: "QA Manager", note: null,
+          source: "manager_manual", createdAt: receivedAt,
+        }],
+      },
+    ];
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => new Response(JSON.stringify(responses.shift()), { status: 200 }),
+    });
+
+    await assert.rejects(
+      () => client.recordManualPaymentAndRead("lead-1", {
+        amountKzt: 10000, paymentKind: "initial_deposit", method: "cash",
+        receivedAt, idempotencyKey: "payment-0001",
+      }),
+      (error) => error instanceof FastApiCrmError && error.code === "payment_readback_mismatch",
+    );
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("fails refund readback when the saved reason differs", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    const refundedAt = "2026-11-10T10:00:00Z";
+    const responses = [
+      {
+        id: "refund-1", requestId: "lead-1", paymentFactId: "payment-1", amountKzt: 5000,
+        method: "cash", refundedAt, recordedByAdminId: "admin-1", reason: "Parent requested",
+        source: "manager_manual", idempotencyKey: "refund-0001", createdAt: refundedAt,
+      },
+      {
+        id: "lead-1", manualRefundFacts: [{
+          id: "refund-1", requestId: "lead-1", paymentFactId: "payment-1", amountKzt: 5000,
+          method: "cash", refundedAt, recordedByAdminId: "admin-1", reason: "Different saved reason",
+          source: "manager_manual", idempotencyKey: "refund-0001", createdAt: refundedAt,
+        }],
+      },
+    ];
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => new Response(JSON.stringify(responses.shift()), { status: 200 }),
+    });
+
+    await assert.rejects(
+      () => client.recordManualRefundAndRead("lead-1", {
+        amountKzt: 5000, paymentFactId: "payment-1", method: "cash", refundedAt,
+        idempotencyKey: "refund-0001", reason: "Parent requested",
+      }),
+      (error) => error instanceof FastApiCrmError && error.code === "refund_readback_mismatch",
+    );
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
   it("performs read-after-write and exposes FastAPI errors without a legacy fallback", async () => {
     const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
     const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
