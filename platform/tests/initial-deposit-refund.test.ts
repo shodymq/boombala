@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { initialDepositRefundRequiresCancellation } from "../src/core/initial-deposit-refund.ts";
+import { canCancelStatusOnlyBooking, initialDepositRefundRequiresCancellation } from "../src/core/initial-deposit-refund.ts";
 
 describe("initial deposit refund policy", () => {
   it("requires cancellation for active reservations and legacy confirmed statuses", () => {
@@ -14,5 +14,13 @@ describe("initial deposit refund policy", () => {
     assert.equal(initialDepositRefundRequiresCancellation("cancelled", "released"), false);
     assert.equal(initialDepositRefundRequiresCancellation("cancelled", "none"), false);
     assert.equal(initialDepositRefundRequiresCancellation("completed", "released"), false);
+  });
+
+  it("allows a status-only legacy booking to be cancelled before the refund", () => {
+    assert.equal(canCancelStatusOnlyBooking("booked", "none"), true);
+    assert.equal(canCancelStatusOnlyBooking("confirmed", "none"), true);
+    assert.equal(canCancelStatusOnlyBooking("paid", "none"), true);
+    assert.equal(canCancelStatusOnlyBooking("booked", "active"), false);
+    assert.equal(canCancelStatusOnlyBooking("completed", "none"), false);
   });
 });

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { setLeadStatus } from "../../../core/bookings.ts";
 import type { Role } from "../../../core/rbac.ts";
 import { birthdayStartTimes } from "../../../core/birthday-booking-time.ts";
-import { initialDepositRefundRequiresCancellation } from "../../../core/initial-deposit-refund.ts";
+import { canCancelStatusOnlyBooking, initialDepositRefundRequiresCancellation } from "../../../core/initial-deposit-refund.ts";
 import { isValidDate } from "../../../core/dates.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
 import { FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
@@ -20,7 +20,7 @@ const leadId = z.string().regex(/^[A-Za-z0-9_-]{1,32}$/);
 const entityId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const paymentMethod = z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]);
 const paymentKind = z.enum(["initial_deposit", "additional"]);
-const crmStatus = z.enum(["contacted", "qualified", "lost", "in_progress", "closed", "completed"]);
+const crmStatus = z.enum(["contacted", "qualified", "lost", "in_progress", "closed", "completed", "cancelled"]);
 const lostReasons = new Set(["too_expensive", "date_unavailable", "no_answer", "competitor", "changed_mind", "other_branch", "later", "other", "price", "no_response", "chose_competitor", "changed_plans", "duplicate"]);
 const str = (formData: FormData, key: string) => String(formData.get(key) ?? "");
 
@@ -88,7 +88,11 @@ export async function leadStatusAction(formData: FormData): Promise<void> {
     try {
       const client = await fastApiClient(user);
       const lead = await client.getLead(id.data);
-      if (!allowedStatusTransitions(lead.type, lead.status).includes(status.data)) return detailFailure(id.data, actionConflict("invalid_lead_status_transition"));
+      let bookingReservationState: "none" | "active" | "released" | undefined;
+      if (status.data === "cancelled" && lead.type === "birthday_request") {
+        bookingReservationState = (await client.getBirthdayLead(id.data)).bookingReservationState;
+      }
+      if (!allowedStatusTransitions(lead.type, lead.status, bookingReservationState).includes(status.data)) return detailFailure(id.data, actionConflict("invalid_lead_status_transition"));
       const updated = await client.updateLeadStatus(id.data, {
         status: status.data,
         ...(status.data === "lost" ? { lostReason } : {}),
@@ -111,7 +115,11 @@ export async function leadStatusAction(formData: FormData): Promise<void> {
   redirect("/requests?notice=status");
 }
 
-function allowedStatusTransitions(type: "birthday_request" | "contact", status: string): string[] {
+function allowedStatusTransitions(
+  type: "birthday_request" | "contact",
+  status: string,
+  bookingReservationState?: "none" | "active" | "released",
+): string[] {
   if (type === "contact") {
     if (status === "new") return ["in_progress", "closed"];
     if (status === "in_progress") return ["closed"];
@@ -122,7 +130,11 @@ function allowedStatusTransitions(type: "birthday_request" | "contact", status: 
   if (status === "qualified") return ["lost"];
   if (status === "lost") return ["contacted", "qualified"];
   if (status === "in_progress") return ["contacted", "qualified", "lost"];
-  if (["booked", "paid", "confirmed"].includes(status)) return ["completed"];
+  if (["booked", "paid", "confirmed"].includes(status)) {
+    const transitions = ["completed"];
+    if (bookingReservationState && canCancelStatusOnlyBooking(status, bookingReservationState)) transitions.push("cancelled");
+    return transitions;
+  }
   return [];
 }
 

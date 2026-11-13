@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@/core/rbac";
-import { initialDepositRefundRequiresCancellation } from "@/core/initial-deposit-refund";
+import { canCancelStatusOnlyBooking, initialDepositRefundRequiresCancellation } from "@/core/initial-deposit-refund";
 import { birthdayStartTimes } from "@/core/birthday-booking-time";
 import { isValidDate } from "@/core/dates";
 import { DatePicker } from "@/components/date-picker";
@@ -58,7 +58,7 @@ const errorMessages: Record<string, string> = {
 };
 const notices: Record<string, string> = { status: "Статус заявки обновлён.", payment: "Факт полученного платежа записан.", refund: "Факт уже выполненного возврата записан." };
 
-function allowedTransitions(lead: FastApiLeadDetail): string[] {
+function allowedTransitions(lead: FastApiLeadDetail, bookingReservationState?: "none" | "active" | "released"): string[] {
   if (lead.type === "contact") {
     if (lead.status === "new") return ["in_progress", "closed"];
     if (lead.status === "in_progress") return ["closed"];
@@ -69,7 +69,11 @@ function allowedTransitions(lead: FastApiLeadDetail): string[] {
   if (lead.status === "qualified") return ["lost"];
   if (lead.status === "lost") return ["contacted", "qualified"];
   if (lead.status === "in_progress") return ["contacted", "qualified", "lost"];
-  if (["booked", "paid", "confirmed"].includes(lead.status)) return ["completed"];
+  if (["booked", "paid", "confirmed"].includes(lead.status)) {
+    const transitions = ["completed"];
+    if (bookingReservationState && canCancelStatusOnlyBooking(lead.status, bookingReservationState)) transitions.push("cancelled");
+    return transitions;
+  }
   return [];
 }
 
@@ -77,8 +81,11 @@ function dateTime(value: string): string {
   return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Almaty" }).format(new Date(value));
 }
 
-function StatusForms({ lead }: { lead: FastApiLeadDetail }) {
-  const nextStatuses = allowedTransitions(lead);
+function StatusForms({ lead, bookingReservationState }: {
+  lead: FastApiLeadDetail;
+  bookingReservationState?: "none" | "active" | "released";
+}) {
+  const nextStatuses = allowedTransitions(lead, bookingReservationState);
   if (!nextStatuses.length) return <p className="text-sm text-muted">Для текущего статуса доступных переходов нет.</p>;
   return (
     <div className="flex flex-wrap gap-3">
@@ -95,7 +102,7 @@ function StatusForms({ lead }: { lead: FastApiLeadDetail }) {
               </select>
             </label>
           ) : null}
-          <button type="submit" className={status === "lost" ? buttonSecondary : button}>{statuses[status] ?? status}</button>
+          <button type="submit" className={status === "lost" || status === "cancelled" ? buttonSecondary : button}>{statuses[status] ?? status}</button>
         </form>
       ))}
     </div>
@@ -218,7 +225,7 @@ export default async function RequestDetailPage({ params, searchParams }: {
 
       <section className={`${panel} grid gap-4`} aria-label="Изменение статуса">
         <div><h2 className="text-lg font-black">Статус заявки</h2><p className="text-sm text-muted">Текущий статус: {statuses[lead.status] ?? lead.status}</p></div>
-        <StatusForms lead={lead} />
+        <StatusForms lead={lead} bookingReservationState={birthday?.bookingReservationState} />
         {lead.status === "lost" && birthday?.lostReason ? <p className="text-sm text-muted">Причина: {lostReasons.find(([value]) => value === birthday?.lostReason)?.[1] ?? birthday.lostReason}</p> : null}
       </section>
 
