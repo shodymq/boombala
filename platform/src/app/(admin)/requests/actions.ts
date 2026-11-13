@@ -190,12 +190,13 @@ export async function recordManualRefundAction(formData: FormData): Promise<void
     const lead = await client.getLead(id.data);
     if (lead.type !== "birthday_request") throw actionConflict("birthday_request_required");
     const birthday = await client.getBirthdayLead(id.data);
-    const hasBooking = ["booked", "paid", "confirmed", "completed"].includes(lead.status);
-    if (hasBooking) throw actionConflict("birthday_booking_cancellation_required");
 
     const payment = birthday.manualPaymentFacts.find((fact) => fact.id === paymentFactId.data && fact.source === "manager_manual");
     if (!payment) throw actionConflict("birthday_payment_reconciliation_required");
     if (payment.paymentKind === null || birthday.manualPaymentFactStatus === "unreconciled") throw actionConflict("birthday_payment_reconciliation_required");
+    if (birthday.bookingReservationState === "active" && payment.paymentKind === "initial_deposit") {
+      throw actionConflict("birthday_booking_cancellation_required");
+    }
     if (birthday.manualRefundFacts.some((refund) => refund.paymentFactId === null)) throw actionConflict("birthday_payment_reconciliation_required");
     const refundedKzt = birthday.manualRefundFacts
       .filter((refund) => refund.paymentFactId === payment.id)

@@ -115,6 +115,7 @@ export type FastApiBirthdayLeadDetail = {
   childBirthDate?: string | null;
   roomId?: string | null;
   slotId?: string | null;
+  bookingReservationState: "none" | "active" | "released";
   requestedDate: string | null;
   guestCount: number | null;
   branch: FastApiLeadListItem["branch"];
@@ -318,8 +319,12 @@ export class FastApiCrmClient {
     return this.request<FastApiLeadList>(`/admin/leads${suffix}`);
   }
 
-  getBirthdayLead(leadId: string): Promise<FastApiBirthdayLeadDetail> {
-    return this.request<FastApiBirthdayLeadDetail>(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
+  async getBirthdayLead(leadId: string): Promise<FastApiBirthdayLeadDetail> {
+    const birthday = await this.request<FastApiBirthdayLeadDetail>(`/admin/leads/${encodeURIComponent(leadId)}/birthday`);
+    if (birthday.bookingReservationState !== "none" && birthday.bookingReservationState !== "active" && birthday.bookingReservationState !== "released") {
+      throw new FastApiCrmError(502, "birthday_reservation_state_invalid", this.requestId);
+    }
+    return birthday;
   }
 
   getLead(leadId: string): Promise<FastApiLeadDetail> {

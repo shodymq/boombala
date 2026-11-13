@@ -155,14 +155,17 @@ export default async function RequestDetailPage({ params, searchParams }: {
   const canManageBookings = can(user.role, "bookings.manage");
   const initialDepositRecorded = Boolean(birthday?.manualPaymentFacts.some((fact) => fact.paymentKind === "initial_deposit"));
   const unallocatedRefund = Boolean(birthday?.manualRefundFacts.some((fact) => fact.paymentFactId === null));
-  const hasBooking = ["booked", "paid", "confirmed", "completed"].includes(lead.status);
-  const bookingReleased = !hasBooking || lead.status === "cancelled";
+  const bookingActive = birthday?.bookingReservationState === "active";
   const reconciliationNeeded = birthday?.manualPaymentFactStatus === "unreconciled" || unallocatedRefund;
   const terminalStatus = ["cancelled", "lost", "completed", "closed"].includes(lead.status);
   const canRecordPayments = canManageBookings && !terminalStatus;
   const refundChoices = birthday?.manualPaymentFacts.filter((payment) =>
     payment.source === "manager_manual" && payment.paymentKind !== null && remainingByPayment(birthday, payment.id) > 0,
   ) ?? [];
+  const availableRefundChoices = refundChoices.filter((payment) =>
+    !bookingActive || payment.paymentKind !== "initial_deposit",
+  );
+  const lockedDepositRefund = bookingActive && refundChoices.some((payment) => payment.paymentKind === "initial_deposit");
   const branchId = birthday?.branch?.id ?? lead.branch?.id;
   const branch = catalog?.branches.length === 1 ? catalog.branches[0] : null;
   const rooms = catalog?.rooms.filter((room) => room.branchId === branchId) ?? [];
@@ -282,20 +285,20 @@ export default async function RequestDetailPage({ params, searchParams }: {
 
               <div className="grid content-start gap-3 rounded-xl border border-line p-4">
                 <h3 className="font-black">Зафиксировать выполненный возврат</h3>
-                {!bookingReleased ? <p className="rounded-xl bg-sun-100 p-3 text-sm font-bold">Сначала отмените бронь и освободите комнату в календаре.</p> : null}
+                {lockedDepositRefund ? <p className="rounded-xl bg-sun-100 p-3 text-sm font-bold">Чтобы вернуть предоплату, сначала отмените бронь и освободите комнату в календаре. Доплату можно вернуть отдельно, пока внесённая предоплата остаётся не меньше 10 000 ₸.</p> : null}
                 {reconciliationNeeded ? <p className="rounded-xl bg-sun-100 p-3 text-sm font-bold">Сначала сверьте нераспределённые старые платежи и возвраты.</p> : null}
-                {bookingReleased && !reconciliationNeeded && refundChoices.length ? (
+                {!reconciliationNeeded && availableRefundChoices.length ? (
                   <form action={recordManualRefundAction} className="grid gap-3">
                     <input type="hidden" name="id" value={lead.id} />
                     <input type="hidden" name="idempotencyKey" value={key(query.refundKey)} />
-                    <label className={field}><span>Платёж, который уже возвращён</span><select className={input} name="paymentFactId" required defaultValue=""><option value="" disabled>Выберите платёж</option>{refundChoices.map((payment) => <option key={payment.id} value={payment.id}>{payment.paymentKind === "initial_deposit" ? "Предоплата" : "Доплата"} · остаток {money.format(remainingByPayment(birthday, payment.id))} ₸ · {dateTime(payment.receivedAt)}</option>)}</select></label>
+                    <label className={field}><span>Платёж, который уже возвращён</span><select className={input} name="paymentFactId" required defaultValue=""><option value="" disabled>Выберите платёж</option>{availableRefundChoices.map((payment) => <option key={payment.id} value={payment.id}>{payment.paymentKind === "initial_deposit" ? "Предоплата" : "Доплата"} · остаток {money.format(remainingByPayment(birthday, payment.id))} ₸ · {dateTime(payment.receivedAt)}</option>)}</select></label>
                     <label className={field}><span>Возвращено, ₸</span><input className={input} type="number" name="amountKzt" min="1" max="10000000" step="1" required /></label>
                     <label className={field}><span>Способ возврата</span><select className={input} name="method" required defaultValue=""><option value="" disabled>Выберите способ</option>{paymentMethods.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                     <label className={field}><span>Причина возврата</span><textarea className={input} name="reason" minLength={1} maxLength={300} rows={3} required /></label>
                     <label className="flex items-start gap-2 text-sm"><input className="mt-1" type="checkbox" name="refundCompleted" value="yes" required /><span>Подтверждаю: деньги уже фактически возвращены вручную.</span></label>
                     <button type="submit" className={buttonSecondary}>Записать факт возврата</button>
                   </form>
-                ) : bookingReleased && !reconciliationNeeded ? <p className="text-sm text-muted">Нет сверенных платежей с доступным остатком для возврата.</p> : null}
+                ) : !reconciliationNeeded && !lockedDepositRefund ? <p className="text-sm text-muted">Нет сверенных платежей с доступным остатком для возврата.</p> : null}
                 <p className="text-xs text-muted">Сумма возврата ограничена остатком выбранного зафиксированного платежа.</p>
               </div>
             </div>

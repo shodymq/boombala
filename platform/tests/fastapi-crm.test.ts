@@ -80,6 +80,25 @@ describe("FastAPI CRM adapter", () => {
     else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
   });
 
+  it("fails closed when a birthday detail omits reservation state", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => new Response(JSON.stringify({ id: "lead-1" }), { status: 200 }),
+    });
+
+    await assert.rejects(
+      () => client.getBirthdayLead("lead-1"),
+      (error) => error instanceof FastApiCrmError && error.code === "birthday_reservation_state_invalid",
+    );
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
   it("fails payment readback when the saved manual method differs", async () => {
     const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
     const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
@@ -93,7 +112,7 @@ describe("FastAPI CRM adapter", () => {
         idempotencyKey: "payment-0001", createdAt: receivedAt,
       },
       {
-        id: "lead-1", manualPaymentFacts: [{
+        id: "lead-1", bookingReservationState: "none", manualPaymentFacts: [{
           id: "payment-1", amountKzt: 10000, paymentKind: "initial_deposit", method: "bank_transfer",
           receivedAt, recordedByAdminId: "admin-1", recordedByAdminName: "QA Manager", note: null,
           source: "manager_manual", createdAt: receivedAt,
@@ -130,7 +149,7 @@ describe("FastAPI CRM adapter", () => {
         source: "manager_manual", idempotencyKey: "refund-0001", createdAt: refundedAt,
       },
       {
-        id: "lead-1", manualRefundFacts: [{
+        id: "lead-1", bookingReservationState: "none", manualRefundFacts: [{
           id: "refund-1", requestId: "lead-1", paymentFactId: "payment-1", amountKzt: 5000,
           method: "cash", refundedAt, recordedByAdminId: "admin-1", reason: "Different saved reason",
           source: "manager_manual", idempotencyKey: "refund-0001", createdAt: refundedAt,
@@ -196,7 +215,7 @@ describe("FastAPI CRM adapter", () => {
       priceSource: "manager_agreed", note: null, releasedAt: null,
     };
     const lead = {
-      id: "lead-1", status: "booked", netInitialDepositKzt: 10000, manualPaymentFactStatus: "prepaid",
+      id: "lead-1", status: "booked", bookingReservationState: "active", netInitialDepositKzt: 10000, manualPaymentFactStatus: "prepaid",
       branch: { id: "branch-1", name: "Алматы", shortLabel: "ALM" },
     };
     const reservation = {
