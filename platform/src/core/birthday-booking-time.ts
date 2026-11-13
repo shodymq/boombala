@@ -1,7 +1,7 @@
 const BIRTHDAY_DURATION_MINUTES = 4 * 60;
 
 export function birthdayStartTimes(workingHours: string): string[] {
-  const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(workingHours);
+  const match = /^(\d{2}):(\d{2})\s*-\s*(\d{2}):(\d{2})$/.exec(workingHours);
   if (!match) return [];
 
   const [openHour, openMinute, closeHour, closeMinute] = match.slice(1).map(Number);

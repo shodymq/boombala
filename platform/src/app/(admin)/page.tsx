@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { randomUUID } from "node:crypto";
 import Image from "next/image";
 import Link from "next/link";
 import { dayFigures } from "@/core/attendance";
+import { birthdayStartTimes } from "@/core/birthday-booking-time";
 import { attendanceSchemaReady } from "@/core/preflight";
 import { BUSINESS_TIME_ZONE, catalogSummary } from "@/core/catalog";
 import { almatyToday } from "@/core/dates";
@@ -9,6 +11,8 @@ import { outboxStats } from "@/core/outbox";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermission } from "@/server/dal";
+import { FastApiCrmClient, unifiedFastapiCrmEnabled, type BookingTimeline, type FastApiBirthdayBookingCatalog } from "@/server/fastapi-crm";
+import { fastApiActorForStaff } from "@/server/fastapi-staff";
 
 export const metadata: Metadata = { title: "Обзор" };
 
@@ -30,7 +34,44 @@ export default async function DashboardPage() {
   const { user } = await requirePermission("dashboard.view");
   const pool = getPool();
   const today = almatyToday();
-  const [migrations, summary, outbox, attendance, requests, bookings] = await Promise.all([
+  const unifiedCrm = unifiedFastapiCrmEnabled();
+  const unifiedBookingView = unifiedCrm && can(user.role, "bookings.manage");
+  const bookingDataPromise: Promise<{
+    branch: FastApiBirthdayBookingCatalog["branches"][number];
+    rooms: FastApiBirthdayBookingCatalog["rooms"];
+    timeline: BookingTimeline;
+  } | null> = (async () => {
+    if (!unifiedBookingView) return null;
+    try {
+      const requestId = randomUUID();
+      const actor = await fastApiActorForStaff(user, { requestId });
+      const client = new FastApiCrmClient(actor);
+      const catalog = await client.getBookingCatalog();
+      if (catalog.branches.length === 1) {
+        const branch = catalog.branches[0];
+        const rooms = catalog.rooms.filter((room) => room.branchId === branch.id);
+        const timeline = await client.getBookingTimeline(branch.id, today);
+        const roomIds = rooms.map((room) => room.id).sort();
+        const timelineRoomIds = timeline.rooms.map((room) => room.id).sort();
+        if (
+          rooms.length === 4 &&
+          birthdayStartTimes(branch.workingHours).length > 0 &&
+          branch.bufferMinutes === 0 &&
+          timeline.branchId === branch.id &&
+          timeline.date === today &&
+          timeline.bufferMinutes === 0 &&
+          roomIds.length === timelineRoomIds.length &&
+          roomIds.every((id, index) => id === timelineRoomIds[index])
+        ) {
+          return { branch, rooms, timeline };
+        }
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  })();
+  const [migrations, summary, outbox, attendance, requests, bookings, bookingData] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
@@ -44,6 +85,7 @@ export default async function DashboardPage() {
         )
       : Promise.resolve(null),
     can(user.role, "bookings.manage")
+      && !unifiedCrm
       ? pool.query<{ booked: number; blocked: number; capacity: number }>(
           `SELECT count(*) FILTER (WHERE kind = 'booking')::int AS booked,
                   count(*) FILTER (WHERE kind = 'block')::int AS blocked,
@@ -52,6 +94,7 @@ export default async function DashboardPage() {
           [today],
         )
       : Promise.resolve(null),
+    bookingDataPromise,
   ]);
   const timestamp = new Date();
   const activePackages = summary?.packages.filter((item) => item.isActive) ?? [];
@@ -60,7 +103,15 @@ export default async function DashboardPage() {
   const maxPrice = Math.max(1, ...pricePackages.map((item) => item.basePrice ?? 0));
   const newRequests = requests?.rows.find((row) => row.status === "new")?.total ?? 0;
   const inProgressRequests = requests?.rows.find((row) => row.status === "in_progress")?.total ?? 0;
-  const todayBookings = bookings?.rows[0];
+  const todayBookings = bookingData
+    ? {
+        booked: bookingData.timeline.reservations.filter((item) => item.kind === "booking" && item.status === "confirmed").length,
+        blocked: bookingData.timeline.reservations.filter((item) => item.kind === "block" && item.status === "blocked").length,
+        capacity: null,
+      }
+    : bookings?.rows[0] ?? null;
+  const bookingDataUnavailable = unifiedBookingView && bookingData === null;
+  const dashboardRooms = unifiedBookingView ? bookingData?.rooms.map((room) => room.name) ?? null : activeRooms.map((room) => room.name);
   const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(timestamp);
   const metrics: Array<{ label: string; value: number; suffix?: string; note: string; href: string; icon: string }> = [];
 
@@ -69,7 +120,7 @@ export default async function DashboardPage() {
     metrics.push({ label: "В работе", value: inProgressRequests, note: "Открытые обращения", href: "/requests?status=in_progress", icon: "↗" });
   }
   if (todayBookings) {
-    metrics.push({ label: "Брони сегодня", value: todayBookings.booked, suffix: ` / ${todayBookings.capacity}`, note: `Заблокировано слотов: ${todayBookings.blocked}`, href: "/bookings", icon: "▦" });
+    metrics.push({ label: "Брони сегодня", value: todayBookings.booked, suffix: todayBookings.capacity == null ? undefined : ` / ${todayBookings.capacity}`, note: `Блокировки: ${todayBookings.blocked}`, href: "/bookings", icon: "▦" });
   }
   if (attendance && attendance !== "outdated") {
     metrics.push({ label: "Дети вошли сегодня", value: attendance.childrenEntered, note: `Ожидается: ${attendance.childrenExpected}`, href: "/attendance", icon: "✓" });
@@ -110,6 +161,7 @@ export default async function DashboardPage() {
           </div>
         </section>
       ) : null}
+      {bookingDataUnavailable ? <p role="alert" className="so-alert">Не удалось получить расписание из CRM API. Счётчик броней скрыт.</p> : null}
 
       <div className="so-dashboard-grid">
         {summary ? (
@@ -149,11 +201,15 @@ export default async function DashboardPage() {
             <dl className="so-catalog-meta">
               <div>
                 <dt>Комнаты</dt>
-                <dd>{activeRooms.map((room) => room.name).join(", ") || "—"}</dd>
+                <dd>{dashboardRooms?.join(", ") || (unifiedBookingView ? "Данные CRM API недоступны" : "—")}</dd>
               </div>
               <div>
-                <dt>Слоты</dt>
-                <dd>{summary.slots.map((slot) => slot.startsAt + "–" + slot.endsAt).join(", ") || "—"}</dd>
+                <dt>{unifiedBookingView ? "Правила бронирования" : "Слоты"}</dt>
+                <dd>{unifiedBookingView
+                  ? bookingData
+                    ? `${bookingData.branch.workingHours}; 4 часа; начало в полный час; буфер 0 минут`
+                    : "Данные CRM API недоступны"
+                  : summary.slots.map((slot) => slot.startsAt + "–" + slot.endsAt).join(", ") || "—"}</dd>
               </div>
             </dl>
           </section>

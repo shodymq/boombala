@@ -9,6 +9,10 @@ describe("birthday booking start times", () => {
     ]);
   });
 
+  it("accepts the spaced working-hours format used by the staging catalog", () => {
+    assert.deepEqual(birthdayStartTimes("10:00 - 22:00"), birthdayStartTimes("10:00-22:00"));
+  });
+
   it("starts at the next whole hour when the branch opens between hours", () => {
     assert.deepEqual(birthdayStartTimes("10:30-22:00"), [
       "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00",
