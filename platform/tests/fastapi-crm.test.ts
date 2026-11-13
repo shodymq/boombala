@@ -173,7 +173,7 @@ describe("FastAPI CRM adapter", () => {
     else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
   });
 
-  it("performs read-after-write and exposes FastAPI errors without a legacy fallback", async () => {
+  it("preserves a booking conflict from the confirmation API without a legacy fallback", async () => {
     const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
     const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
     process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
@@ -183,12 +183,6 @@ describe("FastAPI CRM adapter", () => {
       fetchImpl: async (url) => {
         const urlText = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
         paths.push(new URL(urlText).pathname);
-        if (paths.length === 1) return new Response(JSON.stringify({
-          id: "booking-1", kind: "booking", status: "confirmed", requestId: "lead-1", branchId: "branch-1",
-          bookingDate: "2026-11-10", roomId: "room-1", slotId: null, startsAt: "2026-11-10T12:00:00+06:00",
-          endsAt: "2026-11-10T16:00:00+06:00", packageId: "package-1", priceKzt: 200000,
-          priceSource: "manager_agreed", note: null, releasedAt: null,
-        }), { status: 200 });
         return new Response(JSON.stringify({ error: { code: "slot_taken" } }), { status: 409 });
       },
     });
@@ -196,7 +190,7 @@ describe("FastAPI CRM adapter", () => {
       () => client.confirmBookingAndRead({ requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "12:00", packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0001" }, { workingHours: "10:00-22:00", bufferMinutes: 0 }),
       (error) => error instanceof FastApiCrmError && error.status === 409 && error.code === "slot_taken",
     );
-    assert.deepEqual(paths, ["/api/v1/admin/birthday-bookings/confirm", "/api/v1/admin/leads/lead-1/birthday"]);
+    assert.deepEqual(paths, ["/api/v1/admin/birthday-bookings/confirm"]);
     if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
     else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
     if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
@@ -210,8 +204,8 @@ describe("FastAPI CRM adapter", () => {
     process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
     const booking = {
       id: "booking-1", kind: "booking", status: "confirmed", requestId: "lead-1", branchId: "branch-1",
-      bookingDate: "2026-11-10", roomId: "room-1", slotId: null, startsAt: "2026-11-10T12:00:00+06:00",
-      endsAt: "2026-11-10T16:00:00+06:00", packageId: "package-1", priceKzt: 200000,
+      bookingDate: "2026-11-10", roomId: "room-1", slotId: null, startsAt: "2026-11-10T12:00:00+05:00",
+      endsAt: "2026-11-10T16:00:00+05:00", packageId: "package-1", priceKzt: 200000,
       priceSource: "manager_agreed", note: null, releasedAt: null,
     };
     const lead = {
@@ -267,6 +261,75 @@ describe("FastAPI CRM adapter", () => {
         packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0004",
       }, { workingHours: "10:00-22:00", bufferMinutes: 30 }),
       (error) => error instanceof FastApiCrmError && error.code === "booking_buffer_required",
+    );
+
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("reports a booking as uncertain when readback fails after confirmation succeeds", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    const booking = {
+      id: "booking-1", kind: "booking", status: "confirmed", requestId: "lead-1", branchId: "branch-1",
+      bookingDate: "2026-11-10", roomId: "room-1", slotId: null, startsAt: "2026-11-10T12:00:00+05:00",
+      endsAt: "2026-11-10T16:00:00+05:00", packageId: "package-1", priceKzt: 200000,
+      priceSource: "manager_agreed", note: null, releasedAt: null,
+    };
+    let callCount = 0;
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => {
+        callCount += 1;
+        return callCount === 1
+          ? new Response(JSON.stringify(booking), { status: 200 })
+          : new Response(JSON.stringify({ error: { code: "not_found" } }), { status: 404 });
+      },
+    });
+
+    await assert.rejects(
+      () => client.confirmBookingAndRead({
+        requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "12:00",
+        packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0005",
+      }, { workingHours: "10:00-22:00", bufferMinutes: 0 }),
+      (error) => error instanceof FastApiCrmError && error.status === 502 && error.code === "booking_verification_uncertain",
+    );
+
+    if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;
+    else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
+    if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("reports a malformed successful timeline readback as uncertain", async () => {
+    const beforeFlag = process.env.UNIFIED_FASTAPI_CRM_ENABLED;
+    const beforeBaseUrl = process.env.FASTAPI_ADMIN_BASE_URL;
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.FASTAPI_ADMIN_BASE_URL = "https://api.example.test";
+    const booking = {
+      id: "booking-1", kind: "booking", status: "confirmed", requestId: "lead-1", branchId: "branch-1",
+      bookingDate: "2026-11-10", roomId: "room-1", slotId: null, startsAt: "2026-11-10T12:00:00+05:00",
+      endsAt: "2026-11-10T16:00:00+05:00", packageId: "package-1", priceKzt: 200000,
+      priceSource: "manager_agreed", note: null, releasedAt: null,
+    };
+    const lead = {
+      id: "lead-1", status: "booked", bookingReservationState: "active", netInitialDepositKzt: 10000, manualPaymentFactStatus: "prepaid",
+      branch: { id: "branch-1", name: "Алматы", shortLabel: "ALM" },
+    };
+    const responses = [booking, lead, null];
+    const client = new FastApiCrmClient({ accessToken: "staff-access-token" }, {
+      fetchImpl: async () => new Response(JSON.stringify(responses.shift()), { status: 200 }),
+    });
+
+    await assert.rejects(
+      () => client.confirmBookingAndRead({
+        requestId: "lead-1", bookingDate: "2026-11-10", roomId: "room-1", startTime: "12:00",
+        packageId: "package-1", agreedPriceKzt: 200000, idempotencyKey: "confirm-0006",
+      }, { workingHours: "10:00-22:00", bufferMinutes: 0 }),
+      (error) => error instanceof FastApiCrmError && error.status === 502 && error.code === "booking_verification_uncertain",
     );
 
     if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;

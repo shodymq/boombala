@@ -435,6 +435,8 @@ export class FastApiCrmClient {
 
     const booking = await this.confirmBooking(body);
     if (
+      !booking ||
+      typeof booking !== "object" ||
       booking.kind !== "booking" ||
       booking.status !== "confirmed" ||
       booking.requestId !== body.requestId ||
@@ -448,12 +450,28 @@ export class FastApiCrmClient {
     ) {
       throw new FastApiCrmError(502, "booking_response_mismatch", this.requestId);
     }
-    const lead = await this.getBirthdayLead(body.requestId);
+    let lead: FastApiBirthdayLeadDetail;
+    try {
+      lead = await this.getBirthdayLead(body.requestId);
+    } catch {
+      throw new FastApiCrmError(502, "booking_verification_uncertain", this.requestId);
+    }
+
     if (lead.status !== "booked" || lead.netInitialDepositKzt !== 10000 || lead.manualPaymentFactStatus === "unreconciled" || !lead.branch?.id) {
       throw new FastApiCrmError(502, "booking_lead_readback_mismatch", this.requestId);
     }
-    const timeline = await this.getBookingTimeline(lead.branch.id, body.bookingDate);
-    const reservation = timeline.reservations.find((item) => item.id === booking.id);
+
+    let timeline: BookingTimeline;
+    try {
+      timeline = await this.getBookingTimeline(lead.branch.id, body.bookingDate);
+    } catch {
+      throw new FastApiCrmError(502, "booking_verification_uncertain", this.requestId);
+    }
+
+    if (!timeline || !Array.isArray(timeline.reservations)) {
+      throw new FastApiCrmError(502, "booking_verification_uncertain", this.requestId);
+    }
+    const reservation = timeline.reservations.find((item) => item?.id === booking.id);
     if (
       timeline.branchId !== lead.branch.id ||
       timeline.date !== body.bookingDate ||

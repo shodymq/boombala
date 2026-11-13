@@ -27,5 +27,33 @@ export function hasBirthdayDuration(startsAt: string | null, endsAt: string | nu
 }
 
 export function hasBirthdayStart(startsAt: string | null, date: string, startTime: string): boolean {
-  return new RegExp(`^${date}T${startTime}:00(?:\\.0+)?(?:Z|[+-]\\d{2}:\\d{2})?$`).test(startsAt ?? "");
+  const value = startsAt ?? "";
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return false;
+
+  const fraction = value.match(/\.(\d+)(?=Z|[+-]\d{2}:\d{2}$)/i)?.[1];
+  if (fraction && /[1-9]/.test(fraction)) return false;
+
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return false;
+
+  const start = new Date(timestamp);
+  if (start.getUTCMilliseconds() !== 0) return false;
+
+  const local = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Almaty",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(start)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  return `${local.year}-${local.month}-${local.day}T${local.hour}:${local.minute}` === `${date}T${startTime}` && local.second === "00";
 }

@@ -45,7 +45,7 @@ function detailFailure(id: string, error: unknown, retry?: Record<string, string
     else if (error.status === 409 && error.code === "birthday_refund_exceeds_paid") code = "refund_exceeds_paid";
     else if (error.status === 409 && error.code === "birthday_prepayment_required") code = "prepayment_required";
     else if (error.status === 409 && error.code === "booking_buffer_required") code = "buffer_required";
-    else if (error.status === 502 && ["booking_response_mismatch", "booking_lead_readback_mismatch", "booking_timeline_readback_mismatch"].includes(error.code)) code = "booking_verification_uncertain";
+    else if (error.status === 502 && ["booking_response_mismatch", "booking_verification_uncertain", "booking_lead_readback_mismatch", "booking_timeline_readback_mismatch"].includes(error.code)) code = "booking_verification_uncertain";
     else if (error.status === 409 && ["time_conflict", "slot_taken", "request_already_booked"].includes(error.code)) code = "booking_conflict";
     else if (error.status === 409 && ["start_in_past", "booking_date_in_past"].includes(error.code)) code = "booking_past";
     else if (error.status === 422 && error.code === "invalid_lead_status_transition") code = "transition";

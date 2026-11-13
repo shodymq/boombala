@@ -40,8 +40,12 @@ describe("birthday booking start times", () => {
   });
 
   it("matches the exact whole-hour start, including seconds", () => {
-    assert.equal(hasBirthdayStart("2026-11-10T12:00:00.000+06:00", "2026-11-10", "12:00"), true);
-    assert.equal(hasBirthdayStart("2026-11-10T12:00:30+06:00", "2026-11-10", "12:00"), false);
-    assert.equal(hasBirthdayStart("2026-11-10T12:00:00.500+06:00", "2026-11-10", "12:00"), false);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:00.000+05:00", "2026-11-10", "12:00"), true);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:00+06:00", "2026-11-10", "12:00"), false);
+    assert.equal(hasBirthdayStart("2026-11-10T07:00:00Z", "2026-11-10", "12:00"), true);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:30+05:00", "2026-11-10", "12:00"), false);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:00.500+05:00", "2026-11-10", "12:00"), false);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:00.000001+05:00", "2026-11-10", "12:00"), false);
+    assert.equal(hasBirthdayStart("2026-11-10T12:00:00", "2026-11-10", "12:00"), false);
   });
 });
