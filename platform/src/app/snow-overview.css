@@ -194,6 +194,12 @@
   font-weight: 700;
 }
 
+.so-metric-icon .flaticon-icon {
+  width: 16px;
+  height: 16px;
+  filter: brightness(0) saturate(100%) invert(23%) sepia(32%) saturate(2080%) hue-rotate(228deg) brightness(84%) contrast(91%);
+}
+
 .so-metric-label {
   align-self: center;
   color: var(--so-muted);

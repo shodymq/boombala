@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { randomUUID } from "node:crypto";
 import Image from "next/image";
+import { FlaticonIcon, type FlaticonIconName } from "@/components/flaticon-icon";
 import Link from "next/link";
 import { dayFigures } from "@/core/attendance";
 import { birthdayStartTimes } from "@/core/birthday-booking-time";
@@ -113,17 +114,17 @@ export default async function DashboardPage() {
   const bookingDataUnavailable = unifiedBookingView && bookingData === null;
   const dashboardRooms = unifiedBookingView ? bookingData?.rooms.map((room) => room.name) ?? null : activeRooms.map((room) => room.name);
   const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(timestamp);
-  const metrics: Array<{ label: string; value: number; suffix?: string; note: string; href: string; icon: string }> = [];
+  const metrics: Array<{ label: string; value: number; suffix?: string; note: string; href: string; icon: FlaticonIconName }> = [];
 
   if (requests) {
-    metrics.push({ label: "Новые заявки", value: newRequests, note: "Ждут ответа", href: "/requests?status=new", icon: "+" });
-    metrics.push({ label: "В работе", value: inProgressRequests, note: "Открытые обращения", href: "/requests?status=in_progress", icon: "↗" });
+    metrics.push({ label: "Новые заявки", value: newRequests, note: "Ждут ответа", href: "/requests?status=new", icon: "inbox" });
+    metrics.push({ label: "В работе", value: inProgressRequests, note: "Открытые обращения", href: "/requests?status=in_progress", icon: "ticket" });
   }
   if (todayBookings) {
-    metrics.push({ label: "Брони сегодня", value: todayBookings.booked, suffix: todayBookings.capacity == null ? undefined : ` / ${todayBookings.capacity}`, note: `Блокировки: ${todayBookings.blocked}`, href: "/bookings", icon: "▦" });
+    metrics.push({ label: "Брони сегодня", value: todayBookings.booked, suffix: todayBookings.capacity == null ? undefined : ` / ${todayBookings.capacity}`, note: `Блокировки: ${todayBookings.blocked}`, href: "/bookings", icon: "calendar" });
   }
   if (attendance && attendance !== "outdated") {
-    metrics.push({ label: "Дети вошли сегодня", value: attendance.childrenEntered, note: `Ожидается: ${attendance.childrenExpected}`, href: "/attendance", icon: "✓" });
+    metrics.push({ label: "Дети вошли сегодня", value: attendance.childrenEntered, note: `Ожидается: ${attendance.childrenExpected}`, href: "/attendance", icon: "check" });
   }
 
   return (
@@ -134,7 +135,7 @@ export default async function DashboardPage() {
           <h1>
             Добрый день, {user.name}
             <span className="so-greeting-art">
-              <Image src="/illustrations/snowui-greeting.svg" alt="" width={58} height={58} priority />
+              <Image src="/illustrations/milano-hello.svg" alt="" width={58} height={58} priority />
             </span>
           </h1>
           <p>Заявки, бронирования и посещаемость филиала — на одном экране.</p>
@@ -152,7 +153,7 @@ export default async function DashboardPage() {
           <div className="so-metrics">
             {metrics.map((metric) => (
               <Link className="so-metric" href={metric.href} key={metric.label}>
-                <span className="so-metric-icon" aria-hidden="true">{metric.icon}</span>
+                <span className="so-metric-icon" aria-hidden="true"><FlaticonIcon name={metric.icon} size={16} /></span>
                 <span className="so-metric-label">{metric.label}</span>
                 <strong className="so-metric-value">{metric.value}{metric.suffix ? <span>{metric.suffix}</span> : null}</strong>
                 <span className="so-metric-note">{metric.note}</span>

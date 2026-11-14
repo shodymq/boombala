@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { listLeads } from "@/core/bookings";
 import { listPackages } from "@/core/catalog";
@@ -7,6 +8,7 @@ import { isValidDate } from "@/core/dates";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { DatePicker } from "@/components/date-picker";
+import { FlaticonIcon } from "@/components/flaticon-icon";
 import { FastApiCrmClient, unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
 import { fastApiActorForStaff } from "@/server/fastapi-staff";
 import { leadStatusAction } from "./actions";
@@ -162,7 +164,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
           <DatePicker key={`${createdFrom ?? ""}:${createdTo ?? ""}`} name="createdTo" label="По дату заявки" defaultValue={createdTo ?? ""} />
         </label>
         <div className="crm-requests-filter-actions">
-          <button type="submit" className={btn}>Найти заявки</button>
+          <button type="submit" className={`${btn} inline-flex items-center gap-2`}><FlaticonIcon name="search" size={15} className="crm-action-icon" />Найти заявки</button>
           <Link href="/requests" className={btnGhost}>Сбросить</Link>
         </div>
       </form>
@@ -228,6 +230,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
         </table>
         {leads.length === 0 && !loadError ? (
           <p className="crm-requests-empty" role="status">
+            {!hasFilters ? <Image className="mx-auto mb-3" src="/illustrations/milano-asking-question.svg" alt="" width={88} height={88} /> : null}
             {hasFilters ? "По этим условиям заявок нет. Измените фильтры или сбросьте поиск." : "Заявок пока нет. Новые обращения появятся здесь."}
           </p>
         ) : null}

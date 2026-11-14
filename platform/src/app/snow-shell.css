@@ -81,7 +81,13 @@
 .snow-nav-link { display: flex; min-height: 42px; align-items: center; gap: 12px; border-radius: 12px; padding: 0 12px; color: #81766f; font-size: 13px; font-weight: 500; text-decoration: none; transition: color .2s ease, background .2s ease, transform .2s ease; }
 .snow-nav-link:hover { transform: translateX(2px); background: #f7f4fb; color: #3b1e78; }
 .snow-nav-link[aria-current="page"] { background: #3b1e78; color: #fff; box-shadow: 0 8px 18px rgba(59, 30, 120, .16); }
-.snow-nav-icon { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.flaticon-icon { display: block; flex: 0 0 auto; object-fit: contain; }
+.snow-nav-icon { width: 17px; height: 17px; filter: brightness(0) saturate(100%) invert(47%) sepia(8%) saturate(685%) hue-rotate(336deg) brightness(91%) contrast(86%); opacity: .75; }
+.snow-nav-link:hover .snow-nav-icon,
+.snow-nav-link[aria-current="page"] .snow-nav-icon { opacity: 1; }
+.snow-nav-link[aria-current="page"] .snow-nav-icon { filter: brightness(0) invert(1); }
+.mobile-menu-icon { filter: brightness(0) saturate(100%) invert(23%) sepia(32%) saturate(2080%) hue-rotate(228deg) brightness(84%) contrast(91%); }
+.mobile-menu-icon-close { transform: rotate(45deg); }
 
 .snow-sidebar-footer { display: flex; align-items: center; gap: 10px; margin-top: auto; border-top: 1px solid #eee9e3; padding: 17px 10px 0; }
 .snow-avatar { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border: 1px solid #e4dcef; border-radius: 10px; background: #f5f1fa; color: #3b1e78; font-family: var(--font-heading), sans-serif; font-size: 10px; font-weight: 800; }
@@ -89,6 +95,9 @@
 .snow-sidebar-user strong, .snow-sidebar-user span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snow-sidebar-user strong { color: #2a1810; font-size: 12px; font-weight: 600; }
 .snow-sidebar-user span { margin-top: 3px; color: #ada29c; font-size: 10px; }
+.snow-asset-credits { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 10px 10px 0; font-size: 9px; }
+.snow-asset-credits a { color: var(--color-muted); text-decoration: none; }
+.snow-asset-credits a:hover { color: var(--color-grape-700); text-decoration: underline; }
 
 .snow-content { min-width: 0; }
 .snow-topbar { position: relative; z-index: 10; display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #eee9e3; background: rgba(255, 255, 255, .92); padding: 0 38px; }
@@ -100,7 +109,8 @@
 .snow-topbar-user-copy { display: grid; min-width: 0; }
 .snow-topbar-user-copy strong { max-width: 180px; overflow: hidden; color: #2a1810; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .snow-topbar-user-copy span { margin-top: 2px; color: #8b807a; font-size: 10px; }
-.snow-logout { min-height: 36px; border: 1px solid #e4dcef; border-radius: 10px; background: #fff; padding: 0 13px; color: #3b1e78; font-size: 12px; font-weight: 600; transition: background .2s ease, border-color .2s ease; }
+.snow-logout { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; border: 1px solid #e4dcef; border-radius: 10px; background: #fff; padding: 0 13px; color: #3b1e78; font-size: 12px; font-weight: 600; transition: background .2s ease, border-color .2s ease; }
+.snow-logout .flaticon-icon { filter: brightness(0) saturate(100%) invert(23%) sepia(32%) saturate(2080%) hue-rotate(228deg) brightness(84%) contrast(91%); }
 .snow-logout:hover { border-color: #cbbde1; background: #f7f4fb; }
 .snow-main { width: 100%; max-width: 1440px; min-width: 0; margin: 0 auto; padding: 41px 42px; }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FlaticonIcon } from "@/components/flaticon-icon";
 
 type DateParts = { year: number; month: number; day: number };
 
@@ -129,10 +130,7 @@ export function DatePicker({
         onClick={() => open ? setOpen(false) : openPicker()}
       >
         <span>{formatDate(value)}</span>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="3" y="5" width="18" height="16" rx="2" />
-          <path d="M16 3v4M8 3v4M3 11h18" />
-        </svg>
+        <FlaticonIcon name="calendar" size={16} />
       </button>
       {open ? (
         <div className="crm-date-picker-popover" data-placement={placement} role="dialog" aria-label="Выбор даты" onKeyDown={(event) => {
@@ -152,13 +150,13 @@ export function DatePicker({
               const next = changeMonth(month.year, month.month, -1);
               setVisibleMonth(next);
               setActiveDate(dateValue(next.year, next.month, 1));
-            }}>‹</button>
+            }}><FlaticonIcon name="chevron-right" size={14} className="crm-date-arrow crm-date-arrow-prev" /></button>
             <strong>{title}</strong>
             <button type="button" aria-label="Следующий месяц" onClick={() => {
               const next = changeMonth(month.year, month.month, 1);
               setVisibleMonth(next);
               setActiveDate(dateValue(next.year, next.month, 1));
-            }}>›</button>
+            }}><FlaticonIcon name="chevron-right" size={14} className="crm-date-arrow" /></button>
           </div>
           <div className="crm-date-picker-weekdays" aria-hidden="true">
             {(["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]).map((day) => <span key={day}>{day}</span>)}

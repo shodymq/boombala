@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { listContacts, type ContactFilters } from "@/core/crm";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { DatePicker } from "@/components/date-picker";
+import { FlaticonIcon } from "@/components/flaticon-icon";
 
 export const metadata: Metadata = { title: "Клиенты" };
 
@@ -58,7 +60,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
         <label className="grid gap-1 text-xs font-bold text-muted">С даты регистрации<DatePicker key={`${filters.from ?? ""}:${filters.to ?? ""}`} name="from" label="С даты регистрации" defaultValue={filters.from ?? ""} /></label>
         <label className="grid gap-1 text-xs font-bold text-muted">По дату<DatePicker key={`${filters.from ?? ""}:${filters.to ?? ""}`} name="to" label="По дату" defaultValue={filters.to ?? ""} /></label>
         <div className="flex gap-2 sm:col-span-2 lg:col-span-3">
-          <button type="submit" className={btn}>Найти</button>
+          <button type="submit" className={`${btn} inline-flex items-center gap-2`}><FlaticonIcon name="search" size={15} className="crm-action-icon" />Найти</button>
           <Link href="/contacts" className="flex h-11 items-center rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700">Сбросить</Link>
         </div>
       </form>
@@ -79,7 +81,8 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           </li>
         ))}
         {rows.length === 0 ? (
-          <li className="crm-empty-state rounded-3xl border border-line bg-white p-5 text-sm text-muted">
+          <li className="crm-empty-state grid justify-items-center gap-2 rounded-3xl border border-line bg-white p-5 text-center text-sm text-muted">
+            {!hasFilters ? <Image src="/illustrations/milano-empty-state-no-user-found.svg" alt="" width={76} height={76} /> : null}
             {hasFilters ? <>По этим условиям клиентов нет. <Link href="/contacts" className="font-bold text-grape-700 underline">Сбросить фильтры</Link></> : "База клиентов пока пуста."}
           </li>
         ) : null}

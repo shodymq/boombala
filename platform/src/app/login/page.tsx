@@ -15,7 +15,7 @@ export default async function LoginPage() {
         <p className="text-xs font-extrabold uppercase tracking-[0.16em]">Boom Bala · CRM</p>
         <h1>Рабочее пространство команды</h1>
         <p>Заявки, расписание и работа филиала — в одной панели.</p>
-        <Image className="crm-login-art" src="/illustrations/snowui-greeting.svg" alt="" width={128} height={128} priority />
+        <Image className="crm-login-art" src="/illustrations/milano-hello.svg" alt="" width={128} height={128} priority />
       </section>
       <section className="crm-login-card">
         <p className="crm-eyebrow">Вход для сотрудников</p>

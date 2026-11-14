@@ -55,8 +55,8 @@ describe("FastAPI CRM adapter", () => {
       summary: "День рождения",
       status: "new",
       source: "website",
-      customerName: "Айжан",
-      phone: "+77071234567",
+      customerName: "UAT Synthetic",
+      phone: "+77000000000",
       guestCount: 4,
       requestedDate: "2027-01-20",
       createdAt: "2026-10-31T10:00:00Z",
@@ -69,9 +69,9 @@ describe("FastAPI CRM adapter", () => {
         return new Response(JSON.stringify({ items: [item], total: 1 }), { status: 200 });
       },
     });
-    const result = await client.listLeads({ status: "new", q: "Айжан", createdFrom: "2026-10-01", createdTo: "2026-10-31" });
+    const result = await client.listLeads({ status: "new", q: "UAT Synthetic", createdFrom: "2026-10-01", createdTo: "2026-10-31" });
     assert.deepEqual(result, { items: [item], total: 1 });
-    assert.equal(calls[0].url, "https://api.example.test/api/v1/admin/leads?status=new&q=%D0%90%D0%B9%D0%B6%D0%B0%D0%BD&createdFrom=2026-10-01&createdTo=2026-10-31");
+    assert.equal(calls[0].url, "https://api.example.test/api/v1/admin/leads?status=new&q=UAT+Synthetic&createdFrom=2026-10-01&createdTo=2026-10-31");
     assert.equal(new Headers(calls[0].init.headers).get("authorization"), "Bearer staff-access-token");
     assert.equal(new Headers(calls[0].init.headers).get("x-request-id"), "crm-request-2");
     if (beforeBaseUrl === undefined) delete process.env.FASTAPI_ADMIN_BASE_URL;

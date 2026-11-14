@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { FlaticonIcon, type FlaticonIconName } from "@/components/flaticon-icon";
 
 export interface NavItem {
   href: string;
@@ -10,19 +11,19 @@ export interface NavItem {
 }
 
 const PRIMARY_HREFS = new Set(["/", "/bookings", "/requests", "/attendance", "/contacts"]);
-const ICON_PATHS: Record<string, string> = {
-  "/": "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
-  "/bookings": "M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v13H3V6a2 2 0 0 1 2-2z",
-  "/requests": "M4 4h16v13H7l-3 3z M8 8h8m-8 4h5",
-  "/attendance": "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM18 8v6m3-3h-6",
-  "/contacts": "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM16 3.2a4 4 0 0 1 0 7.6M18 15h1a4 4 0 0 1 4 4v2",
-  "/news": "M6 2h9l5 5v15H6zM14 2v6h6M9 12h8m-8 4h8",
-  "/export": "M12 3v12m0 0 5-5m-5 5-5-5M4 19v2h16v-2",
-  "/legal": "M7 3h10v18H5V5zM8 9h6m-6 4h6m-6 4h4",
-  "/retention": "M12 8v5l3 2M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z",
-  "/users": "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM16 11a4 4 0 1 0 0-8",
-  "/audit": "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
-  "/account": "M12 14a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM4 21a8 8 0 0 1 16 0",
+const ICON_NAMES: Record<string, FlaticonIconName> = {
+  "/": "dashboard",
+  "/bookings": "calendar",
+  "/requests": "inbox",
+  "/attendance": "check",
+  "/contacts": "users",
+  "/news": "bell",
+  "/export": "download",
+  "/legal": "check",
+  "/retention": "heart",
+  "/users": "user",
+  "/audit": "more",
+  "/account": "settings",
 };
 
 function isCurrent(item: NavItem, pathname: string) {
@@ -37,9 +38,7 @@ function NavList({ items, pathname, onNavigate }: { items: NavItem[]; pathname: 
         return (
           <li key={item.href}>
             <Link href={item.href} onClick={onNavigate} aria-current={active ? "page" : undefined} className="snow-nav-link">
-              <svg className="snow-nav-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d={ICON_PATHS[item.href]} />
-              </svg>
+              <FlaticonIcon name={ICON_NAMES[item.href]} size={17} className="snow-nav-icon" />
               <span>{item.label}</span>
             </Link>
           </li>
@@ -69,7 +68,7 @@ export function NavLinks({ items }: { items: NavItem[] }) {
         aria-controls="snow-nav-sections"
         onClick={() => setMenu({ pathname, open: !menuOpen })}
       >
-        <span aria-hidden="true">{menuOpen ? "×" : "☰"}</span>
+        <FlaticonIcon name={menuOpen ? "plus" : "menu"} size={15} className={menuOpen ? "mobile-menu-icon mobile-menu-icon-close" : "mobile-menu-icon"} />
         {menuOpen ? "Закрыть меню" : "Меню"}
       </button>
       <div id="snow-nav-sections" className="snow-nav-sections">

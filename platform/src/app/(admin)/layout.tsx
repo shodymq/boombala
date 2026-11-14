@@ -3,6 +3,9 @@ import { requireUser } from "@/server/dal";
 import Link from "next/link";
 import { logout } from "../login/actions";
 import { CurrentPageLabel, NavLinks, type NavItem } from "./nav-links";
+import { FlaticonIcon } from "@/components/flaticon-icon";
+
+const FIGMA_SOURCE = "https://www.figma.com/design/nFN83oaOWjVyMMCgV4shBY/1-600-Free-Illustrations---Vector-illustrations-set--svg-png---Community?node-id=1-65";
 
 const NAV: Array<NavItem & { permission: Permission }> = [
   { href: "/", label: "Обзор", permission: "dashboard.view" },
@@ -47,6 +50,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <span>{ROLE_LABEL[user.role]}</span>
           </div>
         </div>
+        <div className="snow-asset-credits">
+          <a href="https://www.flaticon.com/" target="_blank" rel="noreferrer">Designed by Flaticon</a>
+          <a href={FIGMA_SOURCE} target="_blank" rel="noreferrer">Illustrations by Streamline</a>
+        </div>
       </aside>
       <div className="snow-content">
         <header className="snow-topbar">
@@ -64,7 +71,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               </span>
             </div>
             <form action={logout}>
-              <button type="submit" className="snow-logout">Выйти</button>
+              <button type="submit" className="snow-logout"><FlaticonIcon name="logout" size={15} />Выйти</button>
             </form>
           </div>
         </header>
