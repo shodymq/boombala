@@ -26,7 +26,7 @@
     "legal:load": "node --no-warnings scripts/legal-load.ts",
     "db:restore": "node --no-warnings scripts/restore-db.mjs",
     "e2e": "node --no-warnings e2e/platform.e2e.mjs",
-    "test": "node --no-warnings --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "test": "node --no-warnings --conditions=react-server --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
     "verify:remote": "node --no-warnings scripts/verify-remote.ts",
     "e2e:news": "node --no-warnings e2e/news.e2e.mjs",
@@ -39,8 +39,8 @@
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
-    "@vercel/oidc": "4.0.2",
-    "next": "16.3.8",
+    "@vercel/oidc": "4.0.4",
+    "next": "16.4.3",
     "pg": "^8.23.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -56,9 +56,14 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^16.3.8",
+    "eslint-config-next": "16.4.3",
     "playwright-core": "^1.64.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@vercel/cli-config": {
+      "zod": "4.6.7"
+    }
   }
 }

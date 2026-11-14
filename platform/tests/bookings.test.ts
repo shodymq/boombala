@@ -232,6 +232,21 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     assert.ok(open.some((x) => x.id === l));
   });
 
+  it("filters the enquiry queue by customer name, phone digits and creation date", async () => {
+    const id = await lead();
+    const phone = (await db.pool.query<{ phone_e164: string }>(
+      "SELECT c.phone_e164 FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id WHERE l.id = $1",
+      [id],
+    )).rows[0].phone_e164;
+    const today = almatyToday();
+
+    assert.ok((await listLeads(db.pool, manager, { q: "Тест Гость" })).some((item) => item.id === id));
+    assert.ok((await listLeads(db.pool, manager, { q: phone.replace(/\D/g, "").slice(-4) })).some((item) => item.id === id));
+    assert.ok((await listLeads(db.pool, manager, { createdFrom: today, createdTo: today })).some((item) => item.id === id));
+    assert.equal((await listLeads(db.pool, manager, { q: "такого клиента нет" })).length, 0);
+    await assert.rejects(() => listLeads(db.pool, manager, { createdFrom: "2026-02-31" }), ValidationError);
+  });
+
   it("permissions: only owner/manager manage bookings; editors and unknown roles are refused; every change is audited", async () => {
     const date = nextDay();
     await assert.rejects(() => createBlock(db.pool, editor, { date, slotId: 1, roomId: roomIds[0] }), ForbiddenError);

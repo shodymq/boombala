@@ -1,87 +1,46 @@
-# Контракт сайта с FastAPI (черновик для согласования с Codex)
+# Контракт сайта и CRM с FastAPI
 
-**Статус:** черновик. Production-формы сайта по-прежнему ходят в Next.js platform (`PLATFORM_URL`) и Telegram. Этот документ описывает, что FastAPI уже отдаёт, и что нужно решить до переключения.
-**Источник контракта:** `BoomBalaApp` `origin/main` (9b65ae5), `backend/app/modules/*/router.py` и `schemas.py`. Все пути ниже относительно префикса `/api/v1`, который задаёт `backend/app/main.py`.
-**Клиент:** `src/lib/fastapi/core.ts` (pure, тесты `npm run test:fastapi`), `src/lib/fastapi/index.ts` (server-only).
+**Статус на 31 октября 2026:** локальная реализация в ветках `codex/website-lead-api` (`BoomBalaApp`) и `codex/website-lead-crm-inbox` (`boombala`). Изменения не опубликованы и не включены в production. Оба переключателя остаются выключенными.
 
----
+## Поток заявки с сайта
 
-## 1. Что уже есть в FastAPI (проверено по коду)
+Next.js route `src/app/api/lead/route.ts` по флагу `UNIFIED_FASTAPI_WEBSITE_LEADS=1` отправляет форму на `POST /api/v1/public/leads/birthday`. По умолчанию форма продолжает использовать текущий путь.
 
-| Назначение | Метод и путь | Auth | Тело запроса | Ответ |
-|---|---|---|---|---|
-| Контактная заявка | `POST /mobile/leads/contact` | опционально (Bearer) | `name`, `phone`, `message?`, `email?` | 201 `{id, type, status}` |
-| Заявка на праздник | `POST /mobile/leads/birthday` | опционально (Bearer) | `name` 2–120, `phone` (шаблон), **`branchId` обязателен**, `preferredDate?` (≥ сегодня, Asia/Almaty), `guestCount?` 1–60, `comment?`, `packageId?`, `childId?`, `sourceCampaignId?`, `birthdayCycleId?`, `idempotencyKey?` 8–128 | 201 `{requestId, submittedAt, nextStep}` |
-| Запрос SMS-кода | `POST /mobile/auth/request-otp` | нет | `phone` 8–20 | 200 `{verification_id, expires_in_seconds, resend_after_seconds}` |
-| Проверка SMS-кода | `POST /mobile/auth/verify-otp` | нет | `phone`, `code` (6 цифр), `verification_id` | 200 `{access_token, refresh_token, token_type, expires_in_seconds, refresh_expires_in_seconds, user{id, phone, email}}` |
-| Текущий пользователь | `GET /mobile/auth/current-user` | Bearer | — | `{id, phone, email}` |
-| Дети | `GET/POST /mobile/me/children`, `PATCH/DELETE /mobile/me/children/{id}` | Bearer | — | — |
-| Заявки родителя | `GET /mobile/leads/birthday`, `GET /mobile/leads/birthday/{id}` | Bearer | — | `BirthdayLeadListResponse` / `BirthdayLeadResponse` |
-| Обновление токенов | `POST /mobile/auth/refresh` | refresh_token | `refresh_token` | `MobileAuthResponse` |
-| Выход | `POST /mobile/auth/logout` | Bearer | — | — |
+Сайт подписывает точные байты JSON-тела HMAC-SHA256. Подпись связывает метод `POST`, путь `/api/v1/public/leads/birthday`, Unix-время, одноразовый nonce и SHA-256 тела. Заголовки: `X-Service-Id`, `X-Request-Timestamp`, `X-Request-Nonce`, `X-Request-Signature` и обязательный `Idempotency-Key`. Секрет хранится только в серверной среде.
 
-**Чего в FastAPI НЕТ** (проверено поиском по `backend/app`):
-- **Публичного календаря / доступности.** Нет ни одного маршрута с `availability`. Календарь (PR 3) заблокирован до появления эндпоинта и PostgreSQL race tests (N12).
-- **Сервисной аутентификации сайт → FastAPI.** Заявки с сайта сейчас анонимны (`optional auth`). Любой может слать POST. Нужен решённый механизм (см. §4).
-- **Correlation ID.** Middleware для `X-Request-ID` не найден. Клиент сайта отправляет заголовок, но FastAPI его не возвращает и не пишет в логи.
-- **Единого формата ошибок в явном виде.** `core/exceptions/schemas.py` задаёт `{error:{code,message,details}}`, клиент читает `error.code`. Для ошибок валидации FastAPI по умолчанию отдаёт `detail` массивом: это надо подтвердить.
+FastAPI сверяет подпись и временное окно, атомарно резервирует nonce в Redis и передаёт заявку существующему `LeadService`. Повтор отправки с тем же `Idempotency-Key` не создаёт вторую заявку; повтор nonce отклоняется. Если Redis или конфигурация подписи недоступны, endpoint отвечает отказом и не переключается на другую базу.
 
----
+`WebsiteBirthdayLeadCreate` запрещает передавать владение ребёнком, кампанией и беседой. Источник задаёт FastAPI как `website`; `Idempotency-Key` передаётся заголовком, а не в JSON. Согласие передаётся с явным типом документа, версией и методом `web_checkbox`.
 
-## 2. Соответствие полей формы сайта и `BirthdayLeadCreate`
+Сайт требует явных ID филиала и каталогов через `UNIFIED_FASTAPI_BRANCH_ID`, `UNIFIED_FASTAPI_PACKAGE_MAP`, `UNIFIED_FASTAPI_ROOM_MAP` и `UNIFIED_FASTAPI_SLOT_MAP`. Неизвестное значение формы приводит к отказу до запроса; значения не угадываются.
 
-Текущая форма (`src/app/api/lead/route.ts`) отправляет: `name, phone, date, package, room, slot, children, page, referrer, utm_*, idempotencyKey, consent`.
+## Поток CRM-инбокса
 
-| Поле сайта | Поле FastAPI | Проблема |
-|---|---|---|
-| `name` | `name` | совпадает (2–120) |
-| `phone` | `phone` | шаблон `^\+?[0-9()\- ]{10,20}$`; нормализация +7 на сайте нужна |
-| `date` | `preferredDate` | формат ISO `YYYY-MM-DD`; прошедшая дата → 422 |
-| `children` | `guestCount` или `comment` | семантика не совпадает: сайт собирает число детей, FastAPI — гостей |
-| `package` | `packageId` | сайт передаёт **значение формы** (`wow-party`), FastAPI ждёт ID из `birthday_packages`. Нужна таблица соответствия |
-| `room` | — | **нет поля** в `BirthdayLeadCreate` |
-| `slot` | — | **нет поля** |
-| **филиал** | `branchId` **обязателен** | сайт сейчас не передаёт `branchId` (один филиал). Нужен фиксированный ID главного филиала |
-| `idempotencyKey` | `idempotencyKey` | 8–128 символов, сайт генерирует UUID — совместимо |
-| `consent` | — | в FastAPI нет поля согласия в заявке; согласие должно храниться отдельно (N13) |
-| `utm_*`, `page`, `referrer` | — | нет полей; либо в `comment`, либо отдельная таблица атрибуции |
+При `UNIFIED_FASTAPI_CRM_ENABLED=1` серверная страница `/requests` получает краткоживущий staff-токен через FastAPI bridge и читает заявки из `/api/v1/admin/leads`. FastAPI определяет роль и филиал по своей активной записи пользователя; роль и филиал из утверждения Next.js не принимаются как полномочия. При ошибке CRM страница показывает ошибку и не подменяет данные локальной базой.
 
-**Вывод:** контракт `POST /mobile/leads/birthday` **не покрывает** текущую форму без решений по `room/slot`, `branchId` и `packageId`. Переключать production на FastAPI нельзя до этих решений.
+В этом режиме страница только читает заявки. Изменение статуса и подтверждение брони отключены до реализации и проверки соответствующих действий через FastAPI. При выключенном флаге сохраняется старый Platform-поток.
 
----
+Для staff bridge используются `CRM_SERVICE_TOKEN` и отдельный `CRM_STAFF_ASSERTION_SECRET` на обеих сторонах. Оба значения должны совпадать с FastAPI `CRM_SERVICE_TOKEN` и `CRM_STAFF_ASSERTION_SECRET`. Сам staff должен существовать и быть активен в FastAPI. Ограничение источника `CRM_BRIDGE_ALLOWED_IPS` тоже должно соответствовать фактической сетевой топологии.
 
-## 3. Что реализовано в PR 1 (сайт)
+## Настройки сайта
 
-- `FASTAPI_FEATURES` — список включённых возможностей: `leads`, `otp`. По умолчанию пусто: клиент не создаётся, сетевых вызовов нет.
-- `FASTAPI_BASE_URL` — https или `http://localhost`. Иначе при включённой фиче — `not_configured` (не отправлять ПДн на неверный хост).
-- `FASTAPI_TIMEOUT_MS` — по умолчанию 5000, допустимо 500–10000.
-- Ошибки: `not_configured | disabled | timeout | unavailable | rejected | invalid_response`. Текст ошибки не содержит URL и не эхует телефон.
-- `rejected` несёт только `error.code` FastAPI.
-- Ответы 2xx проверяются по контракту (`parse*`). Несоответствие → `invalid_response`.
-- Заголовок `x-request-id` (входящий, если валидный; иначе UUID). `redirect: "error"`, `cache: "no-store"`.
-- Логи: одна строка `{event, requestId, route (шаблон), status, outcome, durationMs}`. Ни телефона, ни имени, ни токена.
-- `redact()` рекурсивно скрывает ключи персональных данных и секретов.
-- Тесты: 17 (конфигурация, флаги, отказ по http, disabled без сети, контракт успешных ответов, 4xx/5xx/сеть/таймаут, логи без ПДн, redaction, correlation).
+- `FASTAPI_BASE_URL` — API origin с префиксом `/api/v1`; только HTTPS вне localhost.
+- `FASTAPI_FEATURES=leads` — включает общий клиент.
+- `UNIFIED_FASTAPI_WEBSITE_LEADS=1` — отдельно включает запись формы сайта.
+- `UNIFIED_FASTAPI_WEBSITE_SERVICE_ID` и `UNIFIED_FASTAPI_WEBSITE_SERVICE_SECRET` — сервис и HMAC-ключ сайта.
+- `UNIFIED_FASTAPI_BRANCH_ID`, `UNIFIED_FASTAPI_PACKAGE_MAP`, `UNIFIED_FASTAPI_ROOM_MAP`, `UNIFIED_FASTAPI_SLOT_MAP` — явные соответствия ID.
+- `UNIFIED_FASTAPI_CONSENT_DOCUMENT_KIND` и `UNIFIED_FASTAPI_CONSENT_DOCUMENT_VERSION` — опубликованный документ согласия.
+- `UNIFIED_FASTAPI_CRM_ENABLED=1`, `FASTAPI_ADMIN_BASE_URL`, `CRM_SERVICE_TOKEN`, `CRM_STAFF_ASSERTION_SECRET` — отдельное read-only подключение CRM.
 
-**Не сделано в PR 1 (намеренно):** ни одна страница и ни один route сайта не вызывает клиент. Production-формы не меняются.
+На стороне FastAPI `WEBSITE_LEAD_SERVICE_SECRETS` задаёт JSON-словарь `service_id` → список текущего и предыдущего ключей для ротации; ключи минимум по 32 символа. Также нужны `REDIS_URL` и согласованные CRM bridge secrets. Секреты не добавлять в репозиторий.
 
----
+## Что ещё требуется до включения
 
-## 4. Вопросы к Codex (нужны решения до PR 2/3)
+- Подтвердить, что поле сайта «количество детей» можно сохранять как FastAPI `guestCount`, или согласовать отдельное поле.
+- Заполнить и сверить production ID филиала, пакетов, комнат и слотов с каталогами обеих систем.
+- Сверить тип и версию опубликованного документа согласия и подтвердить допустимость хранения персональных данных в целевой среде.
+- Настроить секреты, Redis и сетевое ограничение staff bridge в целевой среде.
+- Провести интеграционный прогон в согласованной staging-среде: повторная отправка, чтение заявки из CRM, недоступность FastAPI/Redis и staff без доступа.
+- Отдельно реализовать FastAPI-действия для статуса и бронирования, прежде чем включать их в CRM-интерфейсе.
 
-1. **Сервисная аутентификация сайта.** Как FastAPI узнаёт, что запрос пришёл с сервера сайта, а не из браузера? Предложение: отдельный секрет `SITE_SERVICE_TOKEN` (только на сервере сайта, не в браузере), заголовок `Authorization` и проверка в dependency. Нужно решение владельца по выпуску и ротации.
-2. **Публичный календарь.** Когда появится `GET /api/v1/public/availability?date=|month=` с ответами `free | busy | unavailable` по branch/room/slot без ПДн? Гарантии: fail-closed при ошибке БД, race tests на PostgreSQL.
-3. **Соответствие `room/slot/package/branch`.** Какой ID филиала и пакета используется? Нужна таблица соответствия с текущими значениями формы.
-4. **Корреляция.** Добавить middleware, который принимает `X-Request-ID` и возвращает его в ответе и в логах FastAPI.
-5. **Формат ошибок валидации.** Подтвердить, что все 4xx приходят в `{error:{code,message,details}}`, а не `detail`.
-6. **Вход по телефону (N08).** `otp_mock_mode` по умолчанию `True` в `settings.py:23`. Production SMS-провайдер не подключён. Пока не подтверждено — сайт держит вход выключенным (`otp` не включается в production).
-7. **Токены.** `verify-otp` отдаёт `access_token` и `refresh_token`. Предложение: сайт хранит их только в серверной сессии (HttpOnly, Secure, SameSite cookie → server-side session), в браузер не возвращает. Подтвердить, что FastAPI не требует CSRF для cookie-сессий, или что будет Bearer через BFF.
-8. **Согласие.** Где хранится факт согласия с документами при заявке с сайта (сейчас в `platform`, `consent_events`)? Нужна версия документа в запросе.
-
----
-
-## 5. Риски production
-
-- Пока `FASTAPI_FEATURES` пуст, риска для текущих форм нет. Риск возникает только при включении флага без решения пунктов 1, 2, 3 и 7.
-- При переключении `leads` без соответствия полей (§2) данные заявки будут потеряны или исказятся. Переключение только по shadow-сравнению, не dual write.
-- Отключение Next.js platform API — только после проверенной замены каждого flow (N15). В этом PR не трогается.
+До выполнения этих пунктов флаги остаются `0`, и переключение production не выполняется.

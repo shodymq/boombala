@@ -8,6 +8,7 @@ import { almatyToday, isValidDate } from "@/core/dates";
 import { attendanceSchemaReady } from "@/core/preflight";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { DatePicker } from "@/components/date-picker";
 import { AttendanceChart } from "./chart";
 import { confirmEntryAction, correctEntryAction, manualEntryAction, searchAction } from "./actions";
 
@@ -122,7 +123,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
       <nav aria-label="Дата" className="flex flex-wrap items-center gap-2">
         <Link href={`/attendance?date=${shift(date, -1)}`} className={btnGhost + " flex items-center"} aria-label="Предыдущий день">←</Link>
         <form method="get" className="flex items-center gap-2">
-          <input type="date" name="date" defaultValue={date} className={input + " w-auto"} aria-label="Дата" />
+          <DatePicker key={date} name="date" label="Дата" defaultValue={date} className="crm-date-picker-compact" allowClear={false} />
           <button type="submit" className={btn}>Показать</button>
         </form>
         <Link href={`/attendance?date=${shift(date, 1)}`} className={btnGhost + " flex items-center"} aria-label="Следующий день">→</Link>
