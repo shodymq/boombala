@@ -1,14 +1,14 @@
-# Independent review request: CRM calendar closeout (PR #44)
+# Independent review request: CRM release candidate (PR #50)
 
 Please review as someone who did not write this code. Goal: decide GO/NO-GO for the closed synthetic staging pilot, and say
 separately what blocks production. Do not change production, DNS, live services or payments; use the staging only.
 
 ## Identity of what to review
 
-- Repository: `shodymq/boombala`, branch `feat/crm-calendar-ui`, PR #44 (draft, stacked on #43; do not merge to `main`).
+- Repository: `shodymq/boombala`, branch `codex/crm-production-release-2026-11-15`, PR #50 (do not merge to `main` without the production deployment gate).
 - Commit: the SHA this file was committed with (see `git log -1 -- ops/staging/REVIEW-REQUEST.md`).
-- Backend: BoomBalaApp `main` at `6245ddc`, the FastAPI kernel the calendar calls.
-- Staging: VPS `boombala-claude`, Platform build from the same SHA, ports 3400 (CRM), 8100 (FastAPI), 55433 (PostgreSQL), all on 127.0.0.1.
+- Backend: BoomBalaApp `main` at `6edf03af91e86acae8d5566a092b7745041d6533`, the FastAPI kernel the calendar calls.
+- Staging target: VPS `boombala-claude`, Platform `7396c4e21c6576f23d844c1e0f9479f94d158f2f` and backend `6edf03af91e86acae8d5566a092b7745041d6533`, ports 3400 (CRM), 8100 (FastAPI), 55433 (PostgreSQL), all on 127.0.0.1. These SHAs are not evidence that staging has already been deployed.
 
 ## What changed in this round (verify each claim)
 
@@ -34,11 +34,10 @@ separately what blocks production. Do not change production, DNS, live services 
   `bookings/actions.ts` and `requests/actions.ts`; both have an early return when the flag is on.
 - Does the proxy's CSRF rule (`src/proxy.ts`) hold behind nginx, where `x-forwarded-host` is set? Check how it is set in production.
 
-## Evidence already produced (reproduce, do not trust)
+## Historical evidence (not evidence for this release candidate)
 
-- `ops/staging/evidence/closeout-0d9c340/` and `platform/e2e/artifacts/vps-final/`.
-- Unit tests: `npm test` in `platform/` (317+ tests).
-- Browser: `npm run e2e:crm-calendar`, `e2e:crm-security`, `e2e:crm-race`, `e2e:crm-lost-response` against a running staging.
+- Earlier evidence under `ops/staging/evidence/` and `platform/e2e/artifacts/` is intentionally excluded from this release PR and must not be reused as current proof.
+- Run `npm test` in `platform/` and the browser suites below against the exact target SHAs.
 
 ## Not in scope
 

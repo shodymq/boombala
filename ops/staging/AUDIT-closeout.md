@@ -1,7 +1,8 @@
-# Closeout audit: CRM calendar on PR #44
+# Historical closeout audit: CRM calendar on PR #44
 
-Scope: boombala PR #44 (`feat/crm-calendar-ui`) at the commit that adds this file; FastAPI BoomBalaApp `6245ddc`;
-the isolated staging on the VPS at Platform `0d9c340`. Synthetic data only.
+This is historical evidence from boombala PR #44 and is not proof for the current release candidate. The current candidate is
+boombala PR #50 at `7396c4e21c6576f23d844c1e0f9479f94d158f2f` with FastAPI main `6edf03af91e86acae8d5566a092b7745041d6533`.
+Repeat the checks against those exact SHAs. Synthetic data only.
 
 **Independence caveat.** This audit was written by the same agent that wrote the code. It is a self-audit with evidence, not an
 independent review. Before any production decision, have a reviewer who did not write the code repeat items 1–5 below.
