@@ -8,7 +8,7 @@ separately what blocks production. Do not change production, DNS, live services 
 - Repository: `shodymq/boombala`, branch `codex/crm-production-release-2026-11-15`, PR #50 (do not merge to `main` without the production deployment gate).
 - Commit: the SHA this file was committed with (see `git log -1 -- ops/staging/REVIEW-REQUEST.md`).
 - Backend: BoomBalaApp `main` at `6edf03af91e86acae8d5566a092b7745041d6533`, the FastAPI kernel the calendar calls.
-- Staging target: VPS `boombala-claude`, Platform `7396c4e21c6576f23d844c1e0f9479f94d158f2f` and backend `6edf03af91e86acae8d5566a092b7745041d6533`, ports 3400 (CRM), 8100 (FastAPI), 55433 (PostgreSQL), all on 127.0.0.1. These SHAs are not evidence that staging has already been deployed.
+- Staging target: VPS `boombala-claude`, Platform `ef988fb9b8c579719ee1b86d95dc7a5cc6435288` and backend `6edf03af91e86acae8d5566a092b7745041d6533`, ports 3400 (CRM), 8100 (FastAPI), 55433 (PostgreSQL), all on 127.0.0.1. These SHAs are not evidence that staging has already been deployed.
 
 ## What changed in this round (verify each claim)
 
