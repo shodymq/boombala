@@ -23,7 +23,7 @@ Use a date the operator gave you. Use only the test names the operator gives you
 
 **Manager A**
 1. Open the calendar: both branches are in the list; the grid loads; no error banner.
-2. Create a booking: Room A, 14:00, price 180 000 ₸, prepayment 20 000 ₸, cash. Expect the green line "Проверено по данным системы".
+2. Create a booking: Room A, 14:00, price 180 000 ₸, fixed manual prepayment 10 000 ₸, cash. Expect the green line "Проверено по данным системы".
    The booking card shows the prepayment "записана вручную ... (не онлайн-оплата)".
 3. Reload the page three times. The green line does not come back, and the booking stays once.
 4. Try to create another booking for the same phone at another time. Expect a message about an unconfirmed paid request
