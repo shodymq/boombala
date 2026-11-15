@@ -12,10 +12,10 @@
  * mistake in the first one does not expose the admin. Unknown paths and wrong hosts answer 404/421, never a login page.
  */
 
-export type PlatformRole = "admin" | "api" | "all";
+export type PlatformRole = "admin" | "api" | "all" | "invalid";
 
-export function parseRole(value: string | undefined): PlatformRole {
-  return value === "admin" || value === "api" ? value : "all";
+export function parseRole(value: string | undefined, failClosed = false): PlatformRole {
+  return value === "admin" || value === "api" ? value : failClosed ? "invalid" : "all";
 }
 
 export type PathClass = "health" | "public_api" | "admin";
@@ -95,6 +95,7 @@ export type ExposureDecision = { allow: true } | { allow: false; status: 404 | 4
 const normHost = (h: string) => h.trim().toLowerCase().replace(/\.$/, "");
 
 export function decideExposure(cfg: ExposureConfig, req: ExposureRequest): ExposureDecision {
+  if (cfg.role === "invalid") return { allow: false, status: 404, reason: "role" };
   if (cfg.allowedHosts.length > 0) {
     const host = req.host ? normHost(req.host) : "";
     if (!host || !cfg.allowedHosts.includes(host)) return { allow: false, status: 421, reason: "host" };
@@ -114,7 +115,11 @@ export function decideExposure(cfg: ExposureConfig, req: ExposureRequest): Expos
 }
 
 export function exposureFromEnv(env: Record<string, string | undefined> = process.env): ExposureConfig {
-  return { role: parseRole(env.PLATFORM_ROLE), allowedHosts: splitList(env.ALLOWED_HOSTS), adminCidrs: (env.ADMIN_ALLOWED_CIDRS ?? "").split(",").map((s) => s.trim()).filter(Boolean) };
+  return {
+    role: parseRole(env.PLATFORM_ROLE, isProductionEnvironment(env)),
+    allowedHosts: splitList(env.ALLOWED_HOSTS),
+    adminCidrs: (env.ADMIN_ALLOWED_CIDRS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  };
 }
 
 // ── The production profile: refuse to run misconfigured ───────────────────────────────────────────────────────
@@ -124,13 +129,15 @@ const ADMIN_ONLY = ["MFA_ENC_KEY", "CRON_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRA
 const API_ONLY = ["PLATFORM_INTAKE_TOKEN", "PLATFORM_IP_PEPPER"] as const;
 
 /**
- * Problems of an environment that claims to be `kz-production`. Empty list = acceptable. Any other profile has no
- * requirements (development, tests, Preview). The app answers 503 to every request while the list is not empty
- * (fail closed) and logs the codes, never values.
+ * Production is identified by the explicit profile or by the runtime's production marker. Preview and local
+ * development remain intentionally isolated/permissive. A production process with a missing, misspelled, or
+ * otherwise unknown profile answers 503 to every request rather than falling back to the shared `all` role.
  */
 export function profileProblems(env: Record<string, string | undefined> = process.env): string[] {
-  if (env.PLATFORM_PROFILE !== "kz-production") return [];
+  const production = isProductionEnvironment(env);
+  if (!production && env.PLATFORM_PROFILE !== "kz-production") return [];
   const p: string[] = [];
+  if (production && env.PLATFORM_PROFILE !== "kz-production") p.push("production_profile_required");
   const role = env.PLATFORM_ROLE;
   if (role !== "admin" && role !== "api") p.push("role_must_be_admin_or_api");
   if (env.PLATFORM_HTTPS !== "1") p.push("https_required");
@@ -154,4 +161,9 @@ export function profileProblems(env: Record<string, string | undefined> = proces
     if (env.ADMIN_ALLOWED_CIDRS) p.push("api_must_not_have_admin_cidrs");
   }
   return p;
+}
+
+function isProductionEnvironment(env: Record<string, string | undefined>): boolean {
+  if (env.PLATFORM_PROFILE === "kz-production" || env.VERCEL_ENV === "production") return true;
+  return env.NODE_ENV === "production" && env.VERCEL_ENV !== "preview" && env.VERCEL_ENV !== "development";
 }
