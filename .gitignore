@@ -45,3 +45,7 @@ next-env.d.ts
 local.env
 env.local
 /dist
+
+# Staging operator files: never commit
+ops/staging/staging.env
+ops/staging/*.local.env
