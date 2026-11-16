@@ -3,7 +3,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { almatyToday } from "../src/core/dates.ts";
 import {
-  ensureStaging, googleSheetsClient, loadCatalog, loadCrmSnapshot, normalizeRow, readSheet, reconcile, stageRows, summarize,
+  ensureStaging, googleSheetsClient, parseCsv, readCsv, loadCatalog, loadCrmSnapshot, normalizeRow, readSheet, reconcile, stageRows, summarize,
   type CrmSnapshot, type RawRow, type SheetsClient,
 } from "../src/core/sheets-import/index.ts";
 import { seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
@@ -20,13 +20,16 @@ function raw(over: Partial<RawRow> = {}): RawRow {
 const run = (rows: RawRow[], crm = EMPTY_CRM) => reconcile(rows.map((r, i) => normalizeRow(r, { spreadsheetId: SID, sheetId: 1, rowNumber: i + 2 }, CATALOG)), crm, TODAY);
 
 describe("sheets import: normalisation", () => {
-  it("keeps 14:30, 16:40 and 17:30 exactly and never confirms them", () => {
-    for (const t of ["14:30", "16:40", "17:30"]) {
+  it("accepts any valid start minute exactly as written: 13:15, 13:30, 13:45, 14:30, 16:40, 17:30", () => {
+    for (const t of ["13:00", "13:15", "13:30", "13:45", "14:30", "16:40", "17:30"]) {
       const [r] = run([raw({ time: t })]);
       assert.equal(r.time, t);
-      assert.ok(r.reasons.includes("time_not_whole_hour"));
-      assert.equal(r.status, "NEEDS_REVIEW");
+      assert.ok(!r.reasons.some((x) => (x as string).includes("whole_hour")));
+      assert.equal(r.status, "CANDIDATE", `${t} must not be pushed to review because of its minutes`);
     }
+  });
+  it("still rejects impossible times", () => {
+    for (const t of ["25:00", "13:60", "abc", ""]) assert.equal(run([raw({ time: t })])[0].status, "NEEDS_REVIEW");
   });
   it("does not shift the clock: venue wall-clock semantics are recorded as an unconfirmed assumption", () => {
     const [r] = run([raw({ time: "10:00" })]);
@@ -81,6 +84,25 @@ describe("sheets import: reconciliation", () => {
     const ok = run([raw({ time: "10:00" }), raw({ time: "14:00", phone: "8 707 999 88 77", client: "Другой" })]);
     assert.ok(ok.every((r) => !r.reasons.includes("overlap_in_sheet")), "back-to-back four-hour events do not overlap");
   });
+  it("adjacent bookings to the minute are allowed, one minute of overlap is not", () => {
+    const other = { phone: "8 707 999 88 77", client: "Другой" };
+    const adj = run([raw({ time: "13:15" }), raw({ time: "17:15", ...other })]);
+    assert.ok(adj.every((r) => r.status === "CANDIDATE"));
+    const ov = run([raw({ time: "13:15" }), raw({ time: "17:14", ...other })]);
+    assert.ok(ov.every((r) => r.reasons.includes("overlap_in_sheet") && r.status === "NEEDS_REVIEW"));
+    const night = run([raw({ time: "13:30" }), raw({ time: "16:40", ...other })]);
+    assert.ok(night.every((r) => r.reasons.includes("overlap_in_sheet")));
+    const otherRoom = run([raw({ time: "13:30" }), raw({ time: "16:40", room: "Джунгли", ...other })]);
+    assert.ok(otherRoom.every((r) => r.status === "CANDIDATE"), "different rooms never conflict");
+  });
+  it("checks branch working hours only when they are given; the four-hour window must fit", () => {
+    const hours = { workingHours: { openMin: 10 * 60, closeMin: 23 * 60 } };
+    const rows = [raw({ time: "19:30" }), raw({ time: "19:00", room: "Джунгли", phone: "8 707 999 88 77", client: "Другой" }), raw({ time: "09:45", room: "Джунгли", phone: "8 707 999 88 66", client: "Третий" })]
+      .map((r, i) => normalizeRow(r, { spreadsheetId: SID, sheetId: 1, rowNumber: i + 2 }, CATALOG));
+    reconcile(rows, EMPTY_CRM, TODAY, hours);
+    assert.deepEqual(rows.map((r) => r.reasons.includes("outside_working_hours")), [true, false, true]);
+    assert.equal(run([raw({ time: "19:30" })])[0].status, "CANDIDATE", "no hours given: not checked");
+  });
   it("matches existing CRM records and reports conflicts instead of overwriting", () => {
     const crm: CrmSnapshot = {
       leads: [{ id: "l1", date: "2026-11-20", phoneE164: "+77071112233", nameKey: "тест клиент", children: 10, packageId: "pkg-1", roomId: null, status: "new" }],
@@ -118,6 +140,22 @@ describe("sheets import: reader", () => {
     assert.equal(r.rows[1].source.rowNumber, 6);
     assert.equal(r.spreadsheetTimeZone, "Europe/Moscow");
   });
+  it("CSV goes through the same normalizer and reconciliation as the API and yields identical keys", async () => {
+    const csv = "\uFEFF" + [HEADER.join(";"), "20.11.2026;13:15;Стандарт;;Космос;\"К, Клиент\";8 707 111 22 33;Р;7;20000;10;5", ";;;;;;;;;;;", "21.11.2026;16:40;Стандарт;;Джунгли;К2;8 707 111 22 44;;;;;"].join("\r\n");
+    const c = readCsv(csv, { spreadsheetId: SID, sheetId: 77 });
+    assert.equal(c.rows.length, 2);
+    assert.equal(c.blankRows, 1);
+    const viaCsv = reconcile(c.rows.map((r) => normalizeRow(r.raw, r.source, CATALOG)), EMPTY_CRM, TODAY);
+    assert.deepEqual(viaCsv.map((r) => r.time), ["13:15", "16:40"]);
+    assert.ok(viaCsv.every((r) => r.status === "CANDIDATE"));
+    assert.equal(viaCsv[0].customerName, "К, Клиент");
+    const api = await readSheet({ getMeta: async () => ({ timeZone: "Europe/Moscow", sheets: [{ sheetId: 77, title: "x", rowCount: 9 }] }), getValues: async () => parseCsv(csv) }, SID);
+    const viaApi = reconcile(api.rows.map((r) => normalizeRow(r.raw, r.source, CATALOG)), EMPTY_CRM, TODAY);
+    assert.deepEqual(viaApi.map((r) => [r.sourceKey, r.fingerprint]), viaCsv.map((r) => [r.sourceKey, r.fingerprint]));
+  });
+  it("a CSV without the header fails without echoing any cell", () => {
+    assert.throws(() => readCsv("secret,+77070000000\nx,y", { spreadsheetId: SID, sheetId: 1 }), (e: Error) => e.message === "header_not_found");
+  });
   it("uses the read-only scope, sends only a bearer token and never writes", async () => {
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const calls: Array<{ url: string; method: string; body?: string }> = [];
@@ -153,8 +191,8 @@ describe("sheets import: staging against a real PostgreSQL", () => {
     const mk = (over: Partial<RawRow>, rowNumber: number) => normalizeRow(raw({ room: roomName, package: pkgName, ...over }), { spreadsheetId: SID, sheetId: 1, rowNumber }, catalog);
     const crm = await loadCrmSnapshot(db.pool);
     const batch = (rows: ReturnType<typeof mk>[]) => reconcile(rows, crm, TODAY);
-    const a = (n = 2) => mk({ date: "20.11.2026", time: "10:00" }, n);
-    const b = (n = 3, pre = "5 000") => mk({ date: "21.11.2026", time: "10:00", phone: "8 707 222 33 44", client: "Второй", prepayment: pre }, n);
+    const a = (n = 2) => mk({ date: "20.11.2026", time: "13:15" }, n);
+    const b = (n = 3, pre = "5 000") => mk({ date: "21.11.2026", time: "16:40", phone: "8 707 222 33 44", client: "Второй", prepayment: pre }, n);
 
     const first = await stageRows(db.pool, SID, batch([a(), b()]));
     assert.deepEqual([first.inserted, first.updated, first.unchanged], [2, 0, 0]);

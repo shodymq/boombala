@@ -22,7 +22,7 @@ export type ImportStatus =
   | "IGNORED_EMPTY"; // no business content
 
 export type Reason =
-  | "date_unparseable" | "date_missing" | "time_unparseable" | "time_missing" | "time_not_whole_hour"
+  | "date_unparseable" | "date_missing" | "time_unparseable" | "time_missing" | "outside_working_hours"
   | "room_unknown" | "room_ambiguous" | "room_missing" | "package_unknown" | "package_missing"
   | "phone_invalid" | "phone_missing" | "client_missing"
   | "prepayment_unverified" | "no_prepayment" | "prepayment_unparseable"
@@ -37,7 +37,7 @@ export interface NormalizedRow {
   /** Hash of every normalized value: changes when the manager edits the row. */
   fingerprint: string;
   date: string | null; // YYYY-MM-DD
-  /** Venue wall-clock HH:MM exactly as written (never rounded, never timezone-shifted). */
+  /** Venue wall-clock HH:MM exactly as written (any valid minute; never rounded, never timezone-shifted). */
   time: string | null;
   roomId: string | null;
   roomRaw: string;

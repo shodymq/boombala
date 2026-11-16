@@ -92,8 +92,7 @@ export function normalizeRow(raw: RawRow, source: SourceRef, catalog: Catalog): 
   if (!date) reasons.push((raw.date ?? "").trim() ? "date_unparseable" : "date_missing");
   const time = parseTime(raw.time ?? "");
   if (!time) reasons.push((raw.time ?? "").trim() ? "time_unparseable" : "time_missing");
-  // Production reservations are exactly four hours and start on a whole hour. Half-hour starts are kept verbatim.
-  if (time && !time.endsWith(":00")) reasons.push("time_not_whole_hour");
+  // Any valid HH:MM start is allowed (13:15, 16:40 ...). Duration is fixed at four hours with no buffer; see reconcile.ts.
 
   const room = resolveByName(raw.room ?? "", catalog.rooms);
   const roomId = typeof room === "object" ? room.id : null;
