@@ -1,40 +1,13 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createPool, type Pool } from "../src/core/db.ts";
-import { migrate } from "../src/core/migrate.ts";
 import { checkReadAccess, detectSchemaVersion, loadCatalog, loadCrmSnapshot, REQUIRED_COLUMNS } from "../src/core/sheets-import/index.ts";
-import { MIGRATIONS_DIR, makeUser, seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
+import { makeUser, type TestDb } from "./helpers/db.ts";
+import { dbAt, seedBooking, FUTURE } from "./helpers/sheets-db.ts";
 
 const GRANT_SQL = readFileSync(join(import.meta.dirname, "..", "scripts", "sql", "sheets-ro-grant.sql"), "utf8");
-const ROLE_SCRIPT = join(import.meta.dirname, "..", "scripts", "sheets-ro-role.sh");
-const FUTURE = "2099-06-15";
-
-/** A test database with migrations up to (and including) `upTo`; 14 = what production runs today, 15 = after the kernel change. */
-async function dbAt(upTo: number): Promise<TestDb> {
-  const db = await startTestDb({ migrate: false });
-  const dir = mkdtempSync(join(tmpdir(), "bbmig-"));
-  for (const f of readdirSync(MIGRATIONS_DIR)) if (/^\d+_/.test(f) && Number(f.slice(0, 3)) <= upTo) copyFileSync(join(MIGRATIONS_DIR, f), join(dir, f));
-  await migrate(db.pool, dir);
-  rmSync(dir, { recursive: true, force: true });
-  await seedFromSite(db.pool);
-  return db;
-}
-
-async function seedBooking(pool: Pool, opts: { slotId: number; phone: string; room?: string }) {
-  const user = await makeUser(pool, "owner", `o${opts.slotId}${opts.phone.slice(-3)}@example.test`);
-  const c = await pool.query<{ id: string }>(
-    "INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ('Тест', 'тест', $1, 'manual') RETURNING id", [opts.phone]);
-  const room = opts.room ?? "magic-room";
-  const pkg = (await pool.query<{ id: string }>("SELECT id FROM bb.packages ORDER BY sort_order LIMIT 1")).rows[0].id;
-  const r = await pool.query<{ id: string }>(
-    `INSERT INTO bb.slot_reservations (kind, slot_date, slot_id, room_id, contact_id, package_id, children, price_kzt, price_source, created_by)
-     VALUES ('booking', $1, $2, $3, $4, $5, 8, 1000, 'base', $6) RETURNING id`, [FUTURE, opts.slotId, room, c.rows[0].id, pkg, user.id]);
-  return r.rows[0].id;
-}
 
 /** The read-only role is created the way the VPS script creates it (role first, grants second), then used over a real connection. */
 async function readOnlyPool(db: TestDb): Promise<Pool> {
@@ -172,95 +145,3 @@ describe("post-015 keeps exact minutes", () => {
   });
 });
 
-describe("sheets-ro-role.sh (create / status / revoke) on a real cluster", { skip: !existsSync("/opt/homebrew/bin/psql") && !process.env.PSQL_BIN ? "psql not installed" : false }, () => {
-  let db: TestDb, home: string;
-  before(async () => { db = await dbAt(14); home = mkdtempSync(join(tmpdir(), "bbro-")); });
-  after(async () => { await db?.stop(); rmSync(home, { recursive: true, force: true }); });
-
-  const run = (cmd: string) => {
-    const env = { ...process.env, PSQL_ADMIN: `psql -X -q -v ON_ERROR_STOP=1 ${db.url}`, URL_FILE: join(home, "ro.url"), TUNNEL_PORT: new URL(db.url).port, DB_NAME: "postgres", TTL_HOURS: "24" };
-    return execFileSync("bash", [ROLE_SCRIPT, cmd], { env, encoding: "utf8" });
-  };
-
-  it("creates the role, keeps the URL only in a 600 file, never prints the password, and the URL really connects", async () => {
-    const out = run("create");
-    const file = join(home, "ro.url");
-    const url = readFileSync(file, "utf8").trim();
-    const pw = new URL(url).password;
-    assert.ok(pw.length >= 32);
-    assert.ok(!out.includes(pw), "password must not be printed");
-    assert.equal((statSync(file).mode & 0o777).toString(8), "600");
-    assert.ok(!(await db.pool.query("SELECT 1 FROM pg_roles WHERE rolname='bb_sheets_ro' AND rolvaliduntil IS NULL")).rowCount, "role expires");
-    const pool = createPool(url.replace(/@127\.0\.0\.1:\d+\//, `@127.0.0.1:${new URL(db.url).port}/`), { max: 1 });
-    try { assert.equal((await checkReadAccess(pool)).ok, true); } finally { await pool.end(); }
-    assert.throws(() => run("create"), /already exists/);
-  });
-
-  it("revoke drops the role and shreds the file", async () => {
-    run("revoke");
-    assert.equal(existsSync(join(home, "ro.url")), false);
-    assert.equal((await db.pool.query("SELECT 1 FROM pg_roles WHERE rolname='bb_sheets_ro'")).rowCount, 0);
-    assert.match(run("status"), /absent/);
-    assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM pg_policies WHERE policyname = 'sheets_ro_select'")).rows[0].n, 0, "policies are removed with the role");
-  });
-});
-
-describe("sheets-vps-run.sh: everything on the VPS, no tunnel", { skip: !existsSync("/opt/homebrew/bin/psql") && !process.env.PSQL_BIN ? "psql not installed" : false }, () => {
-  let db: TestDb, home: string;
-  const PHONE_DIGITS = "7071234567";
-  const csv = () => {
-    const f = join(home, "b.csv");
-    writeFileSync(f, ["Дата,Время,Пакет,Аниматор,Комната,Клиент,Телефон,Ребенок,Возраст,Предоплата,Количество детей,Количество взрослых",
-      `20.11.2099,16:40,x,А,y,Секретный Клиент,8 ${PHONE_DIGITS.slice(0, 3)} ${PHONE_DIGITS.slice(3)},Малыш,7,10к,10,5`].join("\n"));
-    return f;
-  };
-  const adminCmd = () => `psql -X -q -v ON_ERROR_STOP=1 ${db.url}`;
-  const port = () => new URL(db.url).port;
-  const run = (args: string[]) => {
-    const env = { ...process.env, HOME: home, REPORT_DIR: home, PSQL_ADMIN: adminCmd(), DB_NAME: "postgres", DB_PORT: port() };
-    try { return { code: 0, out: execFileSync("bash", [join(import.meta.dirname, "..", "scripts", "sheets-vps-run.sh"), csv(), ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), err: "" }; }
-    catch (e) { const x = e as { status: number; stdout: string; stderr: string }; return { code: x.status, out: x.stdout ?? "", err: x.stderr ?? "" }; }
-  };
-  before(async () => { db = await dbAt(14); home = mkdtempSync(join(tmpdir(), "bbvps-")); await seedBooking(db.pool, { slotId: 2, phone: "+77075550000" }); });
-  after(async () => { await db?.stop(); rmSync(home, { recursive: true, force: true }); });
-
-  it("a count mismatch stops before staging, and the temporary role is still revoked", async () => {
-    const r = run(["--expect-leads", "48", "--expect-reservations", "0"]);
-    assert.equal(r.code, 3);
-    assert.match(r.err, /production counts: leads=0 activeReservations=1/);
-    assert.match(r.err, /differ from the expected/);
-    assert.equal((await db.pool.query("SELECT 1 FROM pg_roles WHERE rolname='bb_sheets_ro'")).rowCount, 0, "role revoked after a failed run");
-    assert.equal(readdirSync(home).filter((f) => f.startsWith("sheets-report")).length, 0);
-  });
-
-  it("with the right counts: reconciles, stages, prints no personal data, leaves no role, keeps a 600 report", async () => {
-    const r = run(["--expect-leads", "0", "--expect-reservations", "1"]);
-    assert.equal(r.code, 0, r.err);
-    const all = r.out + r.err;
-    for (const secret of ["Секретный", "Малыш", PHONE_DIGITS, "707 123"]) assert.ok(!all.includes(secret), `output must not contain ${secret}`);
-    assert.match(r.out, /"crmSchema": "pre-015"/);
-    assert.match(r.out, /"inserted": 1/);
-    assert.equal((await db.pool.query("SELECT 1 FROM pg_roles WHERE rolname='bb_sheets_ro'")).rowCount, 0);
-    const report = readdirSync(home).find((f) => f.startsWith("sheets-report"))!;
-    assert.equal((statSync(join(home, report)).mode & 0o777).toString(8), "600");
-    assert.equal(readdirSync(home).some((f) => f === "ro.url"), false);
-    assert.match(readFileSync(join(home, report), "utf8"), /16:40/, "time kept exactly");
-    // production untouched: still exactly the one booking, no payment-ish writes, nothing new in bb
-    assert.equal((await db.pool.query("SELECT count(*)::int AS n FROM bb.slot_reservations")).rows[0].n, 1);
-  });
-
-  it("staging is a separate database whose role cannot read bb; a rerun inserts nothing", async () => {
-    const stageUrl = readFileSync(join(home, ".bb_sheets_stage.url"), "utf8").trim();
-    assert.match(stageUrl, /\/bb_sheet_staging$/);
-    assert.notEqual(new URL(stageUrl).pathname, new URL(db.url).pathname);
-    const sp = createPool(stageUrl, { max: 1 });
-    try {
-      assert.equal((await sp.query("SELECT count(*)::int AS n FROM sheet_import.rows")).rows[0].n, 1);
-      await assert.rejects(sp.query("SELECT 1 FROM bb.rooms"), /does not exist|permission denied/);
-    } finally { await sp.end(); }
-    const again = run(["--expect-leads", "0", "--expect-reservations", "1"]);
-    assert.equal(again.code, 0, again.err);
-    assert.match(again.out, /"inserted": 0/);
-    assert.match(again.out, /"unchanged": 1/);
-  });
-});

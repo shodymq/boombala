@@ -4,7 +4,7 @@ import type { CrmSnapshot, NormalizedRow, Reason } from "./types.ts";
 const HARD: ReadonlySet<Reason> = new Set<Reason>([
   "date_unparseable", "date_missing", "time_unparseable", "time_missing", "outside_working_hours", "room_unknown", "room_ambiguous",
   "room_missing", "package_unknown", "package_missing", "phone_invalid", "phone_missing", "client_missing", "prepayment_unparseable",
-  "duplicate_in_sheet", "overlap_in_sheet", "overlap_with_crm", "matches_crm_conflicting", "children_unparseable", "unknown_status_text",
+  "duplicate_in_sheet", "overlap_in_sheet", "overlap_with_crm", "overlap_with_crm_block", "matches_crm_conflicting", "children_unparseable", "unknown_status_text",
 ]);
 
 /** Fixed duration, zero buffer: an event starting exactly when another ends is adjacent, not overlapping. */
@@ -68,6 +68,11 @@ export function reconcile(rows: NormalizedRow[], crm: CrmSnapshot, today: string
         if (res.children != null && r.children != null && res.children !== r.children) add(r, "matches_crm_conflicting");
         if (res.packageId && r.packageId && res.packageId !== r.packageId) add(r, "matches_crm_conflicting");
       } else if (cs < rs + FOUR_HOURS && rs < cs + FOUR_HOURS) add(r, "overlap_with_crm");
+    }
+    for (const block of crm.blocks) {
+      if (block.roomId !== r.roomId) continue;
+      const bs = minutes(block.date, block.startTime);
+      if (bs < rs + FOUR_HOURS && rs < bs + FOUR_HOURS) add(r, "overlap_with_crm_block");
     }
     for (const lead of crm.leads) {
       if (lead.date !== r.date || !r.phoneE164 || lead.phoneE164 !== r.phoneE164) continue;

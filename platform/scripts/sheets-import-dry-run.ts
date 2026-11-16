@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createPool } from "../src/core/db.ts";
 import { almatyToday } from "../src/core/dates.ts";
@@ -11,6 +12,7 @@ import { checkReadAccess, ensureStaging, loadCatalog, loadCrmSnapshot, stageRows
 // Dry run only. Input: Sheets API (GOOGLE_SERVICE_ACCOUNT_KEY_FILE) or a local CSV export (--csv file).
 // READ_URL: read-only access to the database to compare with (SELECT only, wrapped in a READ ONLY transaction).
 // STAGING_URL: a scratch database for sheet_import.rows; it must differ from READ_URL.
+// --allow-empty-crm yes: only for a genuinely empty scratch database.
 // --allow-privileged-read-url yes: LOCAL SCRATCH DATABASES ONLY (the test cluster user is a superuser). Never for production.
 // stdout: aggregate counts only (no names, phones, amounts). Row-level data only in --report-file (local, mode 600).
 const arg = (n: string) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -22,7 +24,9 @@ const fromFile = (f?: string) => (f ? readFileSync(f, "utf8").trim() : undefined
 const readUrl = process.env.READ_URL ?? fromFile(process.env.READ_URL_FILE), stagingUrl = process.env.STAGING_URL ?? fromFile(process.env.STAGING_URL_FILE);
 // Explicit production count check: the run stops before staging when the CRM does not hold what the owner expects.
 const expectLeads = arg("expect-leads") === undefined ? undefined : Number(arg("expect-leads"));
-const expectReservations = arg("expect-reservations") === undefined ? undefined : Number(arg("expect-reservations"));
+const expectBookings = arg("expect-bookings") === undefined ? undefined : Number(arg("expect-bookings")); // ACTIVE CONFIRMED BOOKINGS only
+const expectBlocks = arg("expect-blocks") === undefined ? undefined : Number(arg("expect-blocks")); // active manual blocks, counted separately
+const allowEmptyCrm = arg("allow-empty-crm") === "yes";
 if (!spreadsheetId || !readUrl || (!csvPath && !keyPath)) { console.error("need --spreadsheet/SHEETS_SPREADSHEET_ID, READ_URL (or READ_URL_FILE) and either --csv <file> or GOOGLE_SERVICE_ACCOUNT_KEY_FILE"); process.exit(2); }
 if (stagingUrl && stagingUrl === readUrl) { console.error("STAGING_URL must differ from READ_URL"); process.exit(2); }
 const hours = arg("hours") ? parseWorkingHours(arg("hours")) : null;
@@ -45,15 +49,21 @@ try {
     catalog = await loadCatalog(ro);
     crm = await loadCrmSnapshot(ro, access.schema);
   } finally { await ro.query("ROLLBACK").catch(() => {}); ro.release(); }
-  const crmCounts = { leads: crm.leads.length, activeReservations: crm.reservations.length };
-  console.error(`production counts: leads=${crmCounts.leads} activeReservations=${crmCounts.activeReservations}`); // numbers only
-  if ((expectLeads !== undefined && expectLeads !== crmCounts.leads) || (expectReservations !== undefined && expectReservations !== crmCounts.activeReservations)) {
-    console.error(`production counts differ from the expected leads=${expectLeads ?? "-"} activeReservations=${expectReservations ?? "-"}: stopping before staging. Check which is right, then rerun with the new numbers.`);
+  const crmCounts = { leads: crm.leads.length, activeBookings: crm.reservations.length, activeBlocks: crm.blocks.length };
+  console.error(`production counts: leads=${crmCounts.leads} activeBookings=${crmCounts.activeBookings} activeBlocks=${crmCounts.activeBlocks}`); // numbers only
+  const differs = (want: number | undefined, got: number) => want !== undefined && want !== got;
+  if (differs(expectLeads, crmCounts.leads) || differs(expectBookings, crmCounts.activeBookings) || differs(expectBlocks, crmCounts.activeBlocks)) {
+    console.error(`production counts differ from the expected leads=${expectLeads ?? "-"} activeBookings=${expectBookings ?? "-"} activeBlocks=${expectBlocks ?? "-"}: stopping before staging. Do not just rerun with the new numbers: first confirm independently (new real requests are normal, an empty or shrunken CRM is not).`);
     process.exit(3);
+  }
+  if (crmCounts.leads === 0 && !allowEmptyCrm) {
+    // Zero rows must never be reported as "zero matches": it usually means the role sees nothing.
+    console.error("the CRM snapshot has no leads at all: refusing to reconcile against an apparently empty CRM (pass --allow-empty-crm yes only for a genuinely empty scratch database)");
+    process.exit(4);
   }
   const today = almatyToday();
   const rows = reconcile(sheet.rows.map((r) => normalizeRow(r.raw, r.source, catalog)), crm, today, hours ? { workingHours: hours } : {});
-  const out: Record<string, unknown> = { input: csvPath ? "csv" : "api", spreadsheetTimeZone: sheet.spreadsheetTimeZone, crmSchema: access.schema, productionCounts: crmCounts, readRoleOverbroadTables: access.overbroadRead.length, workingHoursChecked: Boolean(hours), blankRowsIgnored: sheet.blankRows, ...summarize(rows, today) };
+  const out: Record<string, unknown> = { input: csvPath ? "csv" : "api", spreadsheetTimeZone: sheet.spreadsheetTimeZone, crmSchema: access.schema, productionCounts: crmCounts, source: csvPath ? { csvSha256: createHash("sha256").update(readFileSync(csvPath)).digest("hex"), sheetRows: sheet.rows.length } : { sheetRows: sheet.rows.length }, readRoleOverbroadTables: access.overbroadRead.length, workingHoursChecked: Boolean(hours), blankRowsIgnored: sheet.blankRows, ...summarize(rows, today) };
   if (stagingUrl) {
     const staging = createPool(stagingUrl, { max: 1 });
     try { await ensureStaging(staging); out.staging = await stageRows(staging, spreadsheetId, rows); } finally { await staging.end(); }

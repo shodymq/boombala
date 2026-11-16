@@ -144,18 +144,19 @@ export async function loadCrmSnapshot(db: Queryable, version?: SchemaVersion): P
     `SELECT l.id, to_char(l.requested_date,'YYYY-MM-DD') AS d, c.phone_e164 AS phone, c.name_key, l.children, l.package_id, l.room_id, l.status
        FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id`);
   const reservationSql = v === "post-015"
-    ? `SELECT r.id, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','YYYY-MM-DD') AS d, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','HH24:MI') AS t,
+    ? `SELECT r.id, r.kind, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','YYYY-MM-DD') AS d, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','HH24:MI') AS t,
               r.room_id, c.phone_e164 AS phone, r.children, r.package_id
          FROM bb.slot_reservations r LEFT JOIN bb.contacts c ON c.id = r.contact_id
-        WHERE r.released_at IS NULL AND r.kind = 'booking'`
-    : `SELECT r.id, to_char(r.slot_date,'YYYY-MM-DD') AS d, to_char(ts.starts_at,'HH24:MI') AS t,
+        WHERE r.released_at IS NULL AND r.kind IN ('booking', 'block')`
+    : `SELECT r.id, r.kind, to_char(r.slot_date,'YYYY-MM-DD') AS d, to_char(ts.starts_at,'HH24:MI') AS t,
               r.room_id, c.phone_e164 AS phone, r.children, r.package_id
          FROM bb.slot_reservations r JOIN bb.time_slots ts ON ts.id = r.slot_id LEFT JOIN bb.contacts c ON c.id = r.contact_id
-        WHERE r.released_at IS NULL AND r.kind = 'booking'`;
-  const res = await db.query<{ id: string; d: string; t: string; room_id: string; phone: string | null; children: number | null; package_id: string | null }>(reservationSql);
+        WHERE r.released_at IS NULL AND r.kind IN ('booking', 'block')`;
+  const res = await db.query<{ id: string; kind: string; d: string; t: string; room_id: string; phone: string | null; children: number | null; package_id: string | null }>(reservationSql);
   return {
     leads: leads.rows.map((l) => ({ id: l.id, date: l.d, phoneE164: l.phone, nameKey: l.name_key ?? nameKey(""), children: l.children, packageId: l.package_id, roomId: l.room_id, status: l.status })),
-    reservations: res.rows.map((r) => ({ id: r.id, date: r.d, startTime: r.t, roomId: r.room_id, phoneE164: r.phone, children: r.children, packageId: r.package_id })),
+    reservations: res.rows.filter((r) => r.kind === "booking").map((r) => ({ id: r.id, date: r.d, startTime: r.t, roomId: r.room_id, phoneE164: r.phone, children: r.children, packageId: r.package_id })),
+    blocks: res.rows.filter((r) => r.kind === "block").map((r) => ({ id: r.id, date: r.d, startTime: r.t, roomId: r.room_id })),
   };
 }
 
