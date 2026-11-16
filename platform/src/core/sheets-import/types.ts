@@ -27,7 +27,7 @@ export type Reason =
   | "phone_invalid" | "phone_missing" | "client_missing"
   | "prepayment_unverified" | "no_prepayment" | "prepayment_unparseable"
   | "duplicate_in_sheet" | "overlap_in_sheet" | "overlap_with_crm" | "matches_crm_conflicting"
-  | "children_unparseable" | "age_unparseable" | "past_event" | "unknown_status_text"
+  | "children_unparseable" | "age_unparseable" | "count_approximate" | "past_event" | "unknown_status_text"
   | "no_confirmation_flag" | "time_semantics_unconfirmed";
 
 export interface NormalizedRow {
