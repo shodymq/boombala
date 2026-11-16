@@ -54,9 +54,11 @@ async function afterAction(page) {
 }
 
 async function createBooking(page, { room, start, name, price, prepay, phone }) {
-  const form = page.locator('form:has(input[name="customerName"])');
+  // The booking form is a drawer opened by the "Добавить бронь" address; the start time is a free HH:MM input.
+  await openCalendar(page, "&new=1");
+  const form = page.locator("form[aria-label='Новая бронь']");
   await form.locator('select[name="roomId"]').selectOption({ label: room });
-  await form.locator('select[name="startTime"]').selectOption(start);
+  await form.locator('input[name="startTime"]').fill(start);
   await form.locator('input[name="customerName"]').fill(name);
   await form.locator('input[name="phone"]').fill(phone);
   await form.locator('input[name="agreedPriceKzt"]').fill(String(price));
@@ -96,14 +98,14 @@ try {
   await login(pageB, "manager-b@staging.boombala.example.com");
   await openCalendar(pageB);
   const bodyB = await pageB.locator("main").innerText();
-  check("B sees A's booking with the manual prepayment label", bodyB.includes("Тест Клиент E2E A") && bodyB.includes("записана вручную"));
+  check("B sees A's booking with the manual prepayment label", bodyB.includes("Тест Клиент E2E A") && plain(bodyB).includes("предоплата 10 000"));
   await shot(pageB, "03-b-sees-a-booking");
 
   // 4. B tries 16:00–20:00 in the same room: refused with time_conflict, nothing new is written.
-  const beforeCount = (await pageB.locator('[role="listitem"][data-reservation]').count());
+  const beforeCount = (await pageB.locator('a[data-reservation]').count());
   await createBooking(pageB, { room: ROOM_A, start: "16:00", name: "Тест Клиент Конфликт", price: 150000, prepay: 10000, phone: phoneB });
   check("B: 16:00–20:00 refused with time_conflict", (await alertWith(pageB, "Комната занята").count()) === 1);
-  const afterCount = await pageB.locator('[role="listitem"][data-reservation]').count();
+  const afterCount = await pageB.locator('a[data-reservation]').count();
   check("B: conflicting attempt wrote no second reservation", afterCount === beforeCount);
   await shot(pageB, "04-b-conflict-409");
 
@@ -124,7 +126,7 @@ try {
   await openCalendar(pageB, `&request=${requestId}`);
   const form = pageB.locator('form:has(input[name="requestId"])');
   await form.locator('select[name="roomId"]').selectOption({ label: ROOM_A });
-  await form.locator('select[name="startTime"]').selectOption("16:00");
+  await form.locator('input[name="startTime"]').fill("16:00");
   await form.locator('input[name="agreedPriceKzt"]').fill("150000");
   await form.locator('button[type="submit"]').click();
   await afterAction(pageB);
@@ -138,7 +140,7 @@ try {
   // 7. Confirm the same paid request at 18:00 in Room B: no second payment, success only after read-back.
   const form2 = pageB.locator('form:has(input[name="requestId"])');
   await form2.locator('select[name="roomId"]').selectOption({ label: ROOM_B });
-  await form2.locator('select[name="startTime"]').selectOption("18:00");
+  await form2.locator('input[name="startTime"]').fill("18:00");
   await form2.locator('input[name="agreedPriceKzt"]').fill("150000");
   await form2.locator('button[type="submit"]').click();
   await afterAction(pageB);
@@ -151,25 +153,25 @@ try {
   await shot(pageB, "07-paid-confirmed-no-repay");
 
   // 8. RBAC on manual blocks: the sales manager is refused by FastAPI (403), so the page says so and nothing is blocked.
-  await openCalendar(pageA);
-  const blockForm = pageA.locator('form:has(input[aria-label="Причина блокировки"])');
-  await blockForm.locator('select[aria-label="Комната блокировки"]').selectOption({ label: ROOM_B });
-  await blockForm.locator('select[aria-label="Начало блокировки"]').selectOption("10:00");
+  await openCalendar(pageA, "&block=1");
+  const blockForm = pageA.locator("form[aria-label='Блокировка комнаты']");
+  await blockForm.locator('select[name="roomId"]').selectOption({ label: ROOM_B });
+  await blockForm.locator('input[name="startTime"]').fill("10:00");
   await blockForm.locator('input[aria-label="Причина блокировки"]').fill("E2E блок менеджера");
   await blockForm.locator('button[type="submit"]').click();
   await afterAction(pageA);
   check("manager A: manual block refused with a clear forbidden message", (await alertWith(pageA, "Недостаточно прав").count()) === 1);
-  check("manager A: refused block left no block on the grid", (await pageA.locator('[data-state="blocked"]').count()) === 0);
+  check("manager A: refused block left no block on the grid", (await pageA.locator('a[data-state="blocked"]').count()) === 0);
   await shot(pageA, "08-a-block-forbidden");
 
   // 8b. The owner (super_admin in FastAPI) blocks Room B 10:00–14:00 in its own context: verified.
   const ctxOwner = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const pageOwner = await ctxOwner.newPage();
   await login(pageOwner, "owner-a@staging.boombala.example.com");
-  await openCalendar(pageOwner);
-  const ownerBlock = pageOwner.locator('form:has(input[aria-label="Причина блокировки"])');
-  await ownerBlock.locator('select[aria-label="Комната блокировки"]').selectOption({ label: ROOM_B });
-  await ownerBlock.locator('select[aria-label="Начало блокировки"]').selectOption("10:00");
+  await openCalendar(pageOwner, "&block=1");
+  const ownerBlock = pageOwner.locator("form[aria-label='Блокировка комнаты']");
+  await ownerBlock.locator('select[name="roomId"]').selectOption({ label: ROOM_B });
+  await ownerBlock.locator('input[name="startTime"]').fill("10:00");
   await ownerBlock.locator('input[aria-label="Причина блокировки"]').fill("E2E блок");
   await ownerBlock.locator('button[type="submit"]').click();
   await afterAction(pageOwner);
@@ -179,14 +181,17 @@ try {
   await ctxOwner.close();
 
   // 9. A cancels the 14:00–18:00 booking. The history keeps it as cancelled and the room is free in the grid.
-  const bookingCard = pageA.locator("article", { hasText: "Тест Клиент E2E A" }).first();
-  await bookingCard.locator("summary", { hasText: "Отменить бронь" }).click();
-  await bookingCard.locator('button:has-text("Отменить бронь")').click();
+  await openCalendar(pageA);
+  await pageA.locator("a[data-reservation]", { hasText: "Тест Клиент E2E A" }).first().click();
+  const drawer = pageA.locator("[data-drawer]");
+  await drawer.waitFor();
+  await drawer.locator("summary", { hasText: "Отменить бронь" }).click();
+  await drawer.locator('form button[type="submit"]:has-text("Отменить бронь")').click();
   await afterAction(pageA);
   const releasedOk = await pageA.locator('[role="status"]').innerText().catch(() => "");
   check("A: release verified", releasedOk.includes("Бронь отменена"), releasedOk.slice(0, 60));
   const history = await pageA.locator("main").innerText();
-  check("history keeps the cancelled booking", history.includes("Отменено"));
+  check("history keeps the cancelled booking", (await pageA.locator("ul[aria-label='Снятые брони'] li", { hasText: "Тест Клиент E2E A" }).count()) === 1 && history.includes("снята"));
   await shot(pageA, "09-a-cancelled-history");
 
   // 10. Token revocation: the FastAPI bridge session of manager A is revoked; the next load re-issues and works.
@@ -200,11 +205,11 @@ try {
   execFileSync("npm", ["run", "-s", "user:link-fastapi", "--", "--email", "manager-a@staging.boombala.example.com", "--unlink"], { cwd: process.cwd(), env, stdio: "pipe" });
   await openCalendar(pageA);
   const unlinked = await pageA.locator("main").innerText();
-  check("unlinked manager A is refused (fail closed)", unlinked.includes("Не удалось загрузить") && !unlinked.includes("Новая бронь"));
+  check("unlinked manager A is refused (fail closed)", unlinked.includes("Не удалось загрузить") && !unlinked.includes("Добавить бронь"));
   await shot(pageA, "11-a-unlinked-fail-closed");
   execFileSync("npm", ["run", "-s", "user:link-fastapi", "--", "--email", "manager-a@staging.boombala.example.com", "--admin-user-id", "stg-manager-a"], { cwd: process.cwd(), env, stdio: "pipe" });
   await openCalendar(pageA);
-  check("relinked manager A works again", (await pageA.locator("main").innerText()).includes("Новая бронь"));
+  check("relinked manager A works again", (await pageA.locator("main").innerText()).includes("Добавить бронь"));
 
   // 12. Logout invalidates the Platform session; login again works.
   await pageA.click('button:has-text("Выйти")');
@@ -230,7 +235,7 @@ try {
   await pageEditor.goto(`${ADMIN}/bookings?branch=${BRANCH}&date=${DATE}`);
   await pageEditor.waitForLoadState("networkidle");
   const editorBody = await pageEditor.locator("body").innerText();
-  check("editor cannot open the calendar (no grid, no booking form)", !editorBody.includes("Новая бронь на 4 часа") && !editorBody.includes("Занятость"));
+  check("editor cannot open the calendar (no grid, no booking form)", !editorBody.includes("Добавить бронь") && (await pageEditor.locator("[data-timeline]").count()) === 0);
   await ctxEditor.close();
 
   // 12c. Branch scope: an unknown or foreign branch id in the URL never reaches FastAPI; the page falls back to a visible branch.

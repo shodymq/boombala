@@ -74,9 +74,12 @@ await page.route("**/bookings**", async (route) => {
 });
 
 async function submitCreate(p, { room, start, name, price, prepay, phone = phoneRun }) {
-  const form = p.locator('form:has(input[name="customerName"])');
+  // The booking form is a drawer opened by the "new" address parameter; a fresh render gives a fresh idempotency key.
+  await p.goto(`${pageUrl}&new=1`);
+  await p.waitForLoadState("networkidle");
+  const form = p.locator("form[aria-label='Новая бронь']");
   await form.locator('select[name="roomId"]').selectOption({ label: room });
-  await form.locator('select[name="startTime"]').selectOption(start);
+  await form.locator('input[name="startTime"]').fill(start);
   await form.locator('input[name="customerName"]').fill(name);
   await form.locator('input[name="phone"]').fill(phone);
   await form.locator('input[name="agreedPriceKzt"]').fill(String(price));
@@ -135,7 +138,7 @@ await page.waitForLoadState("networkidle");
 const confirmForm = page.locator('form:has(input[name="requestId"])');
 const confirmB = async (room, start, price) => {
   await confirmForm.locator('select[name="roomId"]').selectOption({ label: room });
-  await confirmForm.locator('select[name="startTime"]').selectOption(start);
+  await confirmForm.locator('input[name="startTime"]').fill(start);
   await confirmForm.locator('input[name="agreedPriceKzt"]').fill(String(price));
   await confirmForm.locator('button[type="submit"]').click();
 };
@@ -158,7 +161,7 @@ await page.goto(`${pageUrl}&request=${reqC}`);
 await page.waitForLoadState("networkidle");
 armed = "after-server";
 await page.locator('form:has(input[name="requestId"])').locator('select[name="roomId"]').selectOption({ label: "Комната B" });
-await page.locator('form:has(input[name="requestId"])').locator('select[name="startTime"]').selectOption("18:00");
+await page.locator('form:has(input[name="requestId"])').locator('input[name="startTime"]').fill("18:00");
 await page.locator('form:has(input[name="requestId"])').locator('input[name="agreedPriceKzt"]').fill("150000");
 await page.locator('form:has(input[name="requestId"])').locator('button[type="submit"]').click();
 await page.waitForTimeout(4000);
