@@ -46,7 +46,9 @@ export function parseWorkingHours(text: string | null | undefined): WorkingWindo
 /** Every bookable start on a whole-hour step, so that the four-hour window ends inside working hours. */
 export function startOptions(window: WorkingWindow): string[] {
   const options: string[] = [];
-  for (let t = window.openMin; t + BOOKING_DURATION_MINUTES <= window.closeMin; t += START_STEP_MINUTES) {
+  // A branch may open on a half-hour, but birthday bookings must begin at HH:00.
+  const firstStart = Math.ceil(window.openMin / START_STEP_MINUTES) * START_STEP_MINUTES;
+  for (let t = firstStart; t + BOOKING_DURATION_MINUTES <= window.closeMin; t += START_STEP_MINUTES) {
     options.push(formatMinutes(t));
   }
   return options;
