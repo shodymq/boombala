@@ -45,7 +45,7 @@ describe("migrations and DB-level guarantees", () => {
     }
   });
 
-  it("keeps historical slots and adds every whole-hour start", async () => {
+  it("keeps historical slots and accepts minute-precise four-hour starts", async () => {
     const { rows } = await db.pool.query("SELECT id, to_char(starts_at,'HH24:MI') s, to_char(ends_at,'HH24:MI') e FROM time_slots ORDER BY starts_at, id");
     assert.deepEqual(rows, [
       { id: 1, s: "10:00", e: "14:00" },
@@ -58,8 +58,9 @@ describe("migrations and DB-level guarantees", () => {
       { id: 9, s: "17:00", e: "21:00" },
       { id: 3, s: "18:00", e: "22:00" },
     ]);
-    await assert.rejects(() => db.pool.query("INSERT INTO time_slots (id, starts_at, ends_at) VALUES (10, '13:15', '17:15')"), /check/i);
-    await assert.rejects(() => db.pool.query("INSERT INTO time_slots (id, starts_at, ends_at) VALUES (10, '13:00', '17:00')"), /unique/i);
+    await db.pool.query("INSERT INTO time_slots (id, starts_at, ends_at) VALUES (10, '13:15', '17:15')");
+    await assert.rejects(() => db.pool.query("INSERT INTO time_slots (id, starts_at, ends_at) VALUES (11, '13:16', '17:00')"), /check/i);
+    await assert.rejects(() => db.pool.query("INSERT INTO time_slots (id, starts_at, ends_at) VALUES (12, '13:15', '17:15')"), /unique/i);
     await assert.rejects(() => db.pool.query("DELETE FROM time_slots WHERE id = 1"), /cannot be deleted/);
   });
 

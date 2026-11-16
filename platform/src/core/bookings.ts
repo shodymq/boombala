@@ -135,10 +135,10 @@ async function checkTarget(tx: Client, date: string, slotId: unknown, roomId: un
        FROM bb.time_slots
       WHERE id = $1
         AND ends_at = starts_at + interval '4 hours'
-        AND extract(minute FROM starts_at) = 0`,
+        AND extract(second FROM starts_at) = 0`,
     [slot],
   );
-  if (!slotRow.rowCount) throw new ValidationError({ slotId: "Время должно быть полным часом и длиться 4 часа" });
+  if (!slotRow.rowCount) throw new ValidationError({ slotId: "Время должно быть корректным и длиться 4 часа" });
   const room = await tx.query("SELECT 1 FROM bb.rooms WHERE id = $1 AND is_active", [roomId]);
   if (!room.rowCount) throw new ValidationError({ roomId: "Комната недоступна" });
   // Serialize claims for one room/day before PostgreSQL's exclusion constraint. The constraint remains the final

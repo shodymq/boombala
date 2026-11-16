@@ -6,8 +6,8 @@
 export const BOOKING_DURATION_MINUTES = 240;
 /**
  * Owner decision (2026-11): a party may start at ANY minute (HH:MM), is exactly 240 minutes long and has no buffer.
- * The form offers a 15-minute picker for speed and always allows manual entry to the minute. The FastAPI kernel is still the
- * only authority: while it keeps its whole-hour rule it answers `invalid_start_time` and the calendar shows that refusal.
+ * The form offers a 15-minute picker for speed and always allows manual entry to the minute. The authoritative booking
+ * writer validates the same minute-precise contract and PostgreSQL remains the final overlap guard.
  */
 export const QUICK_STEP_MINUTES = 15;
 export const BUSINESS_TIMEZONE = "Asia/Almaty";

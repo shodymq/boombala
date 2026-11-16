@@ -7,11 +7,11 @@
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
--- Keep the three historical ids, but allow the additional whole-hour starts used by the current 10:00-22:00 branch.
+-- Keep the three historical ids, but allow catalog rows for any minute inside the branch hours.
 ALTER TABLE time_slots DROP CONSTRAINT IF EXISTS time_slots_id_check;
 ALTER TABLE time_slots ADD CONSTRAINT time_slots_id_positive CHECK (id > 0);
-ALTER TABLE time_slots ADD CONSTRAINT time_slots_four_hour_whole_start
-  CHECK (ends_at = starts_at + interval '4 hours' AND extract(minute FROM starts_at) = 0 AND extract(second FROM starts_at) = 0);
+ALTER TABLE time_slots ADD CONSTRAINT time_slots_four_hour_start
+  CHECK (ends_at = starts_at + interval '4 hours' AND extract(second FROM starts_at) = 0);
 CREATE UNIQUE INDEX time_slots_start_idx ON time_slots (starts_at);
 
 INSERT INTO time_slots (id, starts_at, ends_at) VALUES
@@ -29,11 +29,10 @@ BEGIN
   SELECT id INTO bad_slot
     FROM time_slots
    WHERE ends_at <> starts_at + interval '4 hours'
-      OR extract(minute FROM starts_at) <> 0
       OR extract(second FROM starts_at) <> 0
    LIMIT 1;
   IF bad_slot IS NOT NULL THEN
-    RAISE EXCEPTION 'time slot % is not a whole-hour four-hour interval', bad_slot;
+    RAISE EXCEPTION 'time slot % is not a four-hour minute-precise interval', bad_slot;
   END IF;
 END $$;
 
@@ -104,9 +103,8 @@ BEGIN
     IF NEW.starts_at IS NULL OR NEW.ends_at IS NULL OR NEW.ends_at <> NEW.starts_at + interval '4 hours' THEN
       RAISE EXCEPTION 'birthday reservations must last exactly four hours' USING ERRCODE = 'integrity_constraint_violation';
     END IF;
-    IF extract(minute FROM NEW.starts_at AT TIME ZONE 'Asia/Almaty') <> 0
-       OR extract(second FROM NEW.starts_at AT TIME ZONE 'Asia/Almaty') <> 0 THEN
-      RAISE EXCEPTION 'birthday reservations must start on a whole hour' USING ERRCODE = 'integrity_constraint_violation';
+    IF extract(second FROM NEW.starts_at AT TIME ZONE 'Asia/Almaty') <> 0 THEN
+      RAISE EXCEPTION 'birthday reservations must start on a whole minute' USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     IF NEW.slot_id IS NOT NULL THEN
       SELECT (NEW.slot_date + t.starts_at) AT TIME ZONE 'Asia/Almaty',
