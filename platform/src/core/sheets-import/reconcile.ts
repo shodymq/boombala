@@ -2,12 +2,19 @@ import { nameKey } from "../phone.ts";
 import type { CrmSnapshot, NormalizedRow, Reason } from "./types.ts";
 
 const HARD: ReadonlySet<Reason> = new Set<Reason>([
-  "date_unparseable", "date_missing", "time_unparseable", "time_missing", "time_not_whole_hour", "room_unknown", "room_ambiguous",
+  "date_unparseable", "date_missing", "time_unparseable", "time_missing", "outside_working_hours", "room_unknown", "room_ambiguous",
   "room_missing", "package_unknown", "package_missing", "phone_invalid", "phone_missing", "client_missing", "prepayment_unparseable",
   "duplicate_in_sheet", "overlap_in_sheet", "overlap_with_crm", "matches_crm_conflicting", "children_unparseable", "age_unparseable", "unknown_status_text",
 ]);
 
-const FOUR_HOURS = 4 * 60;
+/** Fixed duration, zero buffer: an event starting exactly when another ends is adjacent, not overlapping. */
+export const BOOKING_MINUTES = 4 * 60;
+const FOUR_HOURS = BOOKING_MINUTES;
+
+export interface ReconcileOptions {
+  /** Branch working window in minutes after midnight. When given, a four-hour event must fit inside it. */
+  workingHours?: { openMin: number; closeMin: number };
+}
 const minutes = (date: string, time: string) => Date.parse(`${date}T00:00:00Z`) / 60000 + Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
 
 function add(row: NormalizedRow, reason: Reason) {
@@ -18,7 +25,15 @@ function add(row: NormalizedRow, reason: Reason) {
  * Pure classification. Mutates only the rows it is given. Never produces "confirmed": the strongest outcome is
  * CANDIDATE, which still needs a manager. `today` is the Asia/Almaty calendar date.
  */
-export function reconcile(rows: NormalizedRow[], crm: CrmSnapshot, today: string): NormalizedRow[] {
+export function reconcile(rows: NormalizedRow[], crm: CrmSnapshot, today: string, opts: ReconcileOptions = {}): NormalizedRow[] {
+  if (opts.workingHours) {
+    for (const r of rows) {
+      if (!r.time) continue;
+      const t = Number(r.time.slice(0, 2)) * 60 + Number(r.time.slice(3, 5));
+      if (t < opts.workingHours.openMin || t + FOUR_HOURS > opts.workingHours.closeMin) add(r, "outside_working_hours");
+    }
+  }
+
   // 1. Exact duplicates inside the sheet: keep the first, the rest get a distinct occurrence key so nothing collides.
   const seen = new Map<string, number>();
   for (const r of rows) {
