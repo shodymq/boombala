@@ -121,11 +121,19 @@ export async function checkReadAccess(db: Queryable): Promise<AccessReport> {
   const writable = tables.rows.filter((t) => t.w).map((t) => t.relname);
   const overbroadRead = tables.rows.filter((t) => t.s).map((t) => t.relname);
   const superuser = Boolean(su.rows[0]?.rolsuper);
-  const rlsBlocked: string[] = [];
-  for (const table of Object.keys(REQUIRED_COLUMNS[schema])) {
-    const r = await db.query<{ active: boolean | null }>("SELECT row_security_active(to_regclass($1)) AS active", [`bb.${table}`]);
-    if (r.rows[0]?.active) rlsBlocked.push(table);
-  }
+  // RLS hides every row from a role that has no SELECT policy (unless it owns the table, is superuser or has BYPASSRLS).
+  // row_security_active() is NOT usable here: it is true whenever policies apply, including the policy that lets us read.
+  const rls = await db.query<{ relname: string }>(
+    `SELECT c.relname
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'bb' AND c.relname = ANY($1::text[]) AND c.relrowsecurity
+        AND pg_get_userbyid(c.relowner) <> current_user
+        AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls))
+        AND NOT EXISTS (SELECT 1 FROM pg_policies p
+                         WHERE p.schemaname = 'bb' AND p.tablename = c.relname AND p.permissive = 'PERMISSIVE' AND p.cmd IN ('SELECT', 'ALL')
+                           AND (p.roles @> ARRAY[current_user::name] OR p.roles @> ARRAY['public'::name]))
+      ORDER BY c.relname`, [Object.keys(REQUIRED_COLUMNS[schema])]);
+  const rlsBlocked = rls.rows.map((r) => r.relname);
   return { schema, missing, writable, superuser, rlsBlocked, overbroadRead, ok: missing.length === 0 && writable.length === 0 && !superuser && rlsBlocked.length === 0 };
 }
 
