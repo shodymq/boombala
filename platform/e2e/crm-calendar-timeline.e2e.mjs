@@ -90,6 +90,12 @@ const card = plain(await page.locator("[data-drawer]").innerText());
 check("detail card: client, phone, package, room, exact time", card.includes("Вероника Э.") && card.includes("+77010102091") && card.includes("BoomBala Party") && card.includes("Ice Room") && card.includes("13:30–17:30"));
 check("detail card: money and remaining", card.includes("130 000") && card.includes("10 000") && card.includes("120 000"));
 check("detail card admits what the API does not provide", card.includes("не отдаются API"));
+check("card: focus moves into the panel", await page.evaluate(() => document.querySelector("[data-drawer] aside")?.contains(document.activeElement) ?? false));
+await page.keyboard.press("Escape");
+await page.waitForFunction(() => !document.querySelector("[data-drawer]"), null, { timeout: 5000 }).catch(() => {});
+check("card: Escape closes the panel", (await page.locator("[data-drawer]").count()) === 0);
+await ice.click();
+await page.waitForSelector("[data-drawer]");
 await shot(page, "02-desktop-card");
 
 // create: any minute

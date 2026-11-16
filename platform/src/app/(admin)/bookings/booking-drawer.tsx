@@ -3,6 +3,7 @@ import Link from "next/link";
 import { remainingKzt, paymentLabel } from "../../../core/booking-calendar.ts";
 import type { BookingCatalogPackage, BookingTimelineReservation } from "../../../server/fastapi-crm.ts";
 import { blockAction, createBookingAction, releaseAction, rescheduleAction } from "./crm-actions";
+import { DrawerKeys } from "./drawer-keys";
 import { StartTimeField } from "./start-time-field";
 import { SubmitButton } from "./submit-button";
 import { clock } from "./timeline";
@@ -21,13 +22,13 @@ export function Drawer({ title, closeHref, children }: { title: string; closeHre
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={title} data-drawer>
       <Link href={closeHref} scroll={false} aria-label="Закрыть" className="hidden flex-1 bg-ink/40 md:block" />
-      <aside className="flex w-full flex-col overflow-y-auto bg-white p-4 shadow-2xl md:max-w-md">
+      <DrawerKeys closeHref={closeHref}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h2 className="text-xl font-black text-grape-800">{title}</h2>
           <Link href={closeHref} scroll={false} className={ghost + " h-9 px-3"}>Закрыть</Link>
         </div>
         {children}
-      </aside>
+      </DrawerKeys>
     </div>
   );
 }

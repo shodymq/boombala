@@ -21,7 +21,18 @@ There is no frontend-only source of bookings.
 3. Booking creation is three calls (request, manual payment, confirm). When confirm is refused (for example `invalid_start_time` on today's FastAPI) the request and the 10 000 ₸ prepayment already exist. The UI discloses this and offers "confirm without a new prepayment". A validate-only (dry-run) endpoint, or validation before the payment is written, would remove that state.
 4. Open requests are counted from `GET /admin/leads` filtered client-side by `requestedDate`; there is no server filter or reliable `total` for that, so a long list is marked "N+".
 
-## Verification
+## Verification (what each level proves)
 
-`npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, and `e2e/crm-calendar-timeline.e2e.mjs` against `e2e/support/mock-fastapi-calendar.mjs` (a stand-in for the FastAPI contract; it is not the booking kernel). Screenshots: `docs/platform/calendar-screens/`.
-The older staging scripts `crm-calendar`, `crm-actions-security` and `crm-lost-response` still target the previous page layout (inline forms, `select[name=startTime]`) and need updating when a staging environment is available; they were not run here.
+| Level | What | Result |
+| --- | --- | --- |
+| 1. unit | `npm test` | 334 pass |
+| 2. mock browser | `e2e/crm-calendar-timeline.e2e.mjs` against `e2e/support/mock-fastapi-calendar.mjs` (a stand-in, not the kernel) | 37/37 (main), legacy whole-hour and API-failure modes pass |
+| 3. real FastAPI + PostgreSQL, local | FastAPI `BoomBalaApp` main 6edf03a on a local PostgreSQL (synthetic seed from `ops/staging/seed`): `crm-calendar` 29/29, `crm-actions-security` 8/8, `crm-lost-response` 15/15, `crm-race` 9/9, `crm-full-path` (MFA required) 18/18 | pass. This is a local stack, not the VPS staging |
+| 4. staging browser | the same suites via `ops/staging/e2e.sh` on the VPS | not run (no access from this session) |
+| 5. production read-only smoke | none | not run |
+
+Real-kernel finding: `confirm` with `13:30` or `16:40` returns `422 invalid_start_time` (see FastAPI dependencies). `crm-full-path` asserts that refusal; set `E2E_KERNEL_MINUTES=1` once the kernel accepts any minute and it asserts success instead.
+
+Fixed while running the real stack: the one-time `ok`/`reservation`/`error` address parameters were put back by the framework's own address commit after a server action, so a refresh replayed the "booking created" notice. `crm-flash-clean.tsx` now cleans after the commit. The side panel also got keyboard handling (focus on open, Escape, Tab trap).
+
+Screenshots: `docs/platform/calendar-screens/`.
