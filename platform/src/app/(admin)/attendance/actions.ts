@@ -9,6 +9,8 @@ import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { isHttps } from "../../../server/env.ts";
 import { requestMeta } from "../../../server/request.ts";
+import { bridgeRpc, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
+import { SESSION_COOKIE } from "../../../server/env.ts";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 /** A whole number typed by a person, or NaN (the core refuses it). */
@@ -34,7 +36,10 @@ export async function confirmEntryAction(formData: FormData): Promise<void> {
   let duplicate = false;
   let reg = "";
   try {
-    const r = await confirmRegistrationEntry(getPool(), { id: user.id, role: user.role }, { registrationId: str(formData, "registrationId"), childrenCount: num(formData, "childrenCount"), onDate: date }, await requestMeta());
+    const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+    const r = legacyBridgeEnabled()
+      ? await bridgeRpc<Awaited<ReturnType<typeof confirmRegistrationEntry>>>("attendance.confirm", { registrationId: str(formData, "registrationId"), childrenCount: num(formData, "childrenCount"), onDate: date }, token as string)
+      : await confirmRegistrationEntry(getPool(), { id: user.id, role: user.role }, { registrationId: str(formData, "registrationId"), childrenCount: num(formData, "childrenCount"), onDate: date }, await requestMeta());
     duplicate = r.duplicate;
     reg = `&reg=${r.registrationSeq ?? ""}&cnt=${r.childrenCount}`;
   } catch (error) {
@@ -48,7 +53,10 @@ export async function manualEntryAction(formData: FormData): Promise<void> {
   const date = str(formData, "date");
   let duplicate = false;
   try {
-    const r = await addManualEntry(getPool(), { id: user.id, role: user.role }, { childrenCount: num(formData, "childrenCount"), idempotencyKey: str(formData, "idempotencyKey"), onDate: date }, await requestMeta());
+    const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+    const r = legacyBridgeEnabled()
+      ? await bridgeRpc<Awaited<ReturnType<typeof addManualEntry>>>("attendance.manual", { childrenCount: num(formData, "childrenCount"), idempotencyKey: str(formData, "idempotencyKey"), onDate: date }, token as string)
+      : await addManualEntry(getPool(), { id: user.id, role: user.role }, { childrenCount: num(formData, "childrenCount"), idempotencyKey: str(formData, "idempotencyKey"), onDate: date }, await requestMeta());
     duplicate = r.duplicate;
   } catch (error) {
     return failure(date, error);
@@ -61,12 +69,10 @@ export async function correctEntryAction(formData: FormData): Promise<void> {
   const date = str(formData, "date");
   let changed = false;
   try {
-    const r = await correctEntry(
-      getPool(),
-      { id: user.id, role: user.role },
-      { entryId: str(formData, "entryId"), newCount: num(formData, "newCount"), expectedCount: num(formData, "expectedCount"), reason: str(formData, "reason") },
-      await requestMeta(),
-    );
+    const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+    const r = legacyBridgeEnabled()
+      ? await bridgeRpc<Awaited<ReturnType<typeof correctEntry>>>("attendance.correct", { entryId: str(formData, "entryId"), newCount: num(formData, "newCount"), expectedCount: num(formData, "expectedCount"), reason: str(formData, "reason") }, token as string)
+      : await correctEntry(getPool(), { id: user.id, role: user.role }, { entryId: str(formData, "entryId"), newCount: num(formData, "newCount"), expectedCount: num(formData, "expectedCount"), reason: str(formData, "reason") }, await requestMeta());
     changed = r.changed;
   } catch (error) {
     return failure(date, error);

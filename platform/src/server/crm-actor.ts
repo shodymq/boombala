@@ -1,8 +1,9 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { FastApiCrmClient, FastApiCrmError, type FastApiCrmActor } from "./fastapi-crm.ts";
+import { FastApiCrmClient, FastApiCrmError, legacyCrmBridgeEnabled, type FastApiCrmActor } from "./fastapi-crm.ts";
 import { fastApiActorForStaff } from "./fastapi-staff.ts";
 import { getPool } from "./db.ts";
+import { SESSION_COOKIE } from "./env.ts";
 
 /**
  * FastAPI keeps one live bridge session per staff member: issuing a new token revokes the previous one. Without a cache,
@@ -38,6 +39,13 @@ export async function withFastApiClient<T>(
   run: (client: FastApiCrmClient) => Promise<T>,
   deps: CrmActorDeps = liveDeps,
 ): Promise<T> {
+  if (legacyCrmBridgeEnabled()) {
+    // The VPS validates the opaque Platform session against bb.sessions. No second staff identity or FastAPI schema is
+    // involved in legacy mode, and the bearer never reaches a browser bundle.
+    const raw = (await (await import("next/headers")).cookies()).get(SESSION_COOKIE)?.value;
+    if (!raw) throw new FastApiCrmError(401, "session_invalid", randomUUID());
+    return run(new FastApiCrmClient({ accessToken: raw, requestId: randomUUID() }));
+  }
   const identity = await deps.linkFor(session.user.id);
   if (!identity) throw new FastApiCrmError(403, "staff_not_linked", "link");
   const key = `${session.sessionId}|${identity}`;

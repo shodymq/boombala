@@ -8,6 +8,9 @@ import { FastApiCrmConfigurationError, unifiedFastapiCrmEnabled } from "../../..
 import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
+import { cookies } from "next/headers";
+import { bridgeRpc, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
+import { SESSION_COOKIE } from "../../../server/env.ts";
 
 const uuid = z.string().uuid();
 const str = (f: FormData, k: string) => String(f.get(k) ?? "");
@@ -23,18 +26,19 @@ function failure(error: unknown): never {
 
 export async function confirmLeadAction(formData: FormData): Promise<void> {
   const { user } = await requirePermission("bookings.manage");
-  if (unifiedFastapiCrmEnabled()) return failure(new FastApiCrmConfigurationError("crm_actor_missing"));
+  if (unifiedFastapiCrmEnabled() && !legacyBridgeEnabled()) return failure(new FastApiCrmConfigurationError("crm_actor_missing"));
   const id = uuid.safeParse(formData.get("id"));
   if (!id.success) return failure(new ValidationError({ id: "bad" }));
   let date = "";
   try {
     date = str(formData, "date");
-    await confirmLead(
-      getPool(),
-      { id: user.id, role: user.role },
-      { leadId: id.data, date, slotId: Number(str(formData, "slotId")) || undefined, roomId: str(formData, "roomId") || undefined, packageId: str(formData, "packageId") || undefined },
-      await requestMeta(),
-    );
+    if (legacyBridgeEnabled()) {
+      const token = (await cookies()).get(SESSION_COOKIE)?.value;
+      if (!token) return failure(new FastApiCrmConfigurationError("crm_actor_missing"));
+      await bridgeRpc("requests.confirm", { id: id.data, date, slotId: Number(str(formData, "slotId")) || undefined, roomId: str(formData, "roomId") || undefined, packageId: str(formData, "packageId") || undefined }, token);
+    } else {
+      await confirmLead(getPool(), { id: user.id, role: user.role }, { leadId: id.data, date, slotId: Number(str(formData, "slotId")) || undefined, roomId: str(formData, "roomId") || undefined, packageId: str(formData, "packageId") || undefined }, await requestMeta());
+    }
   } catch (error) {
     return failure(error);
   }
@@ -43,12 +47,16 @@ export async function confirmLeadAction(formData: FormData): Promise<void> {
 
 export async function leadStatusAction(formData: FormData): Promise<void> {
   const { user } = await requirePermission("requests.manage");
-  if (unifiedFastapiCrmEnabled()) return failure(new FastApiCrmConfigurationError("crm_actor_missing"));
+  if (unifiedFastapiCrmEnabled() && !legacyBridgeEnabled()) return failure(new FastApiCrmConfigurationError("crm_actor_missing"));
   const id = uuid.safeParse(formData.get("id"));
   const status = str(formData, "status");
   if (!id.success || !["new", "in_progress", "cancelled"].includes(status)) return failure(new ValidationError({ id: "bad" }));
   try {
-    await setLeadStatus(getPool(), { id: user.id, role: user.role }, id.data, status as "new" | "in_progress" | "cancelled", await requestMeta());
+    if (legacyBridgeEnabled()) {
+      const token = (await cookies()).get(SESSION_COOKIE)?.value;
+      if (!token) return failure(new FastApiCrmConfigurationError("crm_actor_missing"));
+      await bridgeRpc("requests.status", { id: id.data, status }, token);
+    } else await setLeadStatus(getPool(), { id: user.id, role: user.role }, id.data, status as "new" | "in_progress" | "cancelled", await requestMeta());
   } catch (error) {
     return failure(error);
   }

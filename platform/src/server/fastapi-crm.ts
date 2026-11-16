@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { bridgeRpc, legacyBridgeEnabled, LegacyBridgeError } from "./bridge-client.ts";
 
 export type FastApiCrmActor = {
   /** A short-lived FastAPI admin access token for the same staff actor. */
@@ -117,6 +118,11 @@ export function unifiedFastapiCrmEnabled(): boolean {
   return process.env.UNIFIED_FASTAPI_CRM_ENABLED === "1";
 }
 
+/** Production Vercel mode: the same typed client talks to the legacy bb.* bridge on the VPS. */
+export function legacyCrmBridgeEnabled(): boolean {
+  return legacyBridgeEnabled();
+}
+
 function baseUrl(): string {
   const raw = (process.env.FASTAPI_ADMIN_BASE_URL ?? "").trim().replace(/\/+$/, "");
   if (!raw) throw new FastApiCrmConfigurationError("crm_base_url_missing");
@@ -159,6 +165,19 @@ export class FastApiCrmClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (legacyBridgeEnabled()) {
+      const match = path.match(/^\/admin\/([^/?]+)(?:\/([^?]+))?(?:\?(.*))?$/);
+      const op = legacyOperation(path, init.method ?? "GET");
+      const body = init.body ? JSON.parse(String(init.body)) : {};
+      const query = match?.[3] ? Object.fromEntries(new URLSearchParams(match[3])) : {};
+      const ids = legacyPathInput(path);
+      try {
+        return await bridgeRpc<T>(op, { ...ids, ...query, ...body }, this.actor.accessToken);
+      } catch (error) {
+        if (error instanceof LegacyBridgeError) throw new FastApiCrmError(error.status, error.code, this.requestId);
+        throw error;
+      }
+    }
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.actor.accessToken}`);
     headers.set("Accept", "application/json");
@@ -252,6 +271,30 @@ export class FastApiCrmClient {
     const lead = await this.getBirthdayLead(requestId);
     return { reservation, lead };
   }
+}
+
+function legacyOperation(path: string, method: string): string {
+  if (path === "/admin/birthday-bookings/catalog" || path.startsWith("/admin/birthday-bookings/catalog?")) return "calendar.catalog";
+  if (path.startsWith("/admin/birthday-bookings/timeline")) return "calendar.timeline";
+  if (path.startsWith("/admin/leads/") && path.endsWith("/birthday")) return "calendar.lead";
+  if (path.startsWith("/admin/leads?") || path === "/admin/leads") return "calendar.leads";
+  if (path === "/admin/birthday-requests" && method === "POST") return "booking.request";
+  if (path.startsWith("/admin/birthday-requests/") && path.endsWith("/manual-payments") && method === "POST") return "booking.payment";
+  if (path === "/admin/birthday-bookings/confirm" && method === "POST") return "booking.confirm";
+  if (path === "/admin/birthday-slots/block" && method === "POST") return "booking.block";
+  if (path.startsWith("/admin/birthday-reservations/") && path.endsWith("/reschedule") && method === "POST") return "booking.reschedule";
+  if (path.startsWith("/admin/birthday-reservations/") && path.endsWith("/release") && method === "POST") return "booking.release";
+  throw new FastApiCrmConfigurationError("crm_base_url_invalid");
+}
+
+function legacyPathInput(path: string): Record<string, string> {
+  const lead = path.match(/^\/admin\/leads\/([^/]+)\/birthday$/);
+  if (lead) return { id: decodeURIComponent(lead[1]) };
+  const payment = path.match(/^\/admin\/birthday-requests\/([^/]+)\/manual-payments$/);
+  if (payment) return { requestId: decodeURIComponent(payment[1]) };
+  const reservation = path.match(/^\/admin\/birthday-reservations\/([^/]+)\/(?:release|reschedule)$/);
+  if (reservation) return { reservationId: decodeURIComponent(reservation[1]) };
+  return {};
 }
 
 /**

@@ -4,6 +4,8 @@ import { beginEnrollment, isEnrolled } from "@/core/mfa";
 import { getPendingSession, getSession } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { mfaKey } from "@/server/env";
+import { bridgeEnrollment, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { MfaForm } from "./mfa-form";
 
 export const metadata: Metadata = { title: "Второй фактор" };
@@ -14,9 +16,12 @@ export default async function MfaPage() {
   const signedIn = (await getSession()) !== null;
   const pending = signedIn ? null : await getPendingSession();
   if (!signedIn && !pending) redirect("/login");
-  const pool = getPool();
-  const enrolled = pending ? await isEnrolled(pool, pending.user.id) : true;
-  const enrollment = pending && !enrolled ? await beginEnrollment(pool, pending.user.id, mfaKey) : null;
+  const pool = legacyBridgeEnabled() ? null : getPool();
+  const enrollmentResult = pending && legacyBridgeEnabled()
+    ? await bridgeEnrollment((await (await import("next/headers")).cookies()).get(SESSION_COOKIE)?.value ?? "")
+    : null;
+  const enrolled = pending ? (enrollmentResult ? enrollmentResult.enrolled : await isEnrolled(pool!, pending.user.id)) : true;
+  const enrollment = pending && !enrolled ? (enrollmentResult ?? await beginEnrollment(pool!, pending.user.id, mfaKey)) : null;
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-10">
       <div className="rounded-[2rem] border border-line bg-white p-6 shadow-sm sm:p-8">

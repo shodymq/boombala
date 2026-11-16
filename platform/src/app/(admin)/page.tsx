@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { dayFigures } from "@/core/attendance";
 import { attendanceSchemaReady } from "@/core/preflight";
 import { BUSINESS_TIME_ZONE, catalogSummary } from "@/core/catalog";
@@ -8,6 +9,8 @@ import { outboxStats } from "@/core/outbox";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermission } from "@/server/dal";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 
 export const metadata: Metadata = { title: "Обзор" };
 
@@ -27,6 +30,12 @@ const ACCESS: Array<{ permission: Permission; label: string }> = [
 
 export default async function DashboardPage() {
   const { user } = await requirePermission("dashboard.view");
+  if (legacyBridgeEnabled()) {
+    const token = (await cookies()).get(SESSION_COOKIE)?.value;
+    if (!token) throw new Error("session_missing");
+    const remote = await bridgeRpc<{ migrations: string[]; summary: Awaited<ReturnType<typeof catalogSummary>> | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null }>("dashboard", {}, token);
+    return <RemoteDashboard user={user} data={remote} />;
+  }
   const pool = getPool();
   const [migrations, summary, outbox, attendance] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
@@ -144,6 +153,19 @@ export default async function DashboardPage() {
           Здесь показаны только реальные данные из базы: система не подставляет выдуманных цифр.
         </p>
       </section>
+    </div>
+  );
+}
+
+function RemoteDashboard({ user, data }: { user: { name: string; role: string }; data: { migrations: string[]; summary: Awaited<ReturnType<typeof catalogSummary>> | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null } }) {
+  const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(new Date());
+  return (
+    <div className="grid min-w-0 gap-6">
+      <header><h1 className="text-3xl font-black tracking-tight text-grape-800">Здравствуйте, {user.name}</h1><p className="mt-1 text-sm text-muted">Сейчас {now} (Алматы)</p></header>
+      {data.attendance ? <section aria-labelledby="att" className="rounded-3xl border border-line bg-white p-5"><h2 id="att" className="text-lg font-black text-grape-800">Посещаемость сегодня</h2><dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3"><div><dt className="text-muted">Детей фактически вошло</dt><dd className="text-3xl font-black tabular-nums text-grape-800">{data.attendance.childrenEntered}</dd></div><div><dt className="text-muted">Взрослых прошло QR-регистрацию</dt><dd className="text-3xl font-black tabular-nums text-grape-800">{data.attendance.adultsRegistered}</dd></div><div><dt className="text-muted">Детей ожидается (вход не подтверждён)</dt><dd className="text-3xl font-black tabular-nums text-grape-800">{data.attendance.childrenExpected}</dd></div></dl><p className="mt-3 text-sm"><Link href="/attendance" className="font-extrabold text-grape-700 underline">Открыть «Посещаемость»</Link></p></section> : null}
+      {data.outbox ? <section aria-labelledby="ob" className="rounded-3xl border border-line bg-white p-5"><h2 id="ob" className="text-lg font-black text-grape-800">Уведомления в Telegram</h2><p className="mt-2 text-sm">Ожидают отправки: <b>{data.outbox.pending}</b> · Не доставлены после всех попыток: <b className={data.outbox.dead ? "text-red-700" : ""}>{data.outbox.dead}</b></p></section> : null}
+      <section aria-labelledby="sys" className="rounded-3xl border border-line bg-white p-5"><h2 id="sys" className="text-lg font-black text-grape-800">Система</h2><dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-muted">База данных</dt><dd className="font-bold text-ok">подключена через VPS bridge</dd></div><div><dt className="text-muted">Версия схемы</dt><dd className="font-bold">{data.migrations[0] ?? "—"}</dd></div></dl></section>
+      {data.summary ? <section aria-labelledby="cat" className="rounded-3xl border border-line bg-white p-5"><h2 id="cat" className="text-lg font-black text-grape-800">Пакеты, комнаты и слоты из базы</h2><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[18rem] text-left text-sm"><tbody>{data.summary.packages.map((p) => <tr key={p.id} className="border-t border-line"><td className="py-2 pr-3 font-bold">{p.name}</td><td className="py-2 text-right tabular-nums">{p.basePrice == null ? "—" : `${kzt.format(p.basePrice)} ₸`}</td></tr>)}</tbody></table></div><p className="mt-4 text-sm"><span className="font-bold">Комнаты:</span> {data.summary.rooms.map((r) => r.name).join(", ") || "—"}</p></section> : null}
     </div>
   );
 }
