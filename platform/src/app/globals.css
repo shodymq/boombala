@@ -26,3 +26,10 @@
 html { -webkit-text-size-adjust: 100%; }
 body { background: var(--color-paper); color: var(--color-ink); font-family: var(--font-sans); }
 :focus-visible { outline: 3px solid var(--color-grape-600); outline-offset: 2px; border-radius: 6px; }
+
+/* Day timeline: exact minute positions (1 minute = --bk-min). Generated for 0..960 minutes; see core/booking-grid-classes.ts. */
+:root { --bk-min: 0.05rem; }
+@utility bk-top-* { top: calc(--value(integer) * var(--bk-min)); }
+@utility bk-h-* { height: calc(--value(integer) * var(--bk-min)); }
+@source inline("bk-top-{0..960}");
+@source inline("bk-h-{0..960}");

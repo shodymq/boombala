@@ -1,5 +1,5 @@
 import "server-only";
-import { almatyWindow, windowOverlapsRoom } from "../core/booking-calendar.ts";
+import { almatyWindow, CLOSED_REQUEST_STATUSES, windowOverlapsRoom } from "../core/booking-calendar.ts";
 import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmClient } from "./fastapi-crm.ts";
 import { samePhone } from "../core/booking-calendar.ts";
 
@@ -52,6 +52,7 @@ const KNOWN_ERRORS = new Set([
   "branch_hours_unknown",
   "start_in_past",
   "invalid_start_time",
+  "invalid_booking_duration",
   "birthday_prepayment_required",
   "birthday_request_not_bookable",
   "birthday_request_not_payable",
@@ -105,7 +106,7 @@ export async function precheckRoom(client: BookingWriter, branchId: string, date
   if (windowOverlapsRoom(occupied, roomId, startIso, newOccupiedEnd)) throw new FastApiCrmError(409, "time_conflict", "precheck");
 }
 
-const CLOSED_LEAD_STATUSES = new Set(["booked", "completed", "lost", "closed", "cancelled", "confirmed"]);
+const CLOSED_LEAD_STATUSES = CLOSED_REQUEST_STATUSES;
 
 /**
  * The request id of a paid, unconfirmed request for the same phone, branch and date, created in the last 24 hours, or null.
