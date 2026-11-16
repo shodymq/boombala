@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { almatyDate, isCalendarDate } from "../../../core/booking-calendar.ts";
+import { almatyDate, isCalendarDate, toMinutes } from "../../../core/booking-calendar.ts";
 import { withFastApiClient } from "../../../server/crm-actor.ts";
 import { unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
 import { confirmPaidRequestFlow, createBookingFlow, failureCode } from "../../../server/crm-flows.ts";
@@ -17,7 +17,8 @@ import { requirePermission } from "../../../server/dal.ts";
  */
 
 const key = z.string().min(8).max(100);
-const startTime = z.string().regex(/^\d{2}:\d{2}$/);
+// Any real HH:MM. The minute is not rounded or restricted here: the FastAPI kernel decides which starts it accepts.
+const startTime = z.string().regex(/^\d{2}:\d{2}$/).refine((v) => toMinutes(v) !== null, "time");
 const date = z.string().refine(isCalendarDate, "date");
 const id = z.string().min(1).max(64);
 const optionalText = (max: number) => z.string().trim().max(max).transform((v) => (v === "" ? undefined : v));
@@ -36,6 +37,7 @@ const bookingSchema = z.object({
   prepaymentKzt: money,
   prepaymentMethod: z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]),
   note: optionalText(300),
+  childName: optionalText(80),
   idempotencyKey: key,
 });
 
@@ -99,11 +101,14 @@ export async function createBookingAction(formData: FormData): Promise<void> {
     prepaymentKzt: field(formData, "prepaymentKzt"),
     prepaymentMethod: field(formData, "prepaymentMethod"),
     note: field(formData, "note"),
+    childName: field(formData, "childName"),
     idempotencyKey: field(formData, "idempotencyKey"),
   });
   if (!parsed.success) redirect(calendarUrl(branchId, rawDate, "error=invalid"));
   const input = parsed.data;
   if (!unifiedFastapiCrmEnabled()) redirect(calendarUrl(branchId, input.date, "error=unavailable"));
+  // The kernel has no child field yet, so the name travels in the comment (visible in the booking card).
+  const note = [input.childName ? `Ребёнок: ${input.childName}` : "", input.note ?? ""].filter(Boolean).join(". ").slice(0, 300) || undefined;
 
   // Booking needs a request, then a recorded prepayment (the kernel refuses a confirmation without one), then the confirmation.
   // Each step has its own derived idempotency key, so a double submit replays the same records instead of creating new ones.
@@ -120,7 +125,7 @@ export async function createBookingAction(formData: FormData): Promise<void> {
       agreedPriceKzt: input.agreedPriceKzt,
       prepaymentKzt: input.prepaymentKzt,
       prepaymentMethod: input.prepaymentMethod,
-      note: input.note,
+      note,
       idempotencyKey: input.idempotencyKey,
     }, almatyDate()),
   );

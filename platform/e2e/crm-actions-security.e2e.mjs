@@ -39,7 +39,9 @@ await page.fill('input[type="password"]', PW);
 await page.click('button[type="submit"]:has-text("Войти")');
 await page.waitForURL((u) => !u.pathname.startsWith("/login"));
 const pageUrl = `${ADMIN}/bookings?branch=stg-almaty&date=${DATE}`;
-await page.goto(pageUrl);
+// The booking form lives in a drawer opened by the "new" address parameter.
+const formUrl = `${pageUrl}&new=1`;
+await page.goto(formUrl);
 await page.waitForLoadState("networkidle");
 
 // 1. Cross-origin probe with the logged-in cookies and a foreign Origin.
@@ -63,9 +65,9 @@ check("cross-origin POST wrote no request and no payment", (await count("SELECT 
 
 // 2. Double click on the real form: one key, two clicks.
 const repeatName = `REP ${randomUUID().slice(0, 8)}`;
-const form = page.locator('form:has(input[name="customerName"])');
+const form = page.locator("form[aria-label='Новая бронь']");
 await form.locator('select[name="roomId"]').selectOption({ label: "Комната B" });
-await form.locator('select[name="startTime"]').selectOption("10:00");
+await form.locator('input[name="startTime"]').fill("10:00");
 await form.locator('input[name="customerName"]').fill(repeatName);
 await form.locator('input[name="phone"]').fill(runPhone);
 await form.locator('input[name="agreedPriceKzt"]').fill("100000");
@@ -83,11 +85,11 @@ check("double click leaves one active booking", bookings === 1, `bookings=${book
 await page.screenshot({ path: join(ART, "double-submit.png"), fullPage: true });
 
 // 3. A new submit (a new key from a fresh render) for the same room and time is refused by the pre-check: nothing new is written.
-await page.goto(pageUrl);
+await page.goto(formUrl);
 await page.waitForLoadState("networkidle");
-const form2 = page.locator('form:has(input[name="customerName"])');
+const form2 = page.locator("form[aria-label='Новая бронь']");
 await form2.locator('select[name="roomId"]').selectOption({ label: "Комната B" });
-await form2.locator('select[name="startTime"]').selectOption("10:00");
+await form2.locator('input[name="startTime"]').fill("10:00");
 await form2.locator('input[name="customerName"]').fill(`${repeatName} второй`);
 await form2.locator('input[name="phone"]').fill(runPhone);
 await form2.locator('input[name="agreedPriceKzt"]').fill("100000");
