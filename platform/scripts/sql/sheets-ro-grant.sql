@@ -1,5 +1,5 @@
 -- Column-level, version-aware read-only grants for role bb_sheets_ro. The role must already exist (the password is set by
--- scripts/sheets-ro-role.sh, never here). Idempotent. Works on the pre-015 schema (slot_date + slot_id + time_slots) and on
+-- scripts/sheets-db-admin.sh, never here). Idempotent. Works on the pre-015 schema (slot_date + slot_id + time_slots) and on
 -- post-015 (exact starts_at). It never applies a migration and never grants a payment, comment or contact-detail column.
 -- Keep the column lists in step with REQUIRED_COLUMNS in src/core/sheets-import/importer.ts (a test enforces it).
 DO $grant$
@@ -13,7 +13,7 @@ BEGIN
   -- Every bb table has RLS enabled with NO policies (migration 003): without a policy a non-owner role silently reads ZERO rows,
   -- which would look like "nothing in the CRM". So each table the importer reads gets ONE policy: SELECT only, for bb_sheets_ro
   -- only. No BYPASSRLS, no write policy. The column-level grants below still limit which columns can be read.
-  -- Policies are dropped by scripts/sheets-ro-role.sh revoke (and by DROP OWNED BY).
+  -- Policies are dropped by scripts/sheets-db-admin.sh cleanup (and by DROP OWNED BY).
   EXECUTE 'REVOKE ALL ON SCHEMA bb FROM bb_sheets_ro';
   EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA bb FROM bb_sheets_ro';
   FOR t IN SELECT unnest(CASE WHEN post015

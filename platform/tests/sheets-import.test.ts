@@ -10,7 +10,7 @@ import { seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
 
 const SID = "sheet-test-id";
 const CATALOG = { rooms: [{ id: "room-a", name: "Космос" }, { id: "room-b", name: "Джунгли" }], packages: [{ id: "pkg-1", name: "Стандарт" }] };
-const EMPTY_CRM: CrmSnapshot = { leads: [], reservations: [] };
+const EMPTY_CRM: CrmSnapshot = { leads: [], reservations: [], blocks: [] };
 const TODAY = "2026-11-16";
 const HEADER = ["Дата", "Время", "Пакет", "Аниматор", "Комната", "Клиент", "Телефон", "Ребенок", "Возраст", "Предоплата", "Количество детей", "Количество взрослых"];
 
@@ -107,6 +107,7 @@ describe("sheets import: reconciliation", () => {
     const crm: CrmSnapshot = {
       leads: [{ id: "l1", date: "2026-11-20", phoneE164: "+77071112233", nameKey: "тест клиент", children: 10, packageId: "pkg-1", roomId: null, status: "new" }],
       reservations: [],
+      blocks: [],
     };
     assert.equal(run([raw()], crm)[0].status, "ALREADY_IN_CRM");
     assert.equal(run([raw({ children: "12" })], crm)[0].status, "NEEDS_REVIEW");
@@ -114,8 +115,17 @@ describe("sheets import: reconciliation", () => {
     assert.equal(other.status, "CANDIDATE", "same phone but another person is not a match");
   });
   it("flags overlap with a CRM reservation", () => {
-    const crm: CrmSnapshot = { leads: [], reservations: [{ id: "r1", date: "2026-11-20", startTime: "12:00", roomId: "room-a", phoneE164: "+77070000000", children: null, packageId: null }] };
+    const crm: CrmSnapshot = { leads: [], reservations: [{ id: "r1", date: "2026-11-20", startTime: "12:00", roomId: "room-a", phoneE164: "+77070000000", children: null, packageId: null }], blocks: [] };
     assert.ok(run([raw({ time: "14:00" })], crm)[0].reasons.includes("overlap_with_crm"));
+  });
+  it("a manual block occupies its room: overlap is NEEDS_REVIEW, another room or an adjacent start is not", () => {
+    const crm: CrmSnapshot = { leads: [], reservations: [], blocks: [{ id: "b1", date: "2026-11-20", startTime: "14:00", roomId: "room-a" }] };
+    const hit = run([raw({ time: "14:00" })], crm)[0];
+    assert.equal(hit.status, "NEEDS_REVIEW");
+    assert.ok(hit.reasons.includes("overlap_with_crm_block"));
+    assert.ok(run([raw({ time: "17:59" })], crm)[0].reasons.includes("overlap_with_crm_block"));
+    assert.ok(!run([raw({ time: "18:00" })], crm)[0].reasons.includes("overlap_with_crm_block"), "adjacent: allowed");
+    assert.ok(!run([raw({ time: "14:00", room: "Джунгли" })], crm)[0].reasons.includes("overlap_with_crm_block"), "another room");
   });
   it("summary contains aggregates only", () => {
     const s = summarize(run([raw(), raw({ date: "01.10.2026", phone: "8 707 555 44 33" })]), TODAY);

@@ -26,7 +26,7 @@ export type Reason =
   | "room_unknown" | "room_ambiguous" | "room_missing" | "package_unknown" | "package_missing"
   | "phone_invalid" | "phone_missing" | "client_missing"
   | "prepayment_unverified" | "no_prepayment" | "prepayment_unparseable"
-  | "duplicate_in_sheet" | "overlap_in_sheet" | "overlap_with_crm" | "matches_crm_conflicting"
+  | "duplicate_in_sheet" | "overlap_in_sheet" | "overlap_with_crm" | "overlap_with_crm_block" | "matches_crm_conflicting"
   | "children_unparseable" | "age_unparseable" | "count_approximate" | "past_event" | "unknown_status_text"
   | "no_confirmation_flag" | "time_semantics_unconfirmed";
 
@@ -65,5 +65,8 @@ export interface Catalog {
 /** Read-only snapshot of what CRM already holds. No payment or secret fields. */
 export interface CrmSnapshot {
   leads: Array<{ id: string; date: string; phoneE164: string; nameKey: string; children: number | null; packageId: string | null; roomId: string | null; status: string }>;
+  /** Active confirmed bookings only (kind = 'booking'). */
   reservations: Array<{ id: string; date: string; startTime: string; roomId: string; phoneE164: string | null; children: number | null; packageId: string | null }>;
+  /** Active manual blocks (kind = 'block'): they occupy a room like a booking but are not bookings. */
+  blocks: Array<{ id: string; date: string; startTime: string; roomId: string }>;
 }
