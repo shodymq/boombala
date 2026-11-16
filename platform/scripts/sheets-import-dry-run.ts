@@ -6,11 +6,12 @@ import { googleSheetsClient, readSheet, type SheetRead } from "../src/core/sheet
 import { readCsv } from "../src/core/sheets-import/csv.ts";
 import { normalizeRow } from "../src/core/sheets-import/normalize.ts";
 import { reconcile, summarize } from "../src/core/sheets-import/reconcile.ts";
-import { ensureStaging, loadCatalog, loadCrmSnapshot, stageRows } from "../src/core/sheets-import/importer.ts";
+import { checkReadAccess, ensureStaging, loadCatalog, loadCrmSnapshot, stageRows } from "../src/core/sheets-import/importer.ts";
 
 // Dry run only. Input: Sheets API (GOOGLE_SERVICE_ACCOUNT_KEY_FILE) or a local CSV export (--csv file).
 // READ_URL: read-only access to the database to compare with (SELECT only, wrapped in a READ ONLY transaction).
 // STAGING_URL: a scratch database for sheet_import.rows; it must differ from READ_URL.
+// --allow-privileged-read-url yes: LOCAL SCRATCH DATABASES ONLY (the test cluster user is a superuser). Never for production.
 // stdout: aggregate counts only (no names, phones, amounts). Row-level data only in --report-file (local, mode 600).
 const arg = (n: string) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : undefined; };
 const spreadsheetId = arg("spreadsheet") ?? process.env.SHEETS_SPREADSHEET_ID;
@@ -28,15 +29,20 @@ try {
     ? readCsv(readFileSync(csvPath, "utf8"), { spreadsheetId, sheetId: Number(arg("sheet-id") ?? 0) })
     : await readSheet(googleSheetsClient(JSON.parse(readFileSync(keyPath!, "utf8"))), spreadsheetId, { sheetTitle: arg("sheet") });
   const ro = await readPool.connect();
-  let catalog, crm;
+  let catalog, crm, access;
   try {
     await ro.query("BEGIN TRANSACTION READ ONLY");
+    access = await checkReadAccess(ro);
+    if (!access.ok && !(arg("allow-privileged-read-url") === "yes" && access.missing.length === 0 && access.rlsBlocked.length === 0)) {
+      // Names of tables/columns only. A write-capable or incomplete READ_URL is refused before any row is read.
+      throw new Error(`READ_URL not acceptable: missing=[${access.missing.join(",")}] writable=[${access.writable.join(",")}] superuser=${access.superuser} rlsBlocked=[${access.rlsBlocked.join(",")}]`);
+    }
     catalog = await loadCatalog(ro);
-    crm = await loadCrmSnapshot(ro);
+    crm = await loadCrmSnapshot(ro, access.schema);
   } finally { await ro.query("ROLLBACK").catch(() => {}); ro.release(); }
   const today = almatyToday();
   const rows = reconcile(sheet.rows.map((r) => normalizeRow(r.raw, r.source, catalog)), crm, today, hours ? { workingHours: hours } : {});
-  const out: Record<string, unknown> = { input: csvPath ? "csv" : "api", spreadsheetTimeZone: sheet.spreadsheetTimeZone, workingHoursChecked: Boolean(hours), blankRowsIgnored: sheet.blankRows, ...summarize(rows, today) };
+  const out: Record<string, unknown> = { input: csvPath ? "csv" : "api", spreadsheetTimeZone: sheet.spreadsheetTimeZone, crmSchema: access.schema, readRoleOverbroadTables: access.overbroadRead.length, workingHoursChecked: Boolean(hours), blankRowsIgnored: sheet.blankRows, ...summarize(rows, today) };
   if (stagingUrl) {
     const staging = createPool(stagingUrl, { max: 1 });
     try { await ensureStaging(staging); out.staging = await stageRows(staging, spreadsheetId, rows); } finally { await staging.end(); }
@@ -45,6 +51,6 @@ try {
   if (reportFile) writeFileSync(reportFile, JSON.stringify(rows, null, 1), { mode: 0o600 });
   console.log(JSON.stringify(out, null, 2));
 } catch (e) {
-  console.error(`dry run failed: ${(e as Error).message.split("\n")[0].slice(0, 120)}`); // never echo row data
+  console.error(`dry run failed: ${(e as Error).message.split("\n")[0].slice(0, 300)}`); // never echo row data
   process.exitCode = 1;
 } finally { await readPool.end(); }
