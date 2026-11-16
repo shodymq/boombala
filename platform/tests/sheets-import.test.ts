@@ -3,7 +3,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { almatyToday } from "../src/core/dates.ts";
 import {
-  ensureStaging, googleSheetsClient, parseCsv, readCsv, loadCatalog, loadCrmSnapshot, normalizeRow, readSheet, reconcile, stageRows, summarize,
+  ensureStaging, googleSheetsClient, parseAmount, parseCsv, readCsv, loadCatalog, loadCrmSnapshot, normalizeRow, readSheet, reconcile, stageRows, summarize,
   type CrmSnapshot, type RawRow, type SheetsClient,
 } from "../src/core/sheets-import/index.ts";
 import { seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
@@ -229,5 +229,49 @@ describe("sheets import: staging against a real PostgreSQL", () => {
       await loadCrmSnapshot(c);
       await assert.rejects(c.query("INSERT INTO bb.rooms (id, name) VALUES ('zz','zz')"), /read-only/);
     } finally { await c.query("ROLLBACK"); c.release(); }
+  });
+});
+
+describe("sheets import: formats seen in the real sheet (synthetic examples)", () => {
+  const REAL_CATALOG = {
+    rooms: [{ id: "roblox-room", name: "Roblox Room" }, { id: "ice-room", name: "Ice Room" }, { id: "magic-room", name: "Magic Room" }, { id: "rapunzel-room", name: "Rapunzel Room" }],
+    packages: [{ id: "wow-party", name: "WOW PARTY" }, { id: "magic-party", name: "MAGIC PARTY" }, { id: "boom-party", name: "BOOM PARTY" }],
+  };
+  const real = (over: Partial<RawRow> = {}) => normalizeRow({ date: "20.11.26", time: "16:40", package: "Magic party ", room: "Рапунцель room", client: "Имя", phone: "‪+7 701 600 0246‬", prepayment: "10к Сабина", children: "7-8", adults: "по факту", age: "8 лет", ...over }, { spreadsheetId: SID, sheetId: 1, rowNumber: 3 }, REAL_CATALOG);
+  const final = (r: ReturnType<typeof real>) => reconcile([r], EMPTY_CRM, TODAY)[0];
+
+  it("maps the real header names (кабинка, номер, имя, дет, взр, наименование пакет)", async () => {
+    const csv = ["чё,,,,,,,,,,,,,", "№ г. ,Дата,Время,Наименование пакет,аниматор,кабинка,имя,номер,имя ребенка,возраст,предоплата,,дет,взр", "1,10.12.2026,13:15,Wow party,,Ice room,Имя,87021852515,Р,8 лет,10к,П,6,2-3"].join("\n");
+    const sheet = readCsv(csv, { spreadsheetId: SID, sheetId: 0 });
+    assert.equal(sheet.rows.length, 1);
+    const r = final(normalizeRow(sheet.rows[0].raw, sheet.rows[0].source, REAL_CATALOG));
+    assert.deepEqual([r.time, r.roomId, r.packageId, r.phoneE164, r.children, r.childAge, r.prepaymentCandidateKzt], ["13:15", "ice-room", "wow-party", "+77021852515", 6, 8, 10000]);
+    assert.ok(r.reasons.includes("count_approximate"), "2-3 adults is approximate, not guessed");
+    assert.equal(r.adults, null);
+  });
+  it("resolves Russian room spellings and the Boom Bala package, keeps 16:40, ignores bidi marks in phones", () => {
+    const r = final(real({ package: "Boom bala party " }));
+    assert.deepEqual([r.roomId, r.packageId, r.time, r.phoneE164, r.status], ["rapunzel-room", "boom-party", "16:40", "+77016000246", "CANDIDATE"]);
+  });
+  it("amounts: 10к, 10к нал, 20к перевод Сабина, 'по факту' (no prepayment), free text stays unparsed", () => {
+    assert.deepEqual(["10к", "10 к", "10кнал", "10к нал", "20к перевод Сабина", "10к подтверждено"].map((x) => parseAmount(x)), [10000, 10000, 10000, 10000, 20000, 10000]);
+    assert.equal(parseAmount("по факту"), null);
+    assert.equal(parseAmount("внесена"), "bad");
+    assert.ok(final(real({ prepayment: "по факту" })).reasons.includes("no_prepayment"));
+  });
+  it("shared-room labels (floors, common hall, restaurant) and typos are not guessed: review", () => {
+    for (const room of ["2 этаж", "Общий зал", "Ресторан", "Рапкнцель", "1 этаж"]) assert.equal(final(real({ room })).status, "NEEDS_REVIEW", room);
+  });
+  it("'уточнить' / 'согласовать' in package or room means not settled: review", () => {
+    assert.equal(final(real({ package: "Magic party — уточнить" })).status, "NEEDS_REVIEW");
+    assert.equal(final(real({ room: "Общий зал — 10 мест (согласовать)" })).status, "NEEDS_REVIEW");
+  });
+  it("two children in the age cell are not guessed; approximate counts do not block a candidate", () => {
+    const r = final(real({ age: "8 лет, 6 лет", children: "≈15" }));
+    assert.equal(r.childAge, null);
+    assert.equal(r.status, "CANDIDATE");
+  });
+  it("a row with no phone, client or time is review, never a candidate", () => {
+    assert.equal(final(real({ phone: "", client: "", time: "" })).status, "NEEDS_REVIEW");
   });
 });

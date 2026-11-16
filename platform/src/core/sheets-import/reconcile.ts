@@ -4,7 +4,7 @@ import type { CrmSnapshot, NormalizedRow, Reason } from "./types.ts";
 const HARD: ReadonlySet<Reason> = new Set<Reason>([
   "date_unparseable", "date_missing", "time_unparseable", "time_missing", "outside_working_hours", "room_unknown", "room_ambiguous",
   "room_missing", "package_unknown", "package_missing", "phone_invalid", "phone_missing", "client_missing", "prepayment_unparseable",
-  "duplicate_in_sheet", "overlap_in_sheet", "overlap_with_crm", "matches_crm_conflicting", "children_unparseable", "age_unparseable", "unknown_status_text",
+  "duplicate_in_sheet", "overlap_in_sheet", "overlap_with_crm", "matches_crm_conflicting", "children_unparseable", "unknown_status_text",
 ]);
 
 /** Fixed duration, zero buffer: an event starting exactly when another ends is adjacent, not overlapping. */
