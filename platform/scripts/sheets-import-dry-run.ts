@@ -17,8 +17,13 @@ const arg = (n: string) => { const i = process.argv.indexOf(`--${n}`); return i 
 const spreadsheetId = arg("spreadsheet") ?? process.env.SHEETS_SPREADSHEET_ID;
 const csvPath = arg("csv");
 const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE;
-const readUrl = process.env.READ_URL, stagingUrl = process.env.STAGING_URL;
-if (!spreadsheetId || !readUrl || (!csvPath && !keyPath)) { console.error("need --spreadsheet/SHEETS_SPREADSHEET_ID, READ_URL and either --csv <file> or GOOGLE_SERVICE_ACCOUNT_KEY_FILE"); process.exit(2); }
+// Secrets: prefer *_FILE (a protected file) over a value in the environment.
+const fromFile = (f?: string) => (f ? readFileSync(f, "utf8").trim() : undefined);
+const readUrl = process.env.READ_URL ?? fromFile(process.env.READ_URL_FILE), stagingUrl = process.env.STAGING_URL ?? fromFile(process.env.STAGING_URL_FILE);
+// Explicit production count check: the run stops before staging when the CRM does not hold what the owner expects.
+const expectLeads = arg("expect-leads") === undefined ? undefined : Number(arg("expect-leads"));
+const expectReservations = arg("expect-reservations") === undefined ? undefined : Number(arg("expect-reservations"));
+if (!spreadsheetId || !readUrl || (!csvPath && !keyPath)) { console.error("need --spreadsheet/SHEETS_SPREADSHEET_ID, READ_URL (or READ_URL_FILE) and either --csv <file> or GOOGLE_SERVICE_ACCOUNT_KEY_FILE"); process.exit(2); }
 if (stagingUrl && stagingUrl === readUrl) { console.error("STAGING_URL must differ from READ_URL"); process.exit(2); }
 const hours = arg("hours") ? parseWorkingHours(arg("hours")) : null;
 if (arg("hours") && !hours) { console.error("--hours must look like 10:00-23:00 and span at least four hours"); process.exit(2); }
@@ -40,9 +45,15 @@ try {
     catalog = await loadCatalog(ro);
     crm = await loadCrmSnapshot(ro, access.schema);
   } finally { await ro.query("ROLLBACK").catch(() => {}); ro.release(); }
+  const crmCounts = { leads: crm.leads.length, activeReservations: crm.reservations.length };
+  console.error(`production counts: leads=${crmCounts.leads} activeReservations=${crmCounts.activeReservations}`); // numbers only
+  if ((expectLeads !== undefined && expectLeads !== crmCounts.leads) || (expectReservations !== undefined && expectReservations !== crmCounts.activeReservations)) {
+    console.error(`production counts differ from the expected leads=${expectLeads ?? "-"} activeReservations=${expectReservations ?? "-"}: stopping before staging. Check which is right, then rerun with the new numbers.`);
+    process.exit(3);
+  }
   const today = almatyToday();
   const rows = reconcile(sheet.rows.map((r) => normalizeRow(r.raw, r.source, catalog)), crm, today, hours ? { workingHours: hours } : {});
-  const out: Record<string, unknown> = { input: csvPath ? "csv" : "api", spreadsheetTimeZone: sheet.spreadsheetTimeZone, crmSchema: access.schema, readRoleOverbroadTables: access.overbroadRead.length, workingHoursChecked: Boolean(hours), blankRowsIgnored: sheet.blankRows, ...summarize(rows, today) };
+  const out: Record<string, unknown> = { input: csvPath ? "csv" : "api", spreadsheetTimeZone: sheet.spreadsheetTimeZone, crmSchema: access.schema, productionCounts: crmCounts, readRoleOverbroadTables: access.overbroadRead.length, workingHoursChecked: Boolean(hours), blankRowsIgnored: sheet.blankRows, ...summarize(rows, today) };
   if (stagingUrl) {
     const staging = createPool(stagingUrl, { max: 1 });
     try { await ensureStaging(staging); out.staging = await stageRows(staging, spreadsheetId, rows); } finally { await staging.end(); }

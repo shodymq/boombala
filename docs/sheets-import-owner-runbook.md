@@ -1,60 +1,49 @@
-# Temporary read-only access for the Sheets reconciliation
+# Owner runbook: reconcile the Google Sheets with production (on the VPS)
 
-Goal: compare all 168 sheet rows with production without changing a single production row. Nothing here applies a migration
-(production is still pre-015; the importer reads that schema as it is). The role sees only the columns the matcher needs: no
-amounts, payments, comments, children's details or other contact fields. It expires by itself after `TTL_HOURS` (default 48).
+Everything runs on the VPS itself. PostgreSQL is reached over `127.0.0.1`: no SSH tunnel, no open port, no change to sshd.
+One command creates a temporary read-only role, runs the comparison, and removes the role again (also if the run fails).
+Nothing is imported: no booking and no payment fact is created, and nothing in `bb.*` is written.
 
-Replace `USER@VPS` with your SSH login. Assumptions: PostgreSQL runs on the VPS, the database is `boombala`, the port is 5432
-and `sudo -u postgres psql` works there. If not, see "If something differs".
+What the temporary role can read: rooms and packages (id, name), requests (id, date, number of children, package, room, status),
+contacts (id, normalized phone, name key) and reservations (id, kind, room, contact, time, release flag, children, package).
+No amounts, payments, comments or other contact fields. It has SELECT-only row policies on exactly those tables; no BYPASSRLS.
+The importer keeps its own state in a **separate database** `bb_sheet_staging` with its own role, which cannot read `bb.*`.
 
-## 1. On your Mac: copy the two files to the VPS
+Needs on the VPS: Node 22.6+ (`node -v`), `psql`, `openssl`, `sudo` to the `postgres` user, PostgreSQL on `127.0.0.1:5432`
+accepting password logins there (`scram-sha-256`, the default). Replace `USER@VPS` with your SSH login.
 
-```bash
-cd ~/Documents/BoomBalaAll/wt-sheets-import/platform
-ssh USER@VPS 'mkdir -p ~/sheets-ro'
-scp -r scripts/sheets-ro-role.sh scripts/sql USER@VPS:~/sheets-ro/
-```
-
-## 2. On the VPS: create the role
+## 1. On your Mac (two copies; the CSV holds personal data, so it goes straight to your own server)
 
 ```bash
-cd ~/sheets-ro && chmod +x sheets-ro-role.sh
-./sheets-ro-role.sh status
-TTL_HOURS=24 ./sheets-ro-role.sh create
+scp ~/Documents/BoomBalaAll/wt-sheets-import/platform/dist-vps/sheets-import-vps.tgz USER@VPS:~/
+scp "$HOME/Downloads/Банкеты - Лист1.csv" USER@VPS:~/banquets.csv
 ```
 
-`create` prints one line and writes the connection URL to `~/.bb_sheets_ro.url` (mode 600). The password is generated on the
-VPS, goes to PostgreSQL through stdin, and is never printed or kept anywhere else. Re-running `create` is refused until `revoke`.
-
-## 3. On your Mac: fetch the URL file (not through chat) and open a tunnel
+## 2. On the VPS (one command; enter your sudo password if asked)
 
 ```bash
-mkdir -p ~/.config/boombala && chmod 700 ~/.config/boombala
-scp USER@VPS:~/.bb_sheets_ro.url ~/.config/boombala/sheets_ro.url && chmod 600 ~/.config/boombala/sheets_ro.url
-ssh USER@VPS 'shred -u ~/.bb_sheets_ro.url'
-ssh -N -L 55432:127.0.0.1:5432 USER@VPS
+tar -xzf ~/sheets-import-vps.tgz -C ~ && cd ~/bundle/scripts
+./sheets-vps-run.sh ~/banquets.csv --expect-leads 48 --expect-reservations 0
 ```
 
-Leave the last command running in its own Terminal tab (it is the tunnel). The URL already points to `127.0.0.1:55432`.
+`--expect-leads` and `--expect-reservations` are the production counts you gave earlier. If the real numbers differ, the script
+stops before staging and prints the actual counts; check which side is right and rerun with the correct numbers.
+Add `--hours 10:00-23:00` (use the branch's real working hours) to also flag bookings outside working hours.
 
-## 4. Tell Claude
+## 3. Send Claude the output
 
-Write only: "доступ готов, файл ~/.config/boombala/sheets_ro.url". Claude reads the file inside its own shell, never prints it,
-checks the role with the built-in preflight, and runs the reconciliation. Do not paste the URL or password in chat.
+Paste what the command printed into the chat. It contains counts only (no names, phones or amounts). The row-level report stays on the VPS as
+`~/sheets-report-<time>.json` (mode 600). Do not paste or send it unless the manager review needs it.
 
-## 5. When Claude reports it is finished: revoke
+## Done / cleanup
 
-```bash
-ssh USER@VPS 'cd ~/sheets-ro && ./sheets-ro-role.sh revoke'
-rm -f ~/.config/boombala/sheets_ro.url
-```
-
-Then close the tunnel tab (Ctrl+C). `revoke` terminates the role's sessions, drops its grants and the role, and removes the URL file.
-If you forget, the role stops working after `TTL_HOURS` anyway.
+- The temporary role is revoked automatically at the end (the script prints `temporary read-only role revoked`; it would also expire after 2 hours).
+- Check any time: `./sheets-ro-role.sh status` should say `role bb_sheets_ro: absent`.
+- When the whole reconciliation is finished, remove the staging database and the report:
+  `./sheets-ro-role.sh stage-drop && shred -u ~/sheets-report-*.json ~/banquets.csv`
 
 ## If something differs
 
-- Other admin command or database name: `PSQL_ADMIN='sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d OTHERDB' DB_NAME=OTHERDB ./sheets-ro-role.sh create`.
-- PostgreSQL on another port: change `5432` in the tunnel command.
-- `pg_hba.conf` must allow `127.0.0.1` with `scram-sha-256` (the default on most installs).
-- Do not run migration 015 for this. The grant detects the schema and grants the right columns by itself.
+- Admin command or database name: `PSQL_ADMIN='sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d OTHERDB' DB_NAME=OTHERDB ./sheets-vps-run.sh ...`
+- Another PostgreSQL port: `DB_PORT=5433 ./sheets-vps-run.sh ...`
+- Older Node (22.6 to 22.17) is handled automatically; older than 22.6 is refused with a message.

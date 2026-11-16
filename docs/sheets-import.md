@@ -42,4 +42,4 @@ Header names «кабинка», «номер», «имя», «имя ребен
 6. Rollback: bookings are released (not deleted) by the existing release flow; staging rows are untouched.
 
 ## Owner request (one)
-Either send a CSV export (File → Download → CSV) to the machine that runs the dry run, or share the spreadsheet **read-only (Viewer)** with a new service-account e-mail, and put its JSON key into a root-only file on the machine that runs the dry run (not in chat or Git). Also provide `READ_URL` for a temporary column-level read-only role: see [sheets-import-owner-runbook.md](sheets-import-owner-runbook.md). Do not use the broad `bb_backup` role.
+Either send a CSV export (File → Download → CSV) to the machine that runs the dry run, or share the spreadsheet **read-only (Viewer)** with a new service-account e-mail, and put its JSON key into a root-only file on the machine that runs the dry run (not in chat or Git). Also provide `READ_URL` for a temporary column-level read-only role with SELECT-only RLS policies (run on the VPS, no tunnel): see [sheets-import-owner-runbook.md](sheets-import-owner-runbook.md). Do not use the broad `bb_backup` role.
