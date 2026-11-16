@@ -27,8 +27,10 @@ export const API_GRANTS: Record<string, ApiTable> = {
   rooms: { privileges: "SELECT" },
   time_slots: { privileges: "SELECT" },
   price_rules: { privileges: "SELECT" },
-  // free/busy only: which cell is taken, never who took it or for how much
-  slot_reservations: { privileges: "SELECT (slot_date, slot_id, room_id, released_at)" },
+  // free/busy only: which cell is taken, never who took it or for how much.
+  // The interval columns are added by migration 015; applyRoles is intentionally
+  // also usable on a pre-015 database during the documented migration order.
+  slot_reservations: { privileges: "SELECT" },
   news_posts: { privileges: "SELECT", using: "status = 'published' AND published_at <= now()" },
   news_images: {
     privileges: "SELECT",
@@ -67,6 +69,11 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
   await ensureRole(pool, api, opts.apiPassword, 20, "5s");
   await ensureRole(pool, admin, opts.adminPassword, 20, "30s");
   const tables = (await pool.query<{ t: string }>("SELECT c.relname AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'bb' AND c.relkind = 'r' ORDER BY 1")).rows.map((r) => r.t);
+  const reservationColumns = new Set(
+    (await pool.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'bb' AND table_name = 'slot_reservations'",
+    )).rows.map((r) => r.column_name),
+  );
   for (const t of Object.keys(API_GRANTS)) if (!tables.includes(t)) throw new Error(`API_GRANTS names a table that does not exist: ${t}`);
   for (const t of ADMIN_DELETE) if (!tables.includes(t)) throw new Error(`ADMIN_DELETE names a table that does not exist: ${t}`);
 
@@ -82,7 +89,10 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
   // NONE: every write it makes happens inside the intake functions, which run as their owner. It cannot draw, read or set a counter.
   await pool.query(`GRANT USAGE ON ALL SEQUENCES IN SCHEMA bb TO ${ident(admin)}`);
   for (const [t, { privileges, using }] of Object.entries(API_GRANTS)) {
-    await pool.query(`GRANT ${privileges} ON bb.${ident(t)} TO ${ident(api)}`);
+    const effectivePrivileges = t === "slot_reservations"
+      ? `SELECT (${["slot_date", "slot_id", "room_id", "starts_at", "ends_at", "released_at"].filter((column) => reservationColumns.has(column)).join(", ")})`
+      : privileges;
+    await pool.query(`GRANT ${effectivePrivileges} ON bb.${ident(t)} TO ${ident(api)}`);
     await pool.query(`CREATE POLICY ${ident(`${api}_access`)} ON bb.${ident(t)} FOR SELECT TO ${ident(api)} USING (${using ?? "true"})`);
   }
   const fns = (await pool.query<{ sig: string }>("SELECT p.oid::regprocedure::text AS sig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname LIKE $1", [`${API_FUNCTION_PREFIX}%`])).rows;

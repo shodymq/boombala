@@ -38,7 +38,7 @@ const ERRORS: Record<string, string> = {
   outside_working_hours: "Выбранное время выходит за часы работы филиала.",
   branch_hours_unknown: "Часы работы филиала не распознаны, поэтому бронирование отключено.",
   start_in_past: "Нельзя занять прошедшее время.",
-  invalid_start_time: "Время начала должно идти с шагом 15 минут.",
+  invalid_start_time: "Время начала должно быть ровно на часовой отметке (например, 13:00).",
   birthday_prepayment_required: "Чтобы подтвердить бронь, сначала нужна предоплата.",
   birthday_request_not_bookable: "Заявка не может быть забронирована в текущем статусе.",
   birthday_request_not_payable: "По этой заявке нельзя записать предоплату.",
@@ -213,9 +213,9 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
           <div className="min-w-[760px]">
             <div className="grid grid-cols-[8rem_1fr] gap-2">
               <span />
-              <div className="grid grid-cols-[repeat(60,minmax(0,1fr))] text-xs font-bold text-muted">
+              <div className="grid grid-cols-[repeat(15,minmax(0,1fr))] text-xs font-bold text-muted">
                 {hourMarks.map((m) => (
-                  <span key={m} className={`${COLUMN_START[(m - GRID_OPEN_MIN) / START_STEP_MINUTES + 1]} col-span-4`}>{hour(m)}</span>
+                  <span key={m} className={`${COLUMN_START[(m - GRID_OPEN_MIN) / START_STEP_MINUTES + 1]} col-span-1`}>{hour(m)}</span>
                 ))}
               </div>
             </div>
@@ -228,7 +228,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
               return (
                 <div key={room.id} className="mt-2 grid grid-cols-[8rem_1fr] gap-2">
                   <h2 className="self-center text-sm font-black text-grape-800">{room.name}</h2>
-                  <div className="relative grid auto-rows-[2.75rem] grid-cols-[repeat(60,minmax(0,1fr))] gap-y-1 rounded-xl border border-grape-100 bg-paper py-1" role="list" aria-label={`Занятость: ${room.name}`}>
+                  <div className="relative grid auto-rows-[2.75rem] grid-cols-[repeat(15,minmax(0,1fr))] gap-y-1 rounded-xl border border-grape-100 bg-paper py-1" role="list" aria-label={`Занятость: ${room.name}`}>
                     {closedColumns(hours).map((range) => (
                       <div key={`${range.start}-${range.span}`} aria-hidden="true" className={`${COLUMN_START[range.start]} ${COLUMN_SPAN[range.span]} row-start-1 row-span-1 self-stretch bg-line/30`} />
                     ))}
@@ -274,7 +274,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
           {QUICK_STARTS.filter((s) => starts.includes(s)).map((s) => (
             <Link key={s} href={{ pathname: "/bookings", query: { ...branchQuery, start: s } }} className={btnGhost}>{s}</Link>
           ))}
-          <span className="text-xs text-muted">Любой старт с шагом 15 минут также доступен в форме.</span>
+          <span className="text-xs text-muted">Доступны все полные часы в пределах рабочего дня; буфер между бронями — 0 минут.</span>
         </section>
       ) : null}
 

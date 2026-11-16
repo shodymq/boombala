@@ -70,14 +70,14 @@ export default async function BookingsPage({
         </p>
       ) : null}
 
-      <div className="hidden grid-cols-[8rem_repeat(3,1fr)] gap-3 text-sm font-black text-grape-800 md:grid" aria-hidden="true">
+      <div className="hidden grid-cols-[8rem_repeat(9,1fr)] gap-3 text-sm font-black text-grape-800 md:grid" aria-hidden="true">
         <span />
         {grid.slots.map((s) => <span key={s.id}>{s.startsAt}–{s.endsAt}</span>)}
       </div>
 
       <section aria-label="Комнаты и слоты" className="grid gap-4">
         {grid.rooms.map((room) => (
-          <article key={room.id} className="grid gap-3 rounded-3xl border border-line bg-white p-4 md:grid-cols-[8rem_repeat(3,1fr)] md:items-start">
+          <article key={room.id} className="grid gap-3 rounded-3xl border border-line bg-white p-4 md:grid-cols-[8rem_repeat(9,1fr)] md:items-start">
             <h2 className="text-lg font-black text-grape-800 md:pt-2">{room.name}</h2>
             {grid.slots.map((slot) => {
               const cell = cellOf(room.id, slot.id);

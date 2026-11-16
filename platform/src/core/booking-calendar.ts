@@ -4,10 +4,10 @@
  */
 
 export const BOOKING_DURATION_MINUTES = 240;
-export const START_STEP_MINUTES = 15;
+export const START_STEP_MINUTES = 60;
 export const BUSINESS_TIMEZONE = "Asia/Almaty";
-/** Quick-pick starts shown as shortcuts. They never limit the choice: any 15-minute start inside working hours is valid. */
-export const QUICK_STARTS = ["12:00", "16:00", "20:00"] as const;
+/** Hourly shortcuts. The complete list is still filtered by the branch's actual working hours. */
+export const QUICK_STARTS = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"] as const;
 
 const HHMM = /^(\d{2}):(\d{2})$/;
 const RANGE = /(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})/;
@@ -43,7 +43,7 @@ export function parseWorkingHours(text: string | null | undefined): WorkingWindo
   return { openMin, closeMin };
 }
 
-/** Every bookable start on the 15-minute step, so that the four-hour window ends inside working hours. */
+/** Every bookable start on a whole-hour step, so that the four-hour window ends inside working hours. */
 export function startOptions(window: WorkingWindow): string[] {
   const options: string[] = [];
   for (let t = window.openMin; t + BOOKING_DURATION_MINUTES <= window.closeMin; t += START_STEP_MINUTES) {
@@ -77,7 +77,7 @@ export function almatyMinutes(iso: string): number | null {
   return (hour % 24) * 60 + minute;
 }
 
-/** The day grid always spans 09:00-24:00 in 15-minute columns; hours outside a branch's working day are shaded. */
+/** The day grid always spans 09:00-24:00 in hourly columns; hours outside a branch's working day are shaded. */
 export const GRID_OPEN_MIN = 9 * 60;
 export const GRID_CLOSE_MIN = 24 * 60;
 export const GRID_COLUMNS = (GRID_CLOSE_MIN - GRID_OPEN_MIN) / START_STEP_MINUTES;

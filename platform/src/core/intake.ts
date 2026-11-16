@@ -30,7 +30,7 @@ const leadSchema = z.object({
   children: z.union([z.number().int().min(0).max(200), z.string().regex(/^\d{1,3}$/).transform(Number)]).optional().nullable(),
   packageId: idSchema.optional().nullable(),
   roomId: idSchema.optional().nullable(),
-  slotId: z.union([z.number().int().min(1).max(3), z.string().regex(/^[1-3]$/).transform(Number)]).optional().nullable(),
+  slotId: z.union([z.number().int().min(1).max(32767), z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(32767))]).optional().nullable(),
   consent: z.literal(true, "Необходимо согласие"),
   page: optText(200),
   referrer: optText(300),

@@ -22,19 +22,21 @@ test("parses branch hours and refuses unknown or too-short ranges", () => {
   assert.equal(parseWorkingHours("10:00-13:00"), null, "less than four hours cannot hold a party");
 });
 
-test("start options use a 15-minute step and end inside working hours", () => {
+test("start options use a whole-hour step and end inside working hours", () => {
   const options = startOptions({ openMin: 600, closeMin: 1380 });
   assert.equal(options[0], "10:00");
-  assert.equal(options[1], "10:15");
+  assert.equal(options[1], "11:00");
   assert.equal(options.at(-1), "19:00");
-  assert.equal(options.length, (1380 - 600 - 240) / 15 + 1);
+  assert.equal(options.length, (1380 - 600 - 240) / 60 + 1);
 });
 
 test("a start must be on the step and fit the window", () => {
   const window = { openMin: 600, closeMin: 1380 };
   assert.equal(isBookableStart("14:00", window), true);
   assert.equal(isBookableStart("14:10", window), false);
-  assert.equal(isBookableStart("19:15", window), false, "19:15 + 4h runs past closing");
+  assert.equal(isBookableStart("20:00", window), false, "20:00 + 4h runs past closing");
+  assert.equal(isBookableStart("13:15", window), false);
+  assert.equal(isBookableStart("13:30", window), false);
   assert.equal(isBookableStart("09:45", window), false);
   assert.equal(isBookableStart("14:00", null), false);
 });
@@ -46,19 +48,19 @@ test("reads Almaty wall-clock time regardless of the offset in the string", () =
   assert.equal(almatyMinutes("not a date"), null);
 });
 
-test("places a reservation on the 15-minute grid and clips it to the day", () => {
-  // 09:00 Almaty is grid column 1; 14:00 is column 21; four hours span 16 columns.
-  assert.deepEqual(gridColumn("2026-10-28T09:00:00Z", "2026-10-28T13:00:00Z"), { start: 1 + 5 * 4, span: 16 });
-  assert.deepEqual(gridColumn("2026-10-28T03:00:00Z", "2026-10-28T06:00:00Z"), { start: 1, span: 8 }, "08:00-11:00 is clipped to start at 09:00");
+test("places a reservation on the hourly grid and clips it to the day", () => {
+  // 09:00 Almaty is grid column 1; 14:00 is column 6; four hours span 4 columns.
+  assert.deepEqual(gridColumn("2026-10-28T09:00:00Z", "2026-10-28T13:00:00Z"), { start: 1 + 5, span: 4 });
+  assert.deepEqual(gridColumn("2026-10-28T03:00:00Z", "2026-10-28T06:00:00Z"), { start: 1, span: 2 }, "08:00-11:00 is clipped to start at 09:00");
   assert.equal(gridColumn("2026-10-28T02:00:00Z", "2026-10-28T03:00:00Z"), null, "03:00-04:00 Almaty is before the grid");
   // 18:00 to midnight Almaty: an end at 00:00 means the end of the day.
-  assert.deepEqual(gridColumn("2026-10-28T13:00:00Z", "2026-10-28T19:00:00Z"), { start: 37, span: 24 });
+  assert.deepEqual(gridColumn("2026-10-28T13:00:00Z", "2026-10-28T19:00:00Z"), { start: 10, span: 6 });
   // A zero-length interval (no buffer) draws nothing; it must not run to midnight.
   assert.equal(gridColumn("2026-10-28T13:00:00Z", "2026-10-28T13:00:00Z"), null);
 });
 
 test("shades hours outside working time as grid columns", () => {
-  assert.deepEqual(gridRangeColumns(9 * 60, 10 * 60), { start: 1, span: 4 });
+  assert.deepEqual(gridRangeColumns(9 * 60, 10 * 60), { start: 1, span: 1 });
   assert.equal(gridRangeColumns(23 * 60, 24 * 60 + 0) !== null, true);
   assert.equal(gridRangeColumns(5, 5), null);
 });

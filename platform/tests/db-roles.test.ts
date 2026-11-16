@@ -89,7 +89,7 @@ describe("Database roles: one per application, least privilege", () => {
       const burst = await Promise.all(Array.from({ length: 5 }, () => submitConsentV(api, { idempotencyKey: key, name: "Роль Гонка", childrenCount: 1, acceptRules: true, acceptPersonalData: true })));
       assert.equal(new Set(burst.map((b) => b.registrationId)).size, 1, "the per-key lock works for this role too");
       assert.ok(qr.registrationId);
-      assert.equal((await dayAvailability(api, FUTURE)).slots.length, 3);
+      assert.equal((await dayAvailability(api, FUTURE)).slots.length, 9);
       assert.ok((await monthAvailability(api, FUTURE.slice(0, 7))).roomCount >= 1);
       assert.equal((await getPublished(api)).length, 3);
       assert.deepEqual(await publicList(api), []);
