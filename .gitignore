@@ -49,3 +49,6 @@ env.local
 # Staging operator files: never commit
 ops/staging/staging.env
 ops/staging/*.local.env
+
+# sheets import local reports (contain personal data)
+/platform/sheets-report*.json
