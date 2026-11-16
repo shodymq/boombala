@@ -18,11 +18,12 @@ export function parseRole(value: string | undefined, failClosed = false): Platfo
   return value === "admin" || value === "api" ? value : failClosed ? "invalid" : "all";
 }
 
-export type PathClass = "health" | "public_api" | "admin";
+export type PathClass = "health" | "public_api" | "bridge" | "admin";
 
 /** The health check is allowed everywhere; intake and public reads belong to the API; everything else is admin. */
 export function classifyPath(pathname: string): PathClass {
   if (pathname === "/api/health") return "health";
+  if (pathname.startsWith("/api/bridge/")) return "bridge";
   if (pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/")) return "public_api";
   return "admin";
 }
@@ -103,11 +104,11 @@ export function decideExposure(cfg: ExposureConfig, req: ExposureRequest): Expos
   const cls = classifyPath(req.pathname);
   if (cls !== "health") {
     if (cfg.role === "api" && cls !== "public_api") return { allow: false, status: 404, reason: "role" };
-    if (cfg.role === "admin" && cls !== "admin") return { allow: false, status: 404, reason: "role" };
+    if (cfg.role === "admin" && cls !== "admin" && cls !== "bridge") return { allow: false, status: 404, reason: "role" };
   }
   // The admin application (and, in a shared deployment, its pages) is reachable only from the VPN networks. The health
   // check of the admin is included: a stranger must learn nothing, not even that something answers there.
-  if ((cfg.role === "admin" || (cfg.role === "all" && cls === "admin")) && cfg.adminCidrs.length > 0) {
+  if ((cfg.role === "admin" || (cfg.role === "all" && cls === "admin")) && cls !== "bridge" && cfg.adminCidrs.length > 0) {
     const ip = req.realIp?.trim() ?? "";
     if (!ip || !cfg.adminCidrs.some((c) => ipInCidr(ip, c))) return { allow: false, status: 404, reason: "network" };
   }
@@ -135,6 +136,7 @@ const API_ONLY = ["PLATFORM_INTAKE_TOKEN", "PLATFORM_IP_PEPPER"] as const;
  */
 export function profileProblems(env: Record<string, string | undefined> = process.env): string[] {
   const production = isProductionEnvironment(env);
+  const remoteBridge = env.CRM_BRIDGE_MODE === "legacy";
   if (!production && env.PLATFORM_PROFILE !== "kz-production") return [];
   const p: string[] = [];
   if (production && env.PLATFORM_PROFILE !== "kz-production") p.push("production_profile_required");
@@ -142,15 +144,15 @@ export function profileProblems(env: Record<string, string | undefined> = proces
   if (role !== "admin" && role !== "api") p.push("role_must_be_admin_or_api");
   if (env.PLATFORM_HTTPS !== "1") p.push("https_required");
   if (splitList(env.ALLOWED_HOSTS).length === 0) p.push("allowed_hosts_required");
-  if (!env.DATABASE_URL) p.push("database_url_required");
+  if (!env.DATABASE_URL && !remoteBridge) p.push("database_url_required");
   if (role === "admin") {
     if (env.MFA_MODE !== "required") p.push("mfa_required");
-    if (Buffer.from(env.MFA_ENC_KEY ?? "", "base64").length !== 32) p.push("mfa_key_invalid");
+    if (!remoteBridge && Buffer.from(env.MFA_ENC_KEY ?? "", "base64").length !== 32) p.push("mfa_key_invalid");
     const cidrs = (env.ADMIN_ALLOWED_CIDRS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (cidrs.length === 0) p.push("admin_cidrs_required");
+    if (!remoteBridge && cidrs.length === 0) p.push("admin_cidrs_required");
     if (cidrs.some((c) => !validCidr(c))) p.push("admin_cidrs_invalid");
     if (cidrs.some((c) => c === "0.0.0.0/0" || c === "::/0" || /\/([0-7])$/.test(c))) p.push("admin_cidrs_too_wide");
-    if (!env.CRON_SECRET) p.push("cron_secret_required");
+    if (!remoteBridge && !env.CRON_SECRET) p.push("cron_secret_required");
     // Notifications in production never carry a name or a phone: the message says "new enquiry N", the details are in the CRM.
     if (env.TELEGRAM_NOTIFY_LEVEL !== "minimal") p.push("notify_level_must_be_minimal");
     for (const k of API_ONLY) if (env[k]) p.push(`admin_must_not_have_${k.toLowerCase()}`);

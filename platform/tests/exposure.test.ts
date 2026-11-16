@@ -11,6 +11,7 @@ describe("Exposure: what each deployment shows", () => {
   describe("path classes", () => {
     it("health, public API and admin", () => {
       assert.equal(classifyPath("/api/health"), "health");
+      for (const p of ["/api/bridge/health", "/api/bridge/auth/login", "/api/bridge/rpc"]) assert.equal(classifyPath(p), "bridge", p);
       for (const p of ["/api/intake/lead", "/api/intake/consent", "/api/public/news", "/api/public/availability", "/api/public/legal"]) assert.equal(classifyPath(p), "public_api", p);
       for (const p of ["/", "/login", "/login/mfa", "/contacts", "/contacts/abc", "/requests", "/bookings", "/news", "/export", "/retention", "/users", "/audit", "/api/export", "/api/media", "/api/media/x", "/api/cron/outbox", "/api/healthz", "/api/intakeX", "/anything"]) assert.equal(classifyPath(p), "admin", p);
     });
