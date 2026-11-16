@@ -374,6 +374,16 @@ export async function bridgeRpc(request: NextRequest): Promise<Response> {
       case "attendance.correct": return Response.json(await correctEntry(pool, actor, { entryId: text(input.entryId, 80), newCount: Number(input.newCount), expectedCount: Number(input.expectedCount), reason: text(input.reason, 80) }, await requestMeta()));
       case "contacts.list": return Response.json(await listContacts(pool, actor, input.filters as never, Number(input.page) || 1));
       case "legal.published": return Response.json(await getPublished(pool));
+      case "audit.list": {
+        if (!can(session.user.role, "audit.view")) throw new ForbiddenError();
+        const rows = await pool.query<{ id: string; at: Date; action: string; entity_type: string | null; entity_id: string | null; actor: string | null; detail: string | null }>(
+          `SELECT a.id, a.at, a.action, a.entity_type, a.entity_id, u.name AS actor,
+                  left(coalesce(a.after, a.before)::text, 160) AS detail
+             FROM bb.audit_log a LEFT JOIN bb.users u ON u.id = a.actor_user_id
+            ORDER BY a.id DESC LIMIT 200`,
+        );
+        return Response.json({ rows: rows.rows.map((row) => ({ ...row, at: row.at.toISOString() })) }, { headers: { "Cache-Control": "no-store" } });
+      }
       default: throw new BridgeHttpError(404, "operation_not_allowed");
     }
   } catch (error) {

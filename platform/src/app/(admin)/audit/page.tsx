@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 
 export const metadata: Metadata = { title: "Журнал действий" };
 
@@ -16,12 +19,20 @@ interface Row {
 
 export default async function AuditPage() {
   await requirePermission("audit.view");
-  const { rows } = await getPool().query<Row>(
-    `SELECT a.id, a.at, a.action, a.entity_type, a.entity_id, u.name AS actor,
-            left(coalesce(a.after, a.before)::text, 160) AS detail
-       FROM bb.audit_log a LEFT JOIN bb.users u ON u.id = a.actor_user_id
-      ORDER BY a.id DESC LIMIT 200`,
-  );
+  let rows: Row[];
+  if (legacyBridgeEnabled()) {
+    const token = (await cookies()).get(SESSION_COOKIE)?.value;
+    if (!token) throw new Error("session_missing");
+    const remote = await bridgeRpc<{ rows: Array<Omit<Row, "at"> & { at: string }> }>("audit.list", {}, token);
+    rows = remote.rows.map((row) => ({ ...row, at: new Date(row.at) }));
+  } else {
+    ({ rows } = await getPool().query<Row>(
+      `SELECT a.id, a.at, a.action, a.entity_type, a.entity_id, u.name AS actor,
+              left(coalesce(a.after, a.before)::text, 160) AS detail
+         FROM bb.audit_log a LEFT JOIN bb.users u ON u.id = a.actor_user_id
+        ORDER BY a.id DESC LIMIT 200`,
+    ));
+  }
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "medium", timeZone: "Asia/Almaty" });
   return (
     <div className="grid gap-4">
