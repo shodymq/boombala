@@ -17,7 +17,7 @@ Run:
 ```
 SHEETS_SPREADSHEET_ID=… GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/path/key.json READ_URL=… [STAGING_URL=…] npm run sheets:dry-run -- [--hours 10:00-23:00] [--report-file local.json]  # or: --csv banquets.csv
 ```
-`READ_URL` is only used inside `BEGIN TRANSACTION READ ONLY`. `STAGING_URL` must be a different, non-production database. Stdout is aggregate counts only; row-level data goes only to the local `--report-file` (mode 600, never commit it).
+`READ_URL` is only used inside `BEGIN TRANSACTION READ ONLY`, after a privilege preflight (`checkReadAccess`) that refuses a write-capable, superuser or RLS-blocked role and names any missing column. The CRM snapshot works on both the pre-015 schema (`slot_date` + `slot_id` + `time_slots.starts_at`) and post-015 (exact `starts_at`, minutes kept); the schema is detected from `pg_attribute`. Migration 015 is never applied for this. `STAGING_URL` must be a different, non-production database. Stdout is aggregate counts only; row-level data goes only to the local `--report-file` (mode 600, never commit it).
 
 ## Real-sheet formats handled (verified on the owner's CSV export, aggregates only)
 Header names «кабинка», «номер», «имя», «имя ребенка», «дет», «взр», «Наименование пакет»; a junk first line is skipped. Dates `dd.mm.yy`/`dd.mm.yyyy`; phones with bidi marks; prepayment `10к`, `10к нал`, `20к перевод …` (→ KZT amount, unverified), `по факту` (= no prepayment); counts `7-8`, `≈15`, `по факту` (→ `count_approximate`, value left empty, never guessed); ages `8 лет`, `3 годик`. Rooms/packages resolve by exact name or alias (Рапунцель→Rapunzel Room, Boom bala party→BOOM PARTY); shared areas (`2 этаж`, `Общий зал`, `Ресторан`), typos and anything with «уточнить»/«согласовать» are not guessed and go to review. The unnamed column with `П` is **not** used as a confirmation flag (its meaning is unconfirmed).
@@ -42,4 +42,4 @@ Header names «кабинка», «номер», «имя», «имя ребен
 6. Rollback: bookings are released (not deleted) by the existing release flow; staging rows are untouched.
 
 ## Owner request (one)
-Either send a CSV export (File → Download → CSV) to the machine that runs the dry run, or share the spreadsheet **read-only (Viewer)** with a new service-account e-mail, and put its JSON key into a root-only file on the machine that runs the dry run (not in chat or Git). Also provide `READ_URL` with a read-only DB role (as in the backup request, `bb_backup` works).
+Either send a CSV export (File → Download → CSV) to the machine that runs the dry run, or share the spreadsheet **read-only (Viewer)** with a new service-account e-mail, and put its JSON key into a root-only file on the machine that runs the dry run (not in chat or Git). Also provide `READ_URL` for a temporary column-level read-only role: see [sheets-import-owner-runbook.md](sheets-import-owner-runbook.md). Do not use the broad `bb_backup` role.

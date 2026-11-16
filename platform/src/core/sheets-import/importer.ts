@@ -51,16 +51,100 @@ export async function loadCatalog(db: Queryable): Promise<Catalog> {
   return { rooms: rooms.rows, packages: packages.rows };
 }
 
-/** Read-only: no payment, token or credential column is selected. */
-export async function loadCrmSnapshot(db: Queryable): Promise<CrmSnapshot> {
+/** Production may still be on the pre-015 schema (slot_date + slot_id -> time_slots) or already on post-015 (exact starts_at). */
+export type SchemaVersion = "pre-015" | "post-015";
+
+/**
+ * Detected from pg_attribute, not information_schema: information_schema hides columns the role cannot read, and a
+ * grant that forgot `starts_at` must show up as "missing privilege", not as "pre-015".
+ */
+export async function detectSchemaVersion(db: Queryable): Promise<SchemaVersion> {
+  const r = await db.query<{ ok: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'bb.slot_reservations'::regclass AND attname = 'starts_at' AND NOT attisdropped) AS ok`);
+  return r.rows[0]?.ok ? "post-015" : "pre-015";
+}
+
+/** Every column the importer reads, per schema version. The grant SQL (scripts/sql/sheets-ro-grant.sql) must match this. */
+export const REQUIRED_COLUMNS: Record<SchemaVersion, Record<string, string[]>> = {
+  "pre-015": {
+    rooms: ["id", "name", "is_active", "sort_order"],
+    packages: ["id", "name", "is_active", "sort_order"],
+    lead_requests: ["id", "contact_id", "requested_date", "children", "package_id", "room_id", "status"],
+    contacts: ["id", "phone_e164", "name_key"],
+    slot_reservations: ["id", "kind", "room_id", "contact_id", "slot_date", "slot_id", "released_at", "children", "package_id"],
+    time_slots: ["id", "starts_at"],
+  },
+  "post-015": {
+    rooms: ["id", "name", "is_active", "sort_order"],
+    packages: ["id", "name", "is_active", "sort_order"],
+    lead_requests: ["id", "contact_id", "requested_date", "children", "package_id", "room_id", "status"],
+    contacts: ["id", "phone_e164", "name_key"],
+    slot_reservations: ["id", "kind", "room_id", "contact_id", "starts_at", "released_at", "children", "package_id"],
+  },
+};
+
+export interface AccessReport {
+  schema: SchemaVersion;
+  /** table.column that does not exist or that the current role cannot SELECT. */
+  missing: string[];
+  /** Tables on which the current role could write (INSERT/UPDATE/DELETE/TRUNCATE). Must be empty. */
+  writable: string[];
+  superuser: boolean;
+  /** Required tables where row-level security would hide rows from this role (it would read 0 rows silently). */
+  rlsBlocked: string[];
+  /** bb tables the role can read as a whole table (more than the column grants need). Names only. */
+  overbroadRead: string[];
+  ok: boolean;
+}
+
+/** Checks real PostgreSQL privileges of the connected role. Reports table and column NAMES only, never data. */
+export async function checkReadAccess(db: Queryable): Promise<AccessReport> {
+  const schema = await detectSchemaVersion(db);
+  const missing: string[] = [];
+  for (const [table, cols] of Object.entries(REQUIRED_COLUMNS[schema])) {
+    for (const col of cols) {
+      const r = await db.query<{ exists: boolean; can: boolean | null }>(
+        `SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass($1) AND attname = $2 AND NOT attisdropped) AS exists,
+                CASE WHEN to_regclass($1) IS NULL THEN false ELSE has_column_privilege(current_user, to_regclass($1), $2, 'SELECT') END AS can`,
+        [`bb.${table}`, col]);
+      if (!r.rows[0]?.exists || !r.rows[0]?.can) missing.push(`${table}.${col}`);
+    }
+  }
+  const tables = await db.query<{ relname: string; w: boolean; s: boolean }>(
+    `SELECT c.relname,
+            (has_table_privilege(current_user, c.oid, 'INSERT') OR has_table_privilege(current_user, c.oid, 'UPDATE')
+              OR has_table_privilege(current_user, c.oid, 'DELETE') OR has_table_privilege(current_user, c.oid, 'TRUNCATE')) AS w,
+            has_table_privilege(current_user, c.oid, 'SELECT') AS s
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'bb' AND c.relkind IN ('r', 'p') ORDER BY c.relname`);
+  const su = await db.query<{ rolsuper: boolean }>("SELECT rolsuper FROM pg_roles WHERE rolname = current_user");
+  const writable = tables.rows.filter((t) => t.w).map((t) => t.relname);
+  const overbroadRead = tables.rows.filter((t) => t.s).map((t) => t.relname);
+  const superuser = Boolean(su.rows[0]?.rolsuper);
+  const rlsBlocked: string[] = [];
+  for (const table of Object.keys(REQUIRED_COLUMNS[schema])) {
+    const r = await db.query<{ active: boolean | null }>("SELECT row_security_active(to_regclass($1)) AS active", [`bb.${table}`]);
+    if (r.rows[0]?.active) rlsBlocked.push(table);
+  }
+  return { schema, missing, writable, superuser, rlsBlocked, overbroadRead, ok: missing.length === 0 && writable.length === 0 && !superuser && rlsBlocked.length === 0 };
+}
+
+/** Read-only: no payment, token or credential column is selected. Works on both schema versions; times are saved verbatim. */
+export async function loadCrmSnapshot(db: Queryable, version?: SchemaVersion): Promise<CrmSnapshot> {
+  const v = version ?? (await detectSchemaVersion(db));
   const leads = await db.query<{ id: string; d: string; phone: string; name_key: string; children: number | null; package_id: string | null; room_id: string | null; status: string }>(
     `SELECT l.id, to_char(l.requested_date,'YYYY-MM-DD') AS d, c.phone_e164 AS phone, c.name_key, l.children, l.package_id, l.room_id, l.status
        FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id`);
-  const res = await db.query<{ id: string; d: string; t: string; room_id: string; phone: string | null; children: number | null; package_id: string | null }>(
-    `SELECT r.id, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','YYYY-MM-DD') AS d, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','HH24:MI') AS t,
-            r.room_id, c.phone_e164 AS phone, r.children, r.package_id
-       FROM bb.slot_reservations r LEFT JOIN bb.contacts c ON c.id = r.contact_id
-      WHERE r.released_at IS NULL AND r.kind = 'booking'`);
+  const reservationSql = v === "post-015"
+    ? `SELECT r.id, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','YYYY-MM-DD') AS d, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty','HH24:MI') AS t,
+              r.room_id, c.phone_e164 AS phone, r.children, r.package_id
+         FROM bb.slot_reservations r LEFT JOIN bb.contacts c ON c.id = r.contact_id
+        WHERE r.released_at IS NULL AND r.kind = 'booking'`
+    : `SELECT r.id, to_char(r.slot_date,'YYYY-MM-DD') AS d, to_char(ts.starts_at,'HH24:MI') AS t,
+              r.room_id, c.phone_e164 AS phone, r.children, r.package_id
+         FROM bb.slot_reservations r JOIN bb.time_slots ts ON ts.id = r.slot_id LEFT JOIN bb.contacts c ON c.id = r.contact_id
+        WHERE r.released_at IS NULL AND r.kind = 'booking'`;
+  const res = await db.query<{ id: string; d: string; t: string; room_id: string; phone: string | null; children: number | null; package_id: string | null }>(reservationSql);
   return {
     leads: leads.rows.map((l) => ({ id: l.id, date: l.d, phoneE164: l.phone, nameKey: l.name_key ?? nameKey(""), children: l.children, packageId: l.package_id, roomId: l.room_id, status: l.status })),
     reservations: res.rows.map((r) => ({ id: r.id, date: r.d, startTime: r.t, roomId: r.room_id, phoneE164: r.phone, children: r.children, packageId: r.package_id })),
