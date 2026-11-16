@@ -30,6 +30,17 @@ test("start options use a whole-hour step and end inside working hours", () => {
   assert.equal(options.length, (1380 - 600 - 240) / 60 + 1);
 });
 
+test("opening on a half-hour still offers only HH:00 starts", () => {
+  const window = { openMin: 10 * 60 + 30, closeMin: 22 * 60 + 30 };
+  const options = startOptions(window);
+  assert.equal(options[0], "11:00");
+  assert.equal(options.at(-1), "18:00");
+  assert.equal(options.length, 8);
+  assert.equal(options.includes("10:30"), false);
+  assert.equal(isBookableStart("10:30", window), false);
+  assert.equal(isBookableStart("11:00", window), true);
+});
+
 test("a start must be on the step and fit the window", () => {
   const window = { openMin: 600, closeMin: 1380 };
   assert.equal(isBookableStart("14:00", window), true);
