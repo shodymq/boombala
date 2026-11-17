@@ -1,6 +1,7 @@
 "use server";
 
 import { after } from "next/server";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
@@ -9,9 +10,17 @@ import { notifySite } from "../../../server/api.ts";
 import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
+import { bridgeRpc, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
+import { SESSION_COOKIE } from "../../../server/env.ts";
 
 const uuid = z.string().uuid();
 const str = (f: FormData, k: string) => String(f.get(k) ?? "");
+
+async function bridgeToken(): Promise<string> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token) throw new ValidationError({ session: "missing" });
+  return token;
+}
 
 function failure(error: unknown, back = "/news"): never {
   let code = "failed";
@@ -39,7 +48,9 @@ export async function createPostAction(formData: FormData): Promise<void> {
   const { user } = await requirePermission("news.manage");
   let id = "";
   try {
-    id = (await createPost(getPool(), { id: user.id, role: user.role }, input(formData), await requestMeta())).id;
+    id = legacyBridgeEnabled()
+      ? (await bridgeRpc<{ id: string }>("news.create", input(formData), await bridgeToken())).id
+      : (await createPost(getPool(), { id: user.id, role: user.role }, input(formData), await requestMeta())).id;
   } catch (error) {
     return failure(error, "/news/new");
   }
@@ -52,8 +63,14 @@ export async function savePostAction(formData: FormData): Promise<void> {
   if (!id.success) return failure(new ValidationError({ id: "bad" }));
   let slug = "";
   try {
-    await updatePost(getPool(), { id: user.id, role: user.role }, id.data, input(formData), await requestMeta());
-    slug = (await getPool().query<{ slug: string }>("SELECT slug FROM bb.news_posts WHERE id = $1", [id.data])).rows[0]?.slug ?? "";
+    if (legacyBridgeEnabled()) {
+      const token = await bridgeToken();
+      await bridgeRpc("news.update", { id: id.data, ...input(formData) }, token);
+      slug = (await bridgeRpc<{ slug: string } | null>("news.get", { id: id.data }, token))?.slug ?? "";
+    } else {
+      await updatePost(getPool(), { id: user.id, role: user.role }, id.data, input(formData), await requestMeta());
+      slug = (await getPool().query<{ slug: string }>("SELECT slug FROM bb.news_posts WHERE id = $1", [id.data])).rows[0]?.slug ?? "";
+    }
   } catch (error) {
     return failure(error, `/news/${id.data}`);
   }
@@ -70,7 +87,9 @@ export async function publishPostAction(formData: FormData): Promise<void> {
   try {
     // The field is a local Almaty time (UTC+5, no daylight saving).
     const when = at ? new Date(`${at}:00+05:00`) : null;
-    slug = await publishPost(getPool(), { id: user.id, role: user.role }, id.data, when, await requestMeta());
+    slug = legacyBridgeEnabled()
+      ? await bridgeRpc<string>("news.publish", { id: id.data, publishAt: when?.toISOString() }, await bridgeToken())
+      : await publishPost(getPool(), { id: user.id, role: user.role }, id.data, when, await requestMeta());
   } catch (error) {
     return failure(error, `/news/${id.data}`);
   }
@@ -84,7 +103,9 @@ export async function unpublishPostAction(formData: FormData): Promise<void> {
   if (!id.success) return failure(new ValidationError({ id: "bad" }));
   let slug = "";
   try {
-    slug = await unpublishPost(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
+    slug = legacyBridgeEnabled()
+      ? await bridgeRpc<string>("news.unpublish", { id: id.data }, await bridgeToken())
+      : await unpublishPost(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
   } catch (error) {
     return failure(error, `/news/${id.data}`);
   }
@@ -98,7 +119,9 @@ export async function deletePostAction(formData: FormData): Promise<void> {
   if (!id.success) return failure(new ValidationError({ id: "bad" }));
   let slug = "";
   try {
-    slug = await deletePost(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
+    slug = legacyBridgeEnabled()
+      ? await bridgeRpc<string>("news.delete", { id: id.data }, await bridgeToken())
+      : await deletePost(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
   } catch (error) {
     return failure(error, `/news/${id.data}`);
   }
@@ -111,7 +134,8 @@ export async function deleteImageAction(formData: FormData): Promise<void> {
   const id = uuid.safeParse(formData.get("id"));
   if (!id.success) return failure(new ValidationError({ id: "bad" }), "/news/media");
   try {
-    await deleteImage(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
+    if (legacyBridgeEnabled()) await bridgeRpc("news.deleteImage", { id: id.data }, await bridgeToken());
+    else await deleteImage(getPool(), { id: user.id, role: user.role }, id.data, await requestMeta());
   } catch (error) {
     return failure(error, "/news/media");
   }
