@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { listLeads } from "@/core/bookings";
 import { listPackages, listRooms, listSlots } from "@/core/catalog";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { confirmLeadAction, leadStatusAction } from "./actions";
 
 export const metadata: Metadata = { title: "Заявки" };
@@ -25,7 +28,19 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   const status = sp.status && STATUS[sp.status] ? sp.status : undefined;
   const actor = { id: user.id, role: user.role };
   const pool = getPool();
-  const [leads, packages, rooms, slots] = await Promise.all([listLeads(pool, actor, { status }), listPackages(pool), listRooms(pool), listSlots(pool)]);
+  const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+  if (legacyBridgeEnabled() && !token) throw new Error("session_missing");
+  const remoteCatalog = legacyBridgeEnabled()
+    ? await bridgeRpc<{ packages: Awaited<ReturnType<typeof listPackages>>; rooms: Awaited<ReturnType<typeof listRooms>>; slots: Awaited<ReturnType<typeof listSlots>> }>("catalog", {}, token as string)
+    : null;
+  const [leads, packages, rooms, slots] = legacyBridgeEnabled()
+    ? await Promise.all([
+        bridgeRpc<Awaited<ReturnType<typeof listLeads>>>("requests.list", status ? { status } : {}, token as string).then((rows) => rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt) }))),
+        Promise.resolve(remoteCatalog!.packages),
+        Promise.resolve(remoteCatalog!.rooms),
+        Promise.resolve(remoteCatalog!.slots),
+      ])
+    : await Promise.all([listLeads(pool, actor, { status }), listPackages(pool), listRooms(pool), listSlots(pool)]);
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
   const pkgName = (id: string | null) => packages.find((p) => p.id === id)?.name ?? "не выбран";
 
@@ -53,23 +68,27 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
               {l.reservationId ? <p className="mt-1 text-sm"><Link href={`/bookings?date=${l.requestedDate}`} className="font-extrabold text-grape-700 underline">Показать в календаре</Link></p> : null}
               {open ? (
                 <>
-                  <form action={confirmLeadAction} className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <input type="hidden" name="id" value={l.id} />
-                    <input type="date" name="date" defaultValue={l.requestedDate} required className={input} aria-label="Дата" />
-                    <select name="slotId" defaultValue={l.slotId ?? ""} required className={input} aria-label="Слот">
-                      <option value="" disabled>Слот</option>
-                      {slots.map((s) => <option key={s.id} value={s.id}>{s.startsAt}–{s.endsAt}</option>)}
-                    </select>
-                    <select name="roomId" defaultValue={l.roomId ?? ""} required className={input} aria-label="Комната">
-                      <option value="" disabled>Комната</option>
-                      {rooms.filter((r) => r.isActive).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                    </select>
-                    <select name="packageId" defaultValue={l.packageId ?? ""} required className={input} aria-label="Пакет">
-                      <option value="" disabled>Пакет</option>
-                      {packages.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <button type="submit" className={btn + " sm:col-span-2 sm:justify-self-start"}>Подтвердить бронь</button>
-                  </form>
+                  {legacyBridgeEnabled() ? (
+                    <p className="mt-3 text-sm font-bold text-muted">Подтверждение выполняется в календаре после фиксации ручной предоплаты. <Link href={`/bookings?date=${l.requestedDate ?? ""}&new=1`} className="text-grape-700 underline">Открыть календарь</Link></p>
+                  ) : (
+                    <form action={confirmLeadAction} className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <input type="hidden" name="id" value={l.id} />
+                      <input type="date" name="date" defaultValue={l.requestedDate} required className={input} aria-label="Дата" />
+                      <select name="slotId" defaultValue={l.slotId ?? ""} required className={input} aria-label="Слот">
+                        <option value="" disabled>Слот</option>
+                        {slots.map((s) => <option key={s.id} value={s.id}>{s.startsAt}–{s.endsAt}</option>)}
+                      </select>
+                      <select name="roomId" defaultValue={l.roomId ?? ""} required className={input} aria-label="Комната">
+                        <option value="" disabled>Комната</option>
+                        {rooms.filter((r) => r.isActive).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      <select name="packageId" defaultValue={l.packageId ?? ""} required className={input} aria-label="Пакет">
+                        <option value="" disabled>Пакет</option>
+                        {packages.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                      <button type="submit" className={btn + " sm:col-span-2 sm:justify-self-start"}>Подтвердить бронь</button>
+                    </form>
+                  )}
                   <div className="mt-2 flex flex-wrap gap-2">
                     {l.status === "new" ? <form action={leadStatusAction}><input type="hidden" name="id" value={l.id} /><input type="hidden" name="status" value="in_progress" /><button type="submit" className={btnGhost}>В работу</button></form> : null}
                     <form action={leadStatusAction}><input type="hidden" name="id" value={l.id} /><input type="hidden" name="status" value="cancelled" /><button type="submit" className={btnGhost}>Отклонить</button></form>

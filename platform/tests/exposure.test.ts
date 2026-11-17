@@ -11,6 +11,7 @@ describe("Exposure: what each deployment shows", () => {
   describe("path classes", () => {
     it("health, public API and admin", () => {
       assert.equal(classifyPath("/api/health"), "health");
+      for (const p of ["/api/bridge/health", "/api/bridge/auth/login", "/api/bridge/rpc"]) assert.equal(classifyPath(p), "bridge", p);
       for (const p of ["/api/intake/lead", "/api/intake/consent", "/api/public/news", "/api/public/availability", "/api/public/legal"]) assert.equal(classifyPath(p), "public_api", p);
       for (const p of ["/", "/login", "/login/mfa", "/contacts", "/contacts/abc", "/requests", "/bookings", "/news", "/export", "/retention", "/users", "/audit", "/api/export", "/api/media", "/api/media/x", "/api/cron/outbox", "/api/healthz", "/api/intakeX", "/anything"]) assert.equal(classifyPath(p), "admin", p);
     });
@@ -105,6 +106,18 @@ describe("Exposure: what each deployment shows", () => {
       assert.equal(parseRole("api"), "api");
       assert.ok(profileProblems({ PLATFORM_PROFILE: "kz-production", PLATFORM_ROLE: "Admin" }).includes("role_must_be_admin_or_api"));
     });
+    it("fails closed when a production runtime has no valid profile or role", () => {
+      const missing = { NODE_ENV: "production" };
+      const unknown = { NODE_ENV: "production", PLATFORM_PROFILE: "kz-prodution", PLATFORM_ROLE: "all" };
+      assert.equal(exposureFromEnv(missing).role, "invalid");
+      assert.equal(exposureFromEnv(unknown).role, "invalid");
+      assert.ok(profileProblems(missing).includes("production_profile_required"));
+      assert.ok(profileProblems(unknown).includes("production_profile_required"));
+      assert.deepEqual(
+        decideExposure(exposureFromEnv(missing), req("/login", "panel.example.test", "10.77.0.5")),
+        { allow: false, status: 404, reason: "role" },
+      );
+    });
   });
 
   describe("the Kazakhstan production profile (fail closed)", () => {
@@ -118,7 +131,7 @@ describe("Exposure: what each deployment shows", () => {
     it("a complete admin and a complete API configuration are accepted", () => {
       assert.deepEqual(profileProblems(goodAdmin), []);
       assert.deepEqual(profileProblems(goodApi), []);
-      assert.deepEqual(profileProblems({ PLATFORM_ROLE: "all" }), [], "other profiles have no requirements");
+      assert.deepEqual(profileProblems({ PLATFORM_ROLE: "all" }), [], "local/Preview without production markers remains isolated");
     });
     it("the admin is refused without the second factor, without a valid key, without a network allowlist, over plain HTTP, without a host list", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, MFA_MODE: "off" }), ["mfa_required"]);

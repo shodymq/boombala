@@ -6,6 +6,7 @@ import { ConflictError, ValidationError } from "./errors.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
 import { assertCan, type Actor } from "./rbac.ts";
 import { resolvePrice, type PriceSource } from "./catalog.ts";
+import { almatyWindow } from "./booking-calendar.ts";
 import type { RequestMeta } from "./users.ts";
 
 /**
@@ -17,11 +18,24 @@ import type { RequestMeta } from "./users.ts";
  */
 
 const CELL_INDEX = "slot_reservations_active_cell_idx";
+const INTERVAL_INDEX = "slot_reservations_active_room_interval_excl";
 const LEAD_INDEX = "slot_reservations_active_lead_idx";
+
+function instant(value: string | Date): number {
+  return value instanceof Date ? value.getTime() : Date.parse(value);
+}
+
+function overlaps(startA: string, endA: string, startB: string | Date, endB: string | Date): boolean {
+  return instant(startA) < instant(endB) && instant(startB) < instant(endA);
+}
 
 function mapDbError(error: unknown): never {
   const e = error as { code?: string; constraint?: string; message?: string };
   if (e?.code === "23505" && e.constraint === CELL_INDEX) throw new ConflictError("slot_taken");
+  if (e?.code === "23P01" && e.constraint === INTERVAL_INDEX) throw new ConflictError("slot_taken");
+  // GiST exclusion checks can report a deadlock when two managers claim the same room at once. The transaction is
+  // already aborted, so exposing this as the same clean occupancy conflict is safe and keeps the caller retryable.
+  if (e?.code === "40P01") throw new ConflictError("slot_taken");
   if (e?.code === "23505" && e.constraint === LEAD_INDEX) throw new ConflictError("lead_already_booked");
   if (typeof e?.message === "string" && e.message.includes("slot_started")) throw new ValidationError({ date: "Этот слот уже начался" });
   throw error;
@@ -56,10 +70,10 @@ export async function getGrid(db: Queryable, actor: Actor, date: string): Promis
   const [rooms, slots, res, leads] = await Promise.all([
     db.query<{ id: string; name: string }>("SELECT id, name FROM bb.rooms WHERE is_active ORDER BY sort_order, id"),
     db.query<{ id: number; starts_at: string; ends_at: string }>(
-      "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY id",
+      "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY starts_at, id",
     ),
     db.query(
-      `SELECT r.id, r.kind, r.slot_id, r.room_id, r.price_kzt, r.note, c.name AS customer, c.phone_e164, p.name AS package_name
+      `SELECT r.id, r.kind, r.slot_id, r.room_id, r.starts_at, r.ends_at, r.price_kzt, r.note, c.name AS customer, c.phone_e164, p.name AS package_name
          FROM bb.slot_reservations r
          LEFT JOIN bb.contacts c ON c.id = r.contact_id
          LEFT JOIN bb.packages p ON p.id = r.package_id
@@ -75,7 +89,8 @@ export async function getGrid(db: Queryable, actor: Actor, date: string): Promis
   const cells: Cell[] = [];
   for (const room of rooms.rows) {
     for (const slot of slots.rows) {
-      const r = res.rows.find((x) => x.room_id === room.id && x.slot_id === slot.id);
+      const window = almatyWindow(date, slot.starts_at);
+      const r = res.rows.find((x) => x.room_id === room.id && overlaps(window.startIso, window.endIso, x.starts_at, x.ends_at));
       const pending = leads.rows.find((x) => x.room_id === room.id && x.slot_id === slot.id)?.n ?? 0;
       cells.push(
         r
@@ -112,11 +127,24 @@ async function checkTarget(tx: Client, date: string, slotId: unknown, roomId: un
   if (typeof date !== "string" || !isValidDate(date)) errors.date = "Укажите дату";
   else if (date < almatyToday()) errors.date = "Нельзя занять прошедшую дату";
   const slot = Number(slotId);
-  if (![1, 2, 3].includes(slot)) errors.slotId = "Выберите слот";
+  if (!Number.isInteger(slot) || slot <= 0) errors.slotId = "Выберите время начала";
   if (typeof roomId !== "string" || !roomId) errors.roomId = "Выберите комнату";
   if (Object.keys(errors).length) throw new ValidationError(errors);
+  const slotRow = await tx.query<{ starts_at: string; ends_at: string }>(
+    `SELECT to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at
+       FROM bb.time_slots
+      WHERE id = $1
+        AND ends_at = starts_at + interval '4 hours'
+        AND extract(second FROM starts_at) = 0`,
+    [slot],
+  );
+  if (!slotRow.rowCount) throw new ValidationError({ slotId: "Время должно быть корректным и длиться 4 часа" });
   const room = await tx.query("SELECT 1 FROM bb.rooms WHERE id = $1 AND is_active", [roomId]);
   if (!room.rowCount) throw new ValidationError({ roomId: "Комната недоступна" });
+  // Serialize claims for one room/day before PostgreSQL's exclusion constraint. The constraint remains the final
+  // authority, including for writers that bypass this module; this lock prevents a GiST deadlock from becoming a
+  // misleading 500 under normal concurrent manager actions.
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`birthday:${date}:${roomId}`]);
   return { slotId: slot, roomId: roomId as string };
 }
 
@@ -349,9 +377,9 @@ export async function dayAvailability(db: Queryable, date: string): Promise<DayA
   const [rooms, slots, taken, packages] = await Promise.all([
     db.query<{ id: string; name: string }>("SELECT id, name FROM bb.rooms WHERE is_active ORDER BY sort_order, id"),
     db.query<{ id: number; starts_at: string; ends_at: string }>(
-      "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY id",
+      "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY starts_at, id",
     ),
-    db.query<{ slot_id: number; room_id: string }>("SELECT slot_id, room_id FROM bb.slot_reservations WHERE slot_date = $1 AND released_at IS NULL", [date]),
+    db.query<{ room_id: string; starts_at: string | Date; ends_at: string | Date }>("SELECT room_id, starts_at, ends_at FROM bb.slot_reservations WHERE slot_date = $1 AND released_at IS NULL", [date]),
     db.query<{ id: string }>("SELECT id FROM bb.packages WHERE is_active ORDER BY sort_order, id"),
   ]);
   const prices: DayAvailability["prices"] = {};
@@ -363,7 +391,10 @@ export async function dayAvailability(db: Queryable, date: string): Promise<DayA
       id: s.id,
       startsAt: s.starts_at,
       endsAt: s.ends_at,
-      freeRoomIds: rooms.rows.filter((r) => !taken.rows.some((t) => t.slot_id === s.id && t.room_id === r.id)).map((r) => r.id),
+      freeRoomIds: rooms.rows.filter((r) => {
+        const window = almatyWindow(date, s.starts_at);
+        return !taken.rows.some((t) => t.room_id === r.id && overlaps(window.startIso, window.endIso, t.starts_at, t.ends_at));
+      }).map((r) => r.id),
     })),
     prices,
   };
@@ -372,20 +403,34 @@ export async function dayAvailability(db: Queryable, date: string): Promise<DayA
 /** Free rooms per slot for each day of a month that has at least one reservation; days not listed are entirely free. */
 export async function monthAvailability(db: Queryable, month: string): Promise<{ month: string; roomCount: number; days: Record<string, Record<string, number>> }> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new ValidationError({ month: "Некорректный месяц" });
-  const [rooms, taken] = await Promise.all([
+  const [rooms, slots, taken] = await Promise.all([
     db.query<{ n: number }>("SELECT count(*)::int AS n FROM bb.rooms WHERE is_active"),
-    db.query<{ d: string; slot_id: number; n: number }>(
-      `SELECT to_char(slot_date, 'YYYY-MM-DD') AS d, slot_id, count(*)::int AS n FROM bb.slot_reservations
+    db.query<{ id: number; starts_at: string }>("SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at FROM bb.time_slots ORDER BY starts_at, id"),
+    db.query<{ d: string; room_id: string; starts_at: string | Date; ends_at: string | Date }>(
+      `SELECT to_char(slot_date, 'YYYY-MM-DD') AS d, room_id, starts_at, ends_at FROM bb.slot_reservations
         WHERE released_at IS NULL AND slot_date >= ($1 || '-01')::date AND slot_date < (($1 || '-01')::date + interval '1 month')
-        GROUP BY slot_date, slot_id`,
+        ORDER BY slot_date, room_id, starts_at`,
       [month],
     ),
   ]);
   const roomCount = rooms.rows[0].n;
   const days: Record<string, Record<string, number>> = {};
+  const occupiedByDay = new Map<string, Map<number, Set<string>>>();
   for (const t of taken.rows) {
-    days[t.d] ??= { "1": roomCount, "2": roomCount, "3": roomCount };
-    days[t.d][String(t.slot_id)] = Math.max(roomCount - t.n, 0);
+    const bySlot = occupiedByDay.get(t.d) ?? new Map<number, Set<string>>();
+    occupiedByDay.set(t.d, bySlot);
+    for (const slot of slots.rows) {
+      const window = almatyWindow(t.d, slot.starts_at);
+      if (overlaps(window.startIso, window.endIso, t.starts_at, t.ends_at)) {
+        const occupiedRooms = bySlot.get(slot.id) ?? new Set<string>();
+        occupiedRooms.add(t.room_id);
+        bySlot.set(slot.id, occupiedRooms);
+      }
+    }
+  }
+  for (const [day, bySlot] of occupiedByDay) {
+    days[day] = Object.fromEntries(slots.rows.map((slot) => [String(slot.id), roomCount]));
+    for (const [slotId, occupiedRooms] of bySlot) days[day][String(slotId)] = Math.max(roomCount - occupiedRooms.size, 0);
   }
   return { month, roomCount, days };
 }

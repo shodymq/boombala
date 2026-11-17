@@ -12,17 +12,18 @@
  * mistake in the first one does not expose the admin. Unknown paths and wrong hosts answer 404/421, never a login page.
  */
 
-export type PlatformRole = "admin" | "api" | "all";
+export type PlatformRole = "admin" | "api" | "all" | "invalid";
 
-export function parseRole(value: string | undefined): PlatformRole {
-  return value === "admin" || value === "api" ? value : "all";
+export function parseRole(value: string | undefined, failClosed = false): PlatformRole {
+  return value === "admin" || value === "api" ? value : failClosed ? "invalid" : "all";
 }
 
-export type PathClass = "health" | "public_api" | "admin";
+export type PathClass = "health" | "public_api" | "bridge" | "admin";
 
 /** The health check is allowed everywhere; intake and public reads belong to the API; everything else is admin. */
 export function classifyPath(pathname: string): PathClass {
   if (pathname === "/api/health") return "health";
+  if (pathname.startsWith("/api/bridge/")) return "bridge";
   if (pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/")) return "public_api";
   return "admin";
 }
@@ -95,6 +96,7 @@ export type ExposureDecision = { allow: true } | { allow: false; status: 404 | 4
 const normHost = (h: string) => h.trim().toLowerCase().replace(/\.$/, "");
 
 export function decideExposure(cfg: ExposureConfig, req: ExposureRequest): ExposureDecision {
+  if (cfg.role === "invalid") return { allow: false, status: 404, reason: "role" };
   if (cfg.allowedHosts.length > 0) {
     const host = req.host ? normHost(req.host) : "";
     if (!host || !cfg.allowedHosts.includes(host)) return { allow: false, status: 421, reason: "host" };
@@ -102,11 +104,11 @@ export function decideExposure(cfg: ExposureConfig, req: ExposureRequest): Expos
   const cls = classifyPath(req.pathname);
   if (cls !== "health") {
     if (cfg.role === "api" && cls !== "public_api") return { allow: false, status: 404, reason: "role" };
-    if (cfg.role === "admin" && cls !== "admin") return { allow: false, status: 404, reason: "role" };
+    if (cfg.role === "admin" && cls !== "admin" && cls !== "bridge") return { allow: false, status: 404, reason: "role" };
   }
   // The admin application (and, in a shared deployment, its pages) is reachable only from the VPN networks. The health
   // check of the admin is included: a stranger must learn nothing, not even that something answers there.
-  if ((cfg.role === "admin" || (cfg.role === "all" && cls === "admin")) && cfg.adminCidrs.length > 0) {
+  if ((cfg.role === "admin" || (cfg.role === "all" && cls === "admin")) && cls !== "bridge" && cfg.adminCidrs.length > 0) {
     const ip = req.realIp?.trim() ?? "";
     if (!ip || !cfg.adminCidrs.some((c) => ipInCidr(ip, c))) return { allow: false, status: 404, reason: "network" };
   }
@@ -114,7 +116,11 @@ export function decideExposure(cfg: ExposureConfig, req: ExposureRequest): Expos
 }
 
 export function exposureFromEnv(env: Record<string, string | undefined> = process.env): ExposureConfig {
-  return { role: parseRole(env.PLATFORM_ROLE), allowedHosts: splitList(env.ALLOWED_HOSTS), adminCidrs: (env.ADMIN_ALLOWED_CIDRS ?? "").split(",").map((s) => s.trim()).filter(Boolean) };
+  return {
+    role: parseRole(env.PLATFORM_ROLE, isProductionEnvironment(env)),
+    allowedHosts: splitList(env.ALLOWED_HOSTS),
+    adminCidrs: (env.ADMIN_ALLOWED_CIDRS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  };
 }
 
 // ── The production profile: refuse to run misconfigured ───────────────────────────────────────────────────────
@@ -124,26 +130,29 @@ const ADMIN_ONLY = ["MFA_ENC_KEY", "CRON_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRA
 const API_ONLY = ["PLATFORM_INTAKE_TOKEN", "PLATFORM_IP_PEPPER"] as const;
 
 /**
- * Problems of an environment that claims to be `kz-production`. Empty list = acceptable. Any other profile has no
- * requirements (development, tests, Preview). The app answers 503 to every request while the list is not empty
- * (fail closed) and logs the codes, never values.
+ * Production is identified by the explicit profile or by the runtime's production marker. Preview and local
+ * development remain intentionally isolated/permissive. A production process with a missing, misspelled, or
+ * otherwise unknown profile answers 503 to every request rather than falling back to the shared `all` role.
  */
 export function profileProblems(env: Record<string, string | undefined> = process.env): string[] {
-  if (env.PLATFORM_PROFILE !== "kz-production") return [];
+  const production = isProductionEnvironment(env);
+  const remoteBridge = env.CRM_BRIDGE_MODE === "legacy";
+  if (!production && env.PLATFORM_PROFILE !== "kz-production") return [];
   const p: string[] = [];
+  if (production && env.PLATFORM_PROFILE !== "kz-production") p.push("production_profile_required");
   const role = env.PLATFORM_ROLE;
   if (role !== "admin" && role !== "api") p.push("role_must_be_admin_or_api");
   if (env.PLATFORM_HTTPS !== "1") p.push("https_required");
   if (splitList(env.ALLOWED_HOSTS).length === 0) p.push("allowed_hosts_required");
-  if (!env.DATABASE_URL) p.push("database_url_required");
+  if (!env.DATABASE_URL && !remoteBridge) p.push("database_url_required");
   if (role === "admin") {
     if (env.MFA_MODE !== "required") p.push("mfa_required");
-    if (Buffer.from(env.MFA_ENC_KEY ?? "", "base64").length !== 32) p.push("mfa_key_invalid");
+    if (!remoteBridge && Buffer.from(env.MFA_ENC_KEY ?? "", "base64").length !== 32) p.push("mfa_key_invalid");
     const cidrs = (env.ADMIN_ALLOWED_CIDRS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (cidrs.length === 0) p.push("admin_cidrs_required");
+    if (!remoteBridge && cidrs.length === 0) p.push("admin_cidrs_required");
     if (cidrs.some((c) => !validCidr(c))) p.push("admin_cidrs_invalid");
     if (cidrs.some((c) => c === "0.0.0.0/0" || c === "::/0" || /\/([0-7])$/.test(c))) p.push("admin_cidrs_too_wide");
-    if (!env.CRON_SECRET) p.push("cron_secret_required");
+    if (!remoteBridge && !env.CRON_SECRET) p.push("cron_secret_required");
     // Notifications in production never carry a name or a phone: the message says "new enquiry N", the details are in the CRM.
     if (env.TELEGRAM_NOTIFY_LEVEL !== "minimal") p.push("notify_level_must_be_minimal");
     for (const k of API_ONLY) if (env[k]) p.push(`admin_must_not_have_${k.toLowerCase()}`);
@@ -154,4 +163,9 @@ export function profileProblems(env: Record<string, string | undefined> = proces
     if (env.ADMIN_ALLOWED_CIDRS) p.push("api_must_not_have_admin_cidrs");
   }
   return p;
+}
+
+function isProductionEnvironment(env: Record<string, string | undefined>): boolean {
+  if (env.PLATFORM_PROFILE === "kz-production" || env.VERCEL_ENV === "production") return true;
+  return env.NODE_ENV === "production" && env.VERCEL_ENV !== "preview" && env.VERCEL_ENV !== "development";
 }

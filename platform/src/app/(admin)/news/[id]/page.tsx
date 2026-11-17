@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { parseBody } from "@/core/markup";
 import { getPost, listImages, type PostStatus, type PublicBlock } from "@/core/news";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { deletePostAction, publishPostAction, savePostAction, unpublishPostAction } from "../actions";
 import { PostBlocks } from "../PostBlocks";
 import { PostFields, btn, btnGhost, input } from "../PostForm";
@@ -23,9 +26,12 @@ export default async function EditPostPage({ params, searchParams }: { params: P
   const { id } = await params;
   const sp = await searchParams;
   const actor = { id: user.id, role: user.role };
-  const post = await getPost(getPool(), actor, id);
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  const postRaw = legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof getPost>>>("news.get", { id }, token) : await getPost(getPool(), actor, id);
+  const post = postRaw ? { ...postRaw, createdAt: new Date(postRaw.createdAt), updatedAt: new Date(postRaw.updatedAt), publishedAt: postRaw.publishedAt ? new Date(postRaw.publishedAt) : null } : null;
   if (!post) notFound();
-  const images = await listImages(getPool(), actor);
+  const imagesRaw = legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof listImages>>>("news.images", {}, token) : await listImages(getPool(), actor);
+  const images = imagesRaw.map((i) => ({ ...i, createdAt: new Date(i.createdAt) }));
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
   const blocks: PublicBlock[] = [];
   for (const b of parseBody(post.body)) {

@@ -32,7 +32,7 @@ export async function listRooms(db: Queryable): Promise<CatalogItem[]> {
 
 export async function listSlots(db: Queryable): Promise<TimeSlot[]> {
   const { rows } = await db.query<{ id: number; starts_at: string; ends_at: string }>(
-    "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY id",
+    "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY starts_at, id",
   );
   return rows.map((r) => ({ id: r.id, startsAt: r.starts_at, endsAt: r.ends_at }));
 }

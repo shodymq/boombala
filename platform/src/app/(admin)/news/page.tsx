@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { listPosts, type PostStatus } from "@/core/news";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { btnGhost } from "./PostForm";
 
 export const metadata: Metadata = { title: "Новости" };
@@ -16,7 +19,9 @@ export default async function NewsAdminPage({ searchParams }: { searchParams: Pr
   const { user } = await requirePermission("news.manage");
   const sp = await searchParams;
   const status = sp.status && STATUS[sp.status] ? (sp.status as PostStatus) : undefined;
-  const posts = await listPosts(getPool(), { id: user.id, role: user.role }, { status });
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  const postsRaw = legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof listPosts>>>("news.list", { status }, token) : await listPosts(getPool(), { id: user.id, role: user.role }, { status });
+  const posts = postsRaw.map((p) => ({ ...p, createdAt: new Date(p.createdAt), updatedAt: new Date(p.updatedAt), publishedAt: p.publishedAt ? new Date(p.publishedAt) : null }));
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
   return (
     <div className="grid min-w-0 gap-5">

@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { listImages } from "@/core/news";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { deleteImageAction } from "../actions";
 import { btn, btnGhost, input } from "../PostForm";
 
@@ -16,7 +19,9 @@ const ERRORS: Record<string, string> = {
 export default async function MediaPage({ searchParams }: { searchParams: Promise<{ notice?: string; error?: string }> }) {
   const { user } = await requirePermission("news.manage");
   const sp = await searchParams;
-  const images = await listImages(getPool(), { id: user.id, role: user.role });
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  const imagesRaw = legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof listImages>>>("news.images", {}, token) : await listImages(getPool(), { id: user.id, role: user.role });
+  const images = imagesRaw.map((i) => ({ ...i, createdAt: new Date(i.createdAt) }));
   return (
     <div className="grid min-w-0 gap-5">
       <Link href="/news" className="text-sm font-extrabold text-grape-700">← Новости и акции</Link>

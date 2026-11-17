@@ -8,6 +8,8 @@ import { almatyToday, isValidDate } from "@/core/dates";
 import { attendanceSchemaReady } from "@/core/preflight";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { AttendanceChart } from "./chart";
 import { confirmEntryAction, correctEntryAction, manualEntryAction, searchAction } from "./actions";
 
@@ -81,7 +83,9 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   const days = sp.days === "30" ? 30 : 14;
   const actor = { id: user.id, role: user.role };
   const pool = getPool();
-  if (!(await attendanceSchemaReady(pool))) {
+  const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+  const ready = legacyBridgeEnabled() ? true : await attendanceSchemaReady(pool);
+  if (!ready) {
     return (
       <div className="grid gap-4">
         <h1 className="text-3xl font-black tracking-tight text-grape-800">Посещаемость</h1>
@@ -94,12 +98,17 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   const isToday = date === today;
   const range = rangeEndingAt(date, days);
   const saved = savedSearch((await cookies()).get("bb_att")?.value);
-  const [figures, found, entries, series] = await Promise.all([
-    dayFigures(pool, actor, date),
-    searchRegistrations(pool, actor, date, { q: saved.q, filter: saved.f, limit: saved.n }),
-    listEntries(pool, actor, date),
-    attendanceSeries(pool, actor, range.from, range.to),
-  ]);
+  const remote = legacyBridgeEnabled()
+    ? await bridgeRpc<{
+        figures: Awaited<ReturnType<typeof dayFigures>>;
+        found: Awaited<ReturnType<typeof searchRegistrations>>;
+        entries: Awaited<ReturnType<typeof listEntries>>;
+        series: Awaited<ReturnType<typeof attendanceSeries>>;
+      }>("attendance.view", { date, q: saved.q, filter: saved.f, limit: saved.n, from: range.from, to: range.to }, token as string)
+    : null;
+  const [figures, found, entries, series] = remote
+    ? [remote.figures, remote.found, remote.entries, remote.series]
+    : await Promise.all([dayFigures(pool, actor, date), searchRegistrations(pool, actor, date, { q: saved.q, filter: saved.f, limit: saved.n }), listEntries(pool, actor, date), attendanceSeries(pool, actor, range.from, range.to)]);
   const manualKey = randomUUID();
   const registrations = found.rows;
   const regNo = /^\d{1,9}$/.test(sp.reg ?? "") ? sp.reg : "";

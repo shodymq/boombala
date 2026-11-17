@@ -1,0 +1,105 @@
+import "server-only";
+
+import { randomUUID } from "node:crypto";
+
+export type BridgeLoginInput = { email: string; password: string; ip?: string | null; userAgent?: string | null; mfaRequired: boolean };
+export type BridgeLoginResult =
+  | { ok: true; token: string; expiresAt: string; userId: string; mfa: "none" | "verify" | "enroll" }
+  | { ok: false; reason: "invalid" | "locked"; retryAfterSeconds?: number };
+
+export type BridgeSession = {
+  sessionId: string;
+  user: { id: string; email: string; name: string; role: "owner" | "manager" | "editor"; canExport: boolean };
+};
+
+export class LegacyBridgeError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly requestId: string;
+
+  constructor(status: number, code: string, requestId: string) {
+    super(code);
+    this.name = "LegacyBridgeError";
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+  }
+}
+
+export function legacyBridgeEnabled(): boolean {
+  return process.env.CRM_BRIDGE_MODE === "legacy";
+}
+
+function bridgeBase(): string {
+  const raw = (process.env.CRM_BRIDGE_URL ?? process.env.FASTAPI_ADMIN_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  if (!raw) throw new LegacyBridgeError(503, "bridge_url_missing", "config");
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new LegacyBridgeError(503, "bridge_url_invalid", "config");
+  }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname))) {
+    throw new LegacyBridgeError(503, "bridge_url_invalid", "config");
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+
+function serviceToken(): string {
+  const token = (process.env.CRM_SERVICE_TOKEN ?? "").trim();
+  if (token.length < 32) throw new LegacyBridgeError(503, "bridge_token_missing", "config");
+  return token;
+}
+
+async function call<T>(path: string, init: RequestInit = {}, sessionToken?: string): Promise<T> {
+  const requestId = randomUUID();
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "application/json");
+  headers.set("X-CRM-Service-Token", serviceToken());
+  headers.set("X-Request-ID", requestId);
+  if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
+  if (init.body !== undefined) headers.set("Content-Type", "application/json");
+  const response = await fetch(`${bridgeBase()}${path}`, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(8000) });
+  const text = await response.text();
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = null;
+  }
+  if (!response.ok) {
+    const code = body && typeof body === "object" && "error" in body && typeof (body as { error?: unknown }).error === "string" ? (body as { error: string }).error : "bridge_error";
+    throw new LegacyBridgeError(response.status, code, requestId);
+  }
+  return body as T;
+}
+
+export function bridgeLogin(input: BridgeLoginInput): Promise<BridgeLoginResult> {
+  return call<BridgeLoginResult>("/api/bridge/auth/login", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function bridgeMfa(input: { pendingToken?: string; code: string; ip?: string | null; userAgent?: string | null }): Promise<{ ok: true; token: string; expiresAt: string; userId: string; recoveryCodes?: string[] } | { ok: false; reason: "invalid" | "expired" | "locked"; retryAfterSeconds?: number }> {
+  return call("/api/bridge/auth/mfa", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function bridgeSession(token: string | undefined, state: "verified" | "pending" = "verified"): Promise<BridgeSession | null> {
+  if (!token) return Promise.resolve(null);
+  return call<{ session: BridgeSession | null }>(`/api/bridge/auth/session?state=${state}`, {}, token).then((x) => x.session);
+}
+
+export function bridgeEnrollment(token: string): Promise<{ enrolled: boolean; secret?: string; otpauth?: string }> {
+  return call("/api/bridge/auth/enrollment", { method: "POST" }, token);
+}
+
+export function bridgeLogout(token: string | undefined): Promise<void> {
+  if (!token) return Promise.resolve();
+  return call("/api/bridge/auth/logout", { method: "POST" }, token).then(() => undefined);
+}
+
+export function bridgeRpc<T>(op: string, input: unknown, sessionToken: string): Promise<T> {
+  return call<T>("/api/bridge/rpc", { method: "POST", body: JSON.stringify({ op, input }) }, sessionToken);
+}
+
+export function bridgeHealth(): Promise<{ ok: true }> {
+  return call<{ ok: true }>("/api/bridge/health");
+}

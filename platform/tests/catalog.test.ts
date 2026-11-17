@@ -31,8 +31,10 @@ describe("catalog seeded from the public site and price hierarchy", () => {
       assert.equal(row.basePrice, site.price, `${site.id} base`);
       assert.equal(row.weekdayPrice, site.weekdayPrice, `${site.id} weekday`);
     }
-    assert.equal(summary.slots.length, 3);
-    assert.deepEqual((await listSlots(db.pool)).map((s) => `${s.startsAt}-${s.endsAt}`), ["10:00-14:00", "14:00-18:00", "18:00-22:00"]);
+    assert.equal(summary.slots.length, 9);
+    assert.deepEqual((await listSlots(db.pool)).map((s) => `${s.startsAt}-${s.endsAt}`), [
+      "10:00-14:00", "11:00-15:00", "12:00-16:00", "13:00-17:00", "14:00-18:00", "15:00-19:00", "16:00-20:00", "17:00-21:00", "18:00-22:00",
+    ]);
   });
 
   it("seeding again changes nothing and never overwrites prices set in the admin", async () => {

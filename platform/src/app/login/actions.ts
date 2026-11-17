@@ -6,9 +6,12 @@ import { z } from "zod";
 import { authenticate } from "../../core/auth.ts";
 import { MAX_PASSWORD_LENGTH } from "../../core/password.ts";
 import { revokeSession } from "../../core/session.ts";
+import { forgetCrmActor } from "../../server/crm-actor.ts";
+import { getSession } from "../../server/dal.ts";
 import { getPool } from "../../server/db.ts";
 import { SESSION_COOKIE, isHttps, mfaRequired } from "../../server/env.ts";
 import { requestMeta } from "../../server/request.ts";
+import { bridgeLogin, bridgeLogout, legacyBridgeEnabled } from "../../server/bridge-client.ts";
 
 export interface LoginState {
   error?: string;
@@ -23,10 +26,12 @@ export async function login(_prev: LoginState | undefined, formData: FormData): 
   const parsed = schema.safeParse({ email: formData.get("email"), password: formData.get("password") });
   if (!parsed.success) return { error: "Введите e-mail и пароль." };
   const meta = await requestMeta();
-  const result = await authenticate(getPool(), { ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired });
+  const result = legacyBridgeEnabled()
+    ? await bridgeLogin({ ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired })
+    : await authenticate(getPool(), { ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired });
   if (!result.ok) {
     if (result.reason === "locked") {
-      return { error: `Слишком много неудачных попыток. Повторите через ${Math.max(1, Math.ceil(result.retryAfterSeconds / 60))} мин.` };
+      return { error: `Слишком много неудачных попыток. Повторите через ${Math.max(1, Math.ceil((result.retryAfterSeconds ?? 60) / 60))} мин.` };
     }
     return { error: "Неверный e-mail или пароль." };
   }
@@ -35,7 +40,7 @@ export async function login(_prev: LoginState | undefined, formData: FormData): 
     secure: isHttps,
     sameSite: "lax",
     path: "/",
-    expires: result.expiresAt,
+    expires: new Date(result.expiresAt),
   });
   redirect(result.mfa === "none" ? "/" : "/login/mfa");
 }
@@ -43,7 +48,12 @@ export async function login(_prev: LoginState | undefined, formData: FormData): 
 export async function logout(): Promise<void> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
-  if (token) await revokeSession(getPool(), token);
+  const session = await getSession();
+  if (session) forgetCrmActor(session.sessionId);
+  if (token) {
+    if (legacyBridgeEnabled()) await bridgeLogout(token);
+    else await revokeSession(getPool(), token);
+  }
   jar.delete(SESSION_COOKIE);
   redirect("/login");
 }

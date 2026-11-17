@@ -79,7 +79,7 @@
 - `audit_log(id bigserial, at, actor_user_id, action, entity_type, entity_id, before jsonb, after jsonb, ip, user_agent)` (append-only)
 - `packages(id text pk, name, sort_order, is_active)`
 - `rooms(id text pk, name, sort_order, is_active)` (удалять нельзя, только деактивировать, и только без будущих броней)
-- `time_slots(id smallint pk 1..3, starts_at time, ends_at time)`: ровно 10:00–14:00, 14:00–18:00, 18:00–22:00
+- `time_slots(id smallint pk, starts_at time, ends_at time)`: каталог полных часовых стартов; текущая миграция 015 сохраняет старые ids и добавляет 11:00, 12:00, 13:00, 15:00, 16:00 и 17:00 для окна 10:00–22:00
 - `price_rules(id, package_id, rule_type base|weekday|date, rule_date, amount_kzt, created_by, created_at)`: **append-only история**; текущее значение = последняя запись на (пакет, тип, дата). Иерархия: цена на дату → будничная → обычная. `amount_kzt NULL` для типа `date` снимает особую цену.
 
 ### Этап 2: QR и CRM

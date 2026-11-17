@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { LEGAL_KINDS, listDocuments } from "@/core/legal";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { approveAction, createDraftAction, publishAction, retireAction, updateDraftAction } from "./actions";
 
 export const metadata: Metadata = { title: "Документы" };
@@ -23,7 +26,9 @@ const btnGhost = "h-11 rounded-full border-2 border-grape-700 px-4 text-sm font-
 export default async function LegalPage({ searchParams }: { searchParams: Promise<{ notice?: string; error?: string }> }) {
   const { user } = await requirePermission("legal.manage");
   const { notice, error } = await searchParams;
-  const docs = await listDocuments(getPool(), { id: user.id, role: user.role });
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  const docsRaw = legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof listDocuments>>>("legal.list", {}, token) : await listDocuments(getPool(), { id: user.id, role: user.role });
+  const docs = docsRaw.map((d) => ({ ...d, createdAt: new Date(d.createdAt), approvedAt: d.approvedAt ? new Date(d.approvedAt) : null, publishedAt: d.publishedAt ? new Date(d.publishedAt) : null }));
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
 
   return (

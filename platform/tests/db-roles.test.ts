@@ -28,7 +28,7 @@ const FUTURE = (() => {
 const KEY = Buffer.alloc(32, 21).toString("base64");
 
 /** Tables the public API must never reach. Every table of the schema is either in API_GRANTS or here, so a new table forces a decision. */
-const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections"];
+const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections", "booking_operations", "manual_payment_facts"];
 
 describe("Database roles: one per application, least privilege", () => {
   let db: TestDb;
@@ -89,7 +89,7 @@ describe("Database roles: one per application, least privilege", () => {
       const burst = await Promise.all(Array.from({ length: 5 }, () => submitConsentV(api, { idempotencyKey: key, name: "Роль Гонка", childrenCount: 1, acceptRules: true, acceptPersonalData: true })));
       assert.equal(new Set(burst.map((b) => b.registrationId)).size, 1, "the per-key lock works for this role too");
       assert.ok(qr.registrationId);
-      assert.equal((await dayAvailability(api, FUTURE)).slots.length, 3);
+      assert.equal((await dayAvailability(api, FUTURE)).slots.length, 9);
       assert.ok((await monthAvailability(api, FUTURE.slice(0, 7))).roomCount >= 1);
       assert.equal((await getPublished(api)).length, 3);
       assert.deepEqual(await publicList(api), []);

@@ -7,6 +7,7 @@ import { completeMfaLogin } from "../../../core/auth.ts";
 import { getPool } from "../../../server/db.ts";
 import { SESSION_COOKIE, isHttps, mfaKey } from "../../../server/env.ts";
 import { requestMeta } from "../../../server/request.ts";
+import { bridgeMfa, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
 
 export interface MfaState {
   error?: string;
@@ -21,19 +22,15 @@ export async function submitSecondFactor(_prev: MfaState | undefined, formData: 
   if (!parsed.success) return { error: "Введите код из приложения." };
   const jar = await cookies();
   const meta = await requestMeta();
-  const result = await completeMfaLogin(getPool(), {
-    pendingToken: jar.get(SESSION_COOKIE)?.value,
-    code: parsed.data.code,
-    mfaKey,
-    ip: meta.ip,
-    userAgent: meta.userAgent,
-  });
+  const result = legacyBridgeEnabled()
+    ? await bridgeMfa({ pendingToken: jar.get(SESSION_COOKIE)?.value, code: parsed.data.code, ip: meta.ip, userAgent: meta.userAgent })
+    : await completeMfaLogin(getPool(), { pendingToken: jar.get(SESSION_COOKIE)?.value, code: parsed.data.code, mfaKey, ip: meta.ip, userAgent: meta.userAgent });
   if (!result.ok) {
     if (result.reason === "expired") redirect("/login");
-    if (result.reason === "locked") return { error: `Слишком много неудачных попыток. Повторите через ${Math.max(1, Math.ceil(result.retryAfterSeconds / 60))} мин.` };
+    if (result.reason === "locked") return { error: `Слишком много неудачных попыток. Повторите через ${Math.max(1, Math.ceil((result.retryAfterSeconds ?? 60) / 60))} мин.` };
     return { error: "Неверный код." };
   }
-  jar.set(SESSION_COOKIE, result.token, { httpOnly: true, secure: isHttps, sameSite: "lax", path: "/", expires: result.expiresAt });
+  jar.set(SESSION_COOKIE, result.token, { httpOnly: true, secure: isHttps, sameSite: "lax", path: "/", expires: new Date(result.expiresAt) });
   if (result.recoveryCodes) return { recoveryCodes: result.recoveryCodes };
   redirect("/");
 }

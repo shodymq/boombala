@@ -22,11 +22,28 @@ export function proxy(request: NextRequest) {
   // What this process may show at all (role, host, source network). Answers carry no body and no hint of what exists.
   const decision = decideExposure(exposure, { pathname, host: request.headers.get("x-forwarded-host") ?? request.headers.get("host"), realIp: request.headers.get("x-real-ip") });
   if (!decision.allow) return new NextResponse(null, { status: decision.status, headers: { "Cache-Control": "no-store" } });
+  // CSRF, first line: a state-changing request from another origin is refused here with a plain 403, before any action code
+  // runs. Next also checks Origin for Server Actions; this makes the refusal explicit and independent of the framework.
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    const origin = request.headers.get("origin");
+    const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+    if (origin !== null) {
+      let originHost: string | null = null;
+      try {
+        originHost = new URL(origin).host;
+      } catch {
+        originHost = null;
+      }
+      if (originHost === null || originHost !== host) {
+        return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+      }
+    }
+  }
   // Build assets carry no data and need no nonce or login redirect, but they follow the same exposure rules (a stranger must not
   // learn that an application lives here by fetching its scripts).
   if (STATIC_ASSET.test(pathname)) return NextResponse.next();
   // Machine endpoints authenticate themselves (Bearer secrets) and must not be redirected to the login page.
-  const isPublic = pathname === "/login" || pathname === "/api/health" || pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/") || pathname.startsWith("/api/cron/");
+  const isPublic = pathname === "/login" || pathname === "/api/health" || pathname.startsWith("/api/intake/") || pathname.startsWith("/api/public/") || pathname.startsWith("/api/cron/") || pathname.startsWith("/api/bridge/");
   if (!isPublic && !request.cookies.get(SESSION_COOKIE)) {
     return NextResponse.redirect(new URL("/login", request.url));
   }

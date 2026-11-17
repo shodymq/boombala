@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { getContact } from "@/core/crm";
 import { assessContact, type Blocker } from "@/core/privacy";
 import { can } from "@/core/rbac";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { anonymizeContactAction, revokeConsentAction } from "./actions";
 
 export const metadata: Metadata = { title: "Клиент" };
@@ -28,12 +31,21 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
   const { user } = await requirePermission("contacts.view");
   const { id } = await params;
   const { notice, error } = await searchParams;
-  const card = await getContact(getPool(), { id: user.id, role: user.role }, id);
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  const cardRaw = legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof getContact>>>("contacts.get", { id }, token) : await getContact(getPool(), { id: user.id, role: user.role }, id);
+  const card = cardRaw ? {
+    ...cardRaw,
+    contact: { ...cardRaw.contact, firstRegisteredAt: new Date(cardRaw.contact.firstRegisteredAt), lastActivityAt: new Date(cardRaw.contact.lastActivityAt) },
+    leads: cardRaw.leads.map((x) => ({ ...x, createdAt: new Date(x.createdAt) })),
+    registrations: cardRaw.registrations.map((x) => ({ ...x, createdAt: new Date(x.createdAt) })),
+    consents: cardRaw.consents.map((x) => ({ ...x, occurredAt: new Date(x.occurredAt) })),
+  } : null;
   if (!card) notFound();
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
   const { contact: c } = card;
   const actor = { id: user.id, role: user.role };
-  const privacy = can(user.role, "privacy.manage") ? await assessContact(getPool(), actor, id) : null;
+  const privacyRaw = can(user.role, "privacy.manage") ? (legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof assessContact>>>("privacy.assess", { id }, token) : await assessContact(getPool(), actor, id)) : null;
+  const privacy = privacyRaw ? { ...privacyRaw, lastRegistrationAt: privacyRaw.lastRegistrationAt ? new Date(privacyRaw.lastRegistrationAt) : null } : null;
 
   return (
     <div className="grid gap-5">

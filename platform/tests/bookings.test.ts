@@ -57,8 +57,8 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     assert.equal(roomIds.length, 4);
     const names = (await db.pool.query("SELECT name FROM bb.rooms ORDER BY sort_order")).rows.map((r) => r.name);
     assert.deepEqual(names.map((n: string) => n.split(" ")[0]), ["Roblox", "Ice", "Magic", "Rapunzel"]);
-    const slots = (await db.pool.query("SELECT to_char(starts_at,'HH24:MI') s, to_char(ends_at,'HH24:MI') e FROM bb.time_slots ORDER BY id")).rows;
-    assert.deepEqual(slots.map((x) => `${x.s}-${x.e}`), ["10:00-14:00", "14:00-18:00", "18:00-22:00"]);
+    const slots = (await db.pool.query("SELECT to_char(starts_at,'HH24:MI') s, to_char(ends_at,'HH24:MI') e FROM bb.time_slots ORDER BY starts_at, id")).rows;
+    assert.deepEqual(slots.map((x) => `${x.s}-${x.e}`), ["10:00-14:00", "11:00-15:00", "12:00-16:00", "13:00-17:00", "14:00-18:00", "15:00-19:00", "16:00-20:00", "17:00-21:00", "18:00-22:00"]);
   });
 
   it("an enquiry does NOT occupy a slot; confirmation does", async () => {
@@ -83,7 +83,7 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     const date = nextDay();
     await createBlock(db.pool, manager, { date, slotId: 2, roomId: roomIds[1], note: "ремонт" });
     const a = await dayAvailability(db.pool, date);
-    assert.ok(!a.slots[1].freeRoomIds.includes(roomIds[1]));
+    assert.ok(!a.slots.find((slot) => slot.id === 2)!.freeRoomIds.includes(roomIds[1]));
     await assert.rejects(() => createBlock(db.pool, manager, { date, slotId: 2, roomId: roomIds[1] }), (e) => e instanceof ConflictError && e.message === "slot_taken");
     await assert.rejects(
       () => createManualBooking(db.pool, manager, { date, slotId: 2, roomId: roomIds[1], packageId: pkg, name: "Иван", phone: "+77071234567" }),
@@ -94,18 +94,33 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     assert.equal((await db.pool.query("SELECT status FROM bb.lead_requests WHERE id=$1", [id])).rows[0].status, "new", "a refused confirmation leaves the enquiry open");
   });
 
-  it("no pause between slots: back-to-back slots of one room, and all 4 rooms x 3 slots of one day, can be booked", async () => {
+  it("interval exclusion rejects a partial overlap but allows an adjacent start and another room", async () => {
     const date = nextDay();
+    await createManualBooking(db.pool, manager, { date, slotId: 1, roomId: roomIds[0], packageId: pkg, name: "Первый", phone: "+77070000101" }); // 10:00-14:00
+    await assert.rejects(
+      () => createManualBooking(db.pool, manager, { date, slotId: 6, roomId: roomIds[0], packageId: pkg, name: "Пересечение", phone: "+77070000102" }), // 13:00-17:00
+      (e) => e instanceof ConflictError && e.message === "slot_taken",
+    );
+    await createManualBooking(db.pool, manager, { date, slotId: 2, roomId: roomIds[0], packageId: pkg, name: "Встык", phone: "+77070000103" }); // 14:00-18:00
+    await createManualBooking(db.pool, manager, { date, slotId: 6, roomId: roomIds[1], packageId: pkg, name: "Другая Комната", phone: "+77070000104" }); // 13:00-17:00
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE slot_date=$1 AND released_at IS NULL", [date])).rows[0].n, 3);
+  });
+
+  it("no pause between intervals: every hourly start can be booked after the prior reservation is released", async () => {
+    const date = nextDay();
+    let history = 0;
     for (const room of roomIds) {
-      for (const slot of [1, 2, 3]) {
-        await createManualBooking(db.pool, manager, { date, slotId: slot, roomId: room, packageId: pkg, name: `Гость ${room} ${slot}`, phone: "+77075550000" });
+      for (const slot of [1, 4, 5, 6, 2, 7, 8, 9, 3]) {
+        const created = await createManualBooking(db.pool, manager, { date, slotId: slot, roomId: room, packageId: pkg, name: `Гость ${room} ${slot}`, phone: `+7707555${String(history).padStart(4, "0")}` });
+        await releaseReservation(db.pool, manager, created.reservationId, "следующий часовой старт");
+        history += 1;
       }
     }
-    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE slot_date=$1 AND released_at IS NULL", [date])).rows[0].n, 12);
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE slot_date=$1", [date])).rows[0].n, 36);
     const a = await dayAvailability(db.pool, date);
-    assert.ok(a.slots.every((s) => s.freeRoomIds.length === 0));
+    assert.ok(a.slots.every((s) => s.freeRoomIds.length === roomIds.length));
     const m = await monthAvailability(db.pool, date.slice(0, 7));
-    assert.deepEqual(m.days[date], { "1": 0, "2": 0, "3": 0 });
+    assert.equal(m.days[date], undefined, "a fully released day has no occupied-day entry");
   });
 
   it("CONCURRENCY: two managers confirm DIFFERENT enquiries for the same room and slot at once: exactly one booking survives", async () => {
@@ -139,7 +154,7 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     );
     const results = await Promise.allSettled(jobs);
     assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
-    for (const r of results) if (r.status === "rejected") assert.ok((r.reason as Error).message === "slot_taken" || (r.reason as Error).message === "lead_already_booked", String(r.reason));
+    for (const r of results) if (r.status === "rejected") assert.ok(["slot_taken", "lead_already_booked", "lead_not_open"].includes((r.reason as Error).message), String(r.reason));
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE slot_date=$1 AND released_at IS NULL", [date])).rows[0].n, 1);
   });
 
@@ -158,7 +173,7 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     const date = nextDay();
     const sql = `INSERT INTO bb.slot_reservations (kind, slot_date, slot_id, room_id, created_by) VALUES ('block', $1, 1, $2, $3)`;
     await db.pool.query(sql, [date, roomIds[0], owner.id]);
-    await assert.rejects(() => db.pool.query(sql, [date, roomIds[0], owner.id]), (e: { code?: string }) => e.code === "23505");
+    await assert.rejects(() => db.pool.query(sql, [date, roomIds[0], owner.id]), (e: { code?: string; constraint?: string }) => e.code === "23P01" && e.constraint === "slot_reservations_active_room_interval_excl");
   });
 
   it("cancelling frees the cell; the cancelled row stays as history and can be booked again", async () => {
@@ -209,7 +224,7 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
 
   it("validation: unknown/inactive room, missing price, closed enquiry", async () => {
     const date = nextDay();
-    await assert.rejects(() => createBlock(db.pool, manager, { date, slotId: 4 as never, roomId: roomIds[0] }), ValidationError);
+    await assert.rejects(() => createBlock(db.pool, manager, { date, slotId: 99, roomId: roomIds[0] }), ValidationError);
     await assert.rejects(() => createBlock(db.pool, manager, { date, slotId: 1, roomId: "no-such-room" }), ValidationError);
     await assert.rejects(() => createManualBooking(db.pool, manager, { date, slotId: 1, roomId: roomIds[0], packageId: "no-such", name: "Иван", phone: "+77071234567" }), ValidationError);
     await assert.rejects(() => createManualBooking(db.pool, manager, { date, slotId: 1, roomId: roomIds[0], packageId: pkg, name: "Иван", phone: "12" }), ValidationError);

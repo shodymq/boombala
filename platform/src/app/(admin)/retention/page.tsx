@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { retentionReport, type Blocker } from "@/core/privacy";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 
 export const metadata: Metadata = { title: "Хранение данных" };
 export const dynamic = "force-dynamic";
@@ -17,7 +20,15 @@ const BLOCKER: Record<Blocker, string> = {
 /** Read-only dry-run report. Nothing is changed here, and nothing runs on a schedule. */
 export default async function RetentionPage() {
   const { user } = await requirePermission("privacy.manage");
-  const r = await retentionReport(getPool(), { id: user.id, role: user.role });
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  const raw = legacyBridgeEnabled() ? await bridgeRpc<Awaited<ReturnType<typeof retentionReport>>>("retention.report", {}, token) : await retentionReport(getPool(), { id: user.id, role: user.role });
+  const r = {
+    ...raw,
+    asOf: new Date(raw.asOf),
+    settings: { ...raw.settings, legalConfirmedAt: raw.settings.legalConfirmedAt ? new Date(raw.settings.legalConfirmedAt) : null },
+    eligible: raw.eligible.map((x) => ({ ...x, lastRegistrationAt: new Date(x.lastRegistrationAt) })),
+    blocked: raw.blocked.map((x) => ({ ...x, lastRegistrationAt: new Date(x.lastRegistrationAt) })),
+  };
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeZone: "Asia/Almaty" });
   const on = r.settings.autoEnabled && r.settings.legalConfirmedAt;
 
