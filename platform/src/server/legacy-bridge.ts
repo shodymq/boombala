@@ -18,7 +18,7 @@ import { listLeads, setLeadStatus } from "../core/bookings.ts";
 import { getContact, listContacts } from "../core/crm.ts";
 import { assessContact, anonymizeContact, revokeConsent, retentionReport } from "../core/privacy.ts";
 import { getPost, listImages, listPosts, createPost, updatePost, publishPost, unpublishPost, deletePost, deleteImage, type PostInput } from "../core/news.ts";
-import { createUser, listUsers, changeRole, setActive, setCanExport, setPassword } from "../core/users.ts";
+import { changeOwnPassword, createUser, listUsers, changeRole, setActive, setCanExport, setPassword } from "../core/users.ts";
 import { listEnrolledUserIds, resetUserMfa } from "../core/mfa.ts";
 import { nameKey } from "../core/phone.ts";
 import { attendanceSchemaReady } from "../core/preflight.ts";
@@ -408,6 +408,7 @@ export async function bridgeRpc(request: NextRequest): Promise<Response> {
       case "users.active": await setActive(pool, actor, text(input.id, 80), input.active === true, await requestMeta()); return Response.json({ ok: true });
       case "users.export": await setCanExport(pool, actor, text(input.id, 80), input.allowed === true, await requestMeta()); return Response.json({ ok: true });
       case "users.password": await setPassword(pool, actor, text(input.id, 80), text(input.password, 128), await requestMeta()); return Response.json({ ok: true });
+      case "users.passwordSelf": await changeOwnPassword(pool, actor, text(input.currentPassword, 128), text(input.newPassword, 128), { keepSessionId: session.sessionId, ...(await requestMeta()) }); return Response.json({ ok: true });
       case "users.resetMfa": await resetUserMfa(pool, actor, text(input.id, 80), await requestMeta()); return Response.json({ ok: true });
       case "audit.list": {
         if (!can(session.user.role, "audit.view")) throw new ForbiddenError();
