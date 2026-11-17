@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Queryable } from "./db.ts";
 
 /**
- * Deployment order (mandatory):  1. migrations 001..013  ->  2. database roles (`npm run db:roles`)  ->  3. verification
+ * Deployment order (mandatory):  1. all shipped migrations  ->  2. database roles (`npm run db:roles`)  ->  3. verification
  * (`npm run preflight`)  ->  4. start the applications.
  * Recreating a function in a migration drops the EXECUTE grant of the API role, so the roles step must follow every migration run.
  * Problems are CODES (no value of the environment, no data): a person fixes them, the application never guesses.
@@ -82,6 +82,31 @@ async function runPreflight(db: Queryable, migrationsDir?: string): Promise<Pref
       if (!(await has(`to_regclass('bb.${t}') IS NOT NULL`))) continue; // already reported as attendance_schema_missing
       if (!(await has(`has_table_privilege('bb_admin', 'bb.${t}', 'SELECT') AND has_table_privilege('bb_admin', 'bb.${t}', 'INSERT')`))) problems.push(`bb_admin_lacks_privilege: ${t}: run db:roles after the migrations`);
       if (await has(`has_table_privilege('bb_admin', 'bb.${t}', 'DELETE') OR has_table_privilege('bb_admin', 'bb.${t}', 'TRUNCATE')`)) problems.push(`bb_admin_may_delete: ${t}`);
+    }
+    // Migration 016 adds the staff booking idempotency and payment-fact tables.
+    // They are append-only: the bridge needs SELECT/INSERT, and the staff role
+    // must not be able to rewrite them. RLS also needs an explicit staff policy.
+    for (const t of ["booking_operations", "manual_payment_facts"]) {
+      if (!(await has("to_regclass($1) IS NOT NULL", [`bb.${t}`]))) continue;
+      if (!(await has(`has_table_privilege('bb_admin', 'bb.${t}', 'SELECT') AND has_table_privilege('bb_admin', 'bb.${t}', 'INSERT')`))) {
+        problems.push(`bb_admin_lacks_privilege: ${t}: run db:roles after the migrations`);
+      }
+      if (await has(`has_table_privilege('bb_admin', 'bb.${t}', 'UPDATE') OR has_table_privilege('bb_admin', 'bb.${t}', 'DELETE') OR has_table_privilege('bb_admin', 'bb.${t}', 'TRUNCATE')`)) {
+        problems.push(`bb_admin_may_rewrite_append_only: ${t}: run db:roles after the migrations`);
+      }
+      if (!(await has("EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='bb' AND c.relname=$1 AND c.relrowsecurity)", [t]))) {
+        problems.push(`bb_admin_row_security_missing: ${t}`);
+      }
+      if (!(await has("EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='bb' AND tablename=$1 AND policyname='bb_admin_access' AND cmd='ALL' AND roles @> ARRAY['bb_admin']::name[] AND qual='true' AND with_check='true')", [t]))) {
+        problems.push(`bb_admin_policy_missing: ${t}: run db:roles after the migrations`);
+      }
+    }
+    if (await roleExists("bb_api")) {
+      for (const t of ["booking_operations", "manual_payment_facts"]) {
+        if (await has(`to_regclass('bb.${t}') IS NOT NULL AND has_table_privilege('bb_api', 'bb.${t}', 'SELECT,INSERT,UPDATE,DELETE')`)) {
+          problems.push(`bb_api_has_table_privilege: ${t}`);
+        }
+      }
     }
   }
   return { ok: problems.length === 0, problems };
