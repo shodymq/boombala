@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createPool } from "../src/core/db.ts";
 import { preflight } from "../src/core/preflight.ts";
 
-// Verification step of the deployment: migrations 001..013 -> db:roles -> THIS -> start the applications.
+// Verification step of the deployment: all shipped migrations -> db:roles -> THIS -> start the applications.
 // Prints codes only (never a connection string or a value). Exit code 1 means: do not start.
 const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!url) {
@@ -19,7 +19,7 @@ try {
   r.ok = r.problems.length === 0;
   const docs = new Set((await pool.query<{ kind: string }>("SELECT kind::text AS kind FROM bb.legal_documents WHERE status = 'published'")).rows.map((d) => d.kind));
   for (const need of ["visit_rules", "personal_data_consent"]) if (!docs.has(need)) console.log(`note: ${need} is not published yet (the QR registration stays closed until it is)`);
-  if (r.ok) console.log("preflight: OK (migrations, attendance schema, intake function, roles, catalog)");
+  if (r.ok) console.log("preflight: OK (migrations, attendance schema, intake function, booking bridge ACL, roles, catalog)");
   else {
     console.error(`preflight: ${r.problems.length} problem(s)`);
     for (const p of r.problems) console.error(` - ${p}`);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
-import { API_GRANTS, applyRoles } from "../scripts/db-roles.ts";
+import { ADMIN_APPEND_ONLY, API_GRANTS, applyRoles } from "../scripts/db-roles.ts";
 import { authenticate, completeMfaLogin } from "../src/core/auth.ts";
 import { confirmLead, createManualBooking, dayAvailability, monthAvailability, releaseReservation } from "../src/core/bookings.ts";
 import { almatyToday } from "../src/core/dates.ts";
@@ -419,6 +419,24 @@ describe("Database roles: one per application, least privilege", () => {
 
   describe("the staff application role", () => {
     const owner2 = () => ({ id: owner.id, role: "owner" as const });
+
+    it("can read and append booking/payment facts without rewrite or public-API access", async () => {
+      for (const table of ADMIN_APPEND_ONLY) {
+        const privileges = (await db.pool.query(
+          "SELECT has_table_privilege('bb_admin', $1, 'SELECT') AS can_read, has_table_privilege('bb_admin', $1, 'INSERT') AS can_append, has_table_privilege('bb_admin', $1, 'UPDATE') AS can_update, has_table_privilege('bb_admin', $1, 'DELETE') OR has_table_privilege('bb_admin', $1, 'TRUNCATE') AS can_remove",
+          [`bb.${table}`],
+        )).rows[0];
+        assert.deepEqual(privileges, { can_read: true, can_append: true, can_update: false, can_remove: false });
+        assert.equal(Number((await admin.query(`SELECT count(*)::int AS n FROM bb.${table}`)).rows[0].n), 0);
+        await denied(admin, `UPDATE bb.${table} SET created_at = created_at`);
+        await denied(admin, `DELETE FROM bb.${table}`);
+        await denied(api, `SELECT * FROM bb.${table}`);
+        assert.equal((await db.pool.query(
+          "SELECT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='bb' AND tablename=$1 AND policyname='bb_admin_access' AND cmd='ALL' AND roles @> ARRAY['bb_admin']::name[] AND qual='true' AND with_check='true') AS ok",
+          [table],
+        )).rows[0].ok, true);
+      }
+    });
 
     it("runs the whole staff application: users, second factor, CRM, privacy, bookings, legal, news, export, notifications, retention", async () => {
       // users and the two-step login
