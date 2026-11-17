@@ -1,7 +1,7 @@
 name: release-artifact
 
 # Builds the deployable archive for the Kazakhstan server on Linux x86_64 (never on the VPS, never on a Mac).
-# Manual only. The archive holds no secrets: the environment files live on the server.
+# The archive holds no secrets: the environment files live on the server.
 on:
   # One narrowly scoped hotfix branch can produce the Linux VPS artifact
   # without requiring an interactive workflow_dispatch credential.
@@ -39,9 +39,9 @@ jobs:
           node-version: 24
       - name: Build the archive
         env:
-          PUBLIC_SITE_URL: ${{ inputs.public_site_url }}
-          BOOKING_CALENDAR: ${{ inputs.booking_calendar }}
-          NEWS: ${{ inputs.news }}
+          PUBLIC_SITE_URL: ${{ inputs.public_site_url || 'https://boombala.kz' }}
+          BOOKING_CALENDAR: ${{ inputs.booking_calendar || '0' }}
+          NEWS: ${{ inputs.news || '0' }}
         run: scripts/build-release.sh
       - name: Archive facts (no secrets)
         run: |
