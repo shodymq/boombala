@@ -82,9 +82,10 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   const date = sp.date && isValidDate(sp.date) ? sp.date : today;
   const days = sp.days === "30" ? 30 : 14;
   const actor = { id: user.id, role: user.role };
-  const pool = getPool();
-  const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
-  const ready = legacyBridgeEnabled() ? true : await attendanceSchemaReady(pool);
+  const bridgeMode = legacyBridgeEnabled();
+  const token = bridgeMode ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+  const pool = bridgeMode ? null : getPool();
+  const ready = bridgeMode ? true : await attendanceSchemaReady(pool!);
   if (!ready) {
     return (
       <div className="grid gap-4">
@@ -95,6 +96,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
       </div>
     );
   }
+  if (bridgeMode && !token) throw new Error("session_missing");
   const isToday = date === today;
   const range = rangeEndingAt(date, days);
   const saved = savedSearch((await cookies()).get("bb_att")?.value);
@@ -108,7 +110,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
     : null;
   const [figures, found, entries, series] = remote
     ? [remote.figures, remote.found, remote.entries, remote.series]
-    : await Promise.all([dayFigures(pool, actor, date), searchRegistrations(pool, actor, date, { q: saved.q, filter: saved.f, limit: saved.n }), listEntries(pool, actor, date), attendanceSeries(pool, actor, range.from, range.to)]);
+    : await Promise.all([dayFigures(pool!, actor, date), searchRegistrations(pool!, actor, date, { q: saved.q, filter: saved.f, limit: saved.n }), listEntries(pool!, actor, date), attendanceSeries(pool!, actor, range.from, range.to)]);
   const manualKey = randomUUID();
   const registrations = found.rows;
   const regNo = /^\d{1,9}$/.test(sp.reg ?? "") ? sp.reg : "";

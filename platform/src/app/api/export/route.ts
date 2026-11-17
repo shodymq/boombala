@@ -5,6 +5,9 @@ import { json } from "../../../server/api.ts";
 import { getSession } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
+import { bridgeExport, LegacyBridgeError, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "../../../server/env.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +30,23 @@ export async function POST(request: Request) {
     return typeof v === "string" && v.trim() ? v.trim() : undefined;
   };
   try {
+    if (legacyBridgeEnabled()) {
+      const token = (await cookies()).get(SESSION_COOKIE)?.value;
+      if (!token) return json({ ok: false, error: "unauthorized" }, 401);
+      const upstream = await bridgeExport({
+        format: (str("format") ?? "csv") as ExportFormat,
+        columns: form.getAll("columns").filter((v): v is string => typeof v === "string"),
+        from: str("from"),
+        to: str("to"),
+        filters: { q: str("q"), source: str("source"), verification: str("verification") },
+      }, token);
+      const headers = new Headers();
+      for (const name of ["Content-Type", "Content-Disposition", "Cache-Control", "X-Content-Type-Options"]) {
+        const value = upstream.headers.get(name);
+        if (value) headers.set(name, value);
+      }
+      return new Response(upstream.body, { status: upstream.status, headers });
+    }
     const result = await exportContacts(
       getPool(),
       { id: user.id, role: user.role, canExport: user.canExport },
@@ -48,6 +68,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof LegacyBridgeError) return json({ ok: false, error: error.code }, error.status);
     if (error instanceof ForbiddenError) return json({ ok: false, error: "forbidden" }, 403);
     if (error instanceof ValidationError) return json({ ok: false, error: "validation", fields: error.fields }, 422);
     return json({ ok: false, error: "server" }, 500);

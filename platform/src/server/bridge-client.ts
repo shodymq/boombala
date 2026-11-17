@@ -51,25 +51,41 @@ function serviceToken(): string {
   return token;
 }
 
-async function call<T>(path: string, init: RequestInit = {}, sessionToken?: string): Promise<T> {
+async function send(path: string, init: RequestInit = {}, sessionToken?: string, timeoutMs = 8000, accept = "application/json"): Promise<Response> {
   const requestId = randomUUID();
   const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
+  headers.set("Accept", accept);
   headers.set("X-CRM-Service-Token", serviceToken());
   headers.set("X-Request-ID", requestId);
   if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
-  if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${bridgeBase()}${path}`, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(8000) });
+  // Let fetch set the multipart boundary for image uploads. JSON bodies use the
+  // bridge's ordinary content type; never overwrite a caller's explicit type.
+  if (init.body !== undefined && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(`${bridgeBase()}${path}`, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+  if (!response.ok) {
+    const text = await response.text();
+    let body: unknown = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+    const code = body && typeof body === "object" && "error" in body && typeof (body as { error?: unknown }).error === "string" ? (body as { error: string }).error : "bridge_error";
+    throw new LegacyBridgeError(response.status, code, requestId);
+  }
+  return response;
+}
+
+async function call<T>(path: string, init: RequestInit = {}, sessionToken?: string): Promise<T> {
+  const response = await send(path, init, sessionToken);
   const text = await response.text();
   let body: unknown = null;
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
     body = null;
-  }
-  if (!response.ok) {
-    const code = body && typeof body === "object" && "error" in body && typeof (body as { error?: unknown }).error === "string" ? (body as { error: string }).error : "bridge_error";
-    throw new LegacyBridgeError(response.status, code, requestId);
   }
   return body as T;
 }
@@ -98,6 +114,32 @@ export function bridgeLogout(token: string | undefined): Promise<void> {
 
 export function bridgeRpc<T>(op: string, input: unknown, sessionToken: string): Promise<T> {
   return call<T>("/api/bridge/rpc", { method: "POST", body: JSON.stringify({ op, input }) }, sessionToken);
+}
+
+export type BridgeExportInput = {
+  format: "csv" | "xlsx";
+  columns: string[];
+  from?: string;
+  to?: string;
+  filters?: { q?: string; source?: string; verification?: string };
+};
+
+/** Streams an authorized contact export from the VPS; no Vercel database connection is used. */
+export function bridgeExport(input: BridgeExportInput, sessionToken: string): Promise<Response> {
+  return send("/api/bridge/export", { method: "POST", body: JSON.stringify(input) }, sessionToken, 60_000, "application/octet-stream");
+}
+
+/** Uploads an image to the VPS where it is decoded, metadata-stripped and stored. */
+export async function bridgeImageUpload(file: File, alt: string, sessionToken: string): Promise<void> {
+  const form = new FormData();
+  form.set("file", file, file.name);
+  form.set("alt", alt);
+  await send("/api/bridge/media", { method: "POST", body: form }, sessionToken, 60_000);
+}
+
+/** Reads a private staff-only image from the VPS without a Vercel database connection. */
+export function bridgeImage(id: string, sessionToken: string): Promise<Response> {
+  return send(`/api/bridge/media/${encodeURIComponent(id)}`, {}, sessionToken, 8_000, "image/webp");
 }
 
 export function bridgeHealth(): Promise<{ ok: true }> {

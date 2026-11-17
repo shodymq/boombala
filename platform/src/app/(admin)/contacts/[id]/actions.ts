@@ -7,16 +7,22 @@ import { anonymizeContact, revokeConsent } from "../../../../core/privacy.ts";
 import { requirePermission } from "../../../../server/dal.ts";
 import { getPool } from "../../../../server/db.ts";
 import { requestMeta } from "../../../../server/request.ts";
+import { cookies } from "next/headers";
+import { bridgeRpc, legacyBridgeEnabled } from "../../../../server/bridge-client.ts";
+import { SESSION_COOKIE } from "../../../../server/env.ts";
 
 const uuid = z.string().uuid();
 
-async function run(formData: FormData, fn: (actor: { id: string; role: "owner" | "manager" | "editor" }, id: string, meta: Awaited<ReturnType<typeof requestMeta>>) => Promise<unknown>, notice: string): Promise<void> {
+async function run(formData: FormData, op: "contacts.revoke" | "contacts.anonymize", fn: (actor: { id: string; role: "owner" | "manager" | "editor" }, id: string, meta: Awaited<ReturnType<typeof requestMeta>>) => Promise<unknown>, notice: string): Promise<void> {
   const { user } = await requirePermission("privacy.manage");
   const id = uuid.safeParse(formData.get("id"));
   if (!id.success) redirect("/contacts");
+  const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+  if (legacyBridgeEnabled() && !token) redirect("/login");
   let code = "";
   try {
-    await fn({ id: user.id, role: user.role }, id.data, await requestMeta());
+    if (legacyBridgeEnabled()) await bridgeRpc(op, { id: id.data }, token as string);
+    else await fn({ id: user.id, role: user.role }, id.data, await requestMeta());
   } catch (error) {
     if (error instanceof NotFoundError) redirect("/contacts");
     code = error instanceof ForbiddenError ? "forbidden" : error instanceof ConflictError ? "blocked" : "failed";
@@ -25,9 +31,9 @@ async function run(formData: FormData, fn: (actor: { id: string; role: "owner" |
 }
 
 export async function revokeConsentAction(formData: FormData): Promise<void> {
-  return run(formData, (actor, id, meta) => revokeConsent(getPool(), actor, id, meta), "revoked");
+  return run(formData, "contacts.revoke", (actor, id, meta) => revokeConsent(getPool(), actor, id, meta), "revoked");
 }
 
 export async function anonymizeContactAction(formData: FormData): Promise<void> {
-  return run(formData, (actor, id, meta) => anonymizeContact(getPool(), actor, id, meta), "anonymized");
+  return run(formData, "contacts.anonymize", (actor, id, meta) => anonymizeContact(getPool(), actor, id, meta), "anonymized");
 }

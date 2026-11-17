@@ -6,6 +6,7 @@ import { createBlock, createManualBooking, releaseReservation } from "../../../c
 import { isValidDate } from "../../../core/dates.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
 import { FastApiCrmConfigurationError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
+import { legacyBridgeEnabled } from "../../../server/bridge-client.ts";
 import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
@@ -30,7 +31,7 @@ function failure(date: string, error: unknown): never {
 export async function manualBookingAction(formData: FormData): Promise<void> {
   const { user } = await requirePermission("bookings.manage");
   const date = str(formData, "date");
-  if (unifiedFastapiCrmEnabled()) return failure(date, new FastApiCrmConfigurationError("crm_actor_missing"));
+  if (unifiedFastapiCrmEnabled() || legacyBridgeEnabled()) return failure(date, new FastApiCrmConfigurationError("crm_actor_missing"));
   try {
     const children = str(formData, "children").trim();
     await createManualBooking(
@@ -57,7 +58,7 @@ export async function manualBookingAction(formData: FormData): Promise<void> {
 export async function blockAction(formData: FormData): Promise<void> {
   const { user } = await requirePermission("bookings.manage");
   const date = str(formData, "date");
-  if (unifiedFastapiCrmEnabled()) return failure(date, new FastApiCrmConfigurationError("crm_actor_missing"));
+  if (unifiedFastapiCrmEnabled() || legacyBridgeEnabled()) return failure(date, new FastApiCrmConfigurationError("crm_actor_missing"));
   try {
     await createBlock(getPool(), { id: user.id, role: user.role }, { date, slotId: Number(str(formData, "slotId")), roomId: str(formData, "roomId"), note: str(formData, "note") }, await requestMeta());
   } catch (error) {
@@ -69,7 +70,7 @@ export async function blockAction(formData: FormData): Promise<void> {
 export async function releaseAction(formData: FormData): Promise<void> {
   const { user } = await requirePermission("bookings.manage");
   const date = str(formData, "date");
-  if (unifiedFastapiCrmEnabled()) return failure(date, new FastApiCrmConfigurationError("crm_actor_missing"));
+  if (unifiedFastapiCrmEnabled() || legacyBridgeEnabled()) return failure(date, new FastApiCrmConfigurationError("crm_actor_missing"));
   const id = uuid.safeParse(formData.get("id"));
   if (!id.success) return failure(date, new ValidationError({ id: "bad" }));
   try {
