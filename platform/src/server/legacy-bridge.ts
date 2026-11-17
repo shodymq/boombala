@@ -12,12 +12,14 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import { beginEnrollment, isEnrolled } from "../core/mfa.ts";
 import { outboxStats } from "../core/outbox.ts";
 import { getPublished, listDocuments, createDraft, updateDraft, approveDocument, publishDocument, retireDocument, LEGAL_KINDS } from "../core/legal.ts";
-import { can, type Actor } from "../core/rbac.ts";
+import { can, canExport, type Actor } from "../core/rbac.ts";
+import { exportContacts, type ExportFormat } from "../core/export.ts";
+import { MAX_UPLOAD_BYTES } from "../core/images.ts";
 import { validateSession, type ValidSession } from "../core/session.ts";
 import { listLeads, setLeadStatus } from "../core/bookings.ts";
 import { getContact, listContacts } from "../core/crm.ts";
 import { assessContact, anonymizeContact, revokeConsent, retentionReport } from "../core/privacy.ts";
-import { getPost, listImages, listPosts, createPost, updatePost, publishPost, unpublishPost, deletePost, deleteImage, type PostInput } from "../core/news.ts";
+import { adminImage, addImage, getPost, listImages, listPosts, createPost, updatePost, publishPost, unpublishPost, deletePost, deleteImage, type PostInput } from "../core/news.ts";
 import { changeOwnPassword, createUser, listUsers, changeRole, setActive, setCanExport, setPassword } from "../core/users.ts";
 import { listEnrolledUserIds, resetUserMfa } from "../core/mfa.ts";
 import { nameKey } from "../core/phone.ts";
@@ -154,6 +156,88 @@ export async function bridgeHealth(request: NextRequest): Promise<Response> {
     assertBridgeService(request);
     await getPool().query("SELECT 1");
     return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return jsonError(error);
+  }
+}
+
+/** The export is generated on the VPS and streamed to the already-authorized browser session. */
+export async function bridgeContactExport(request: NextRequest): Promise<Response> {
+  try {
+    assertBridgeService(request);
+    const { session } = await bridgeSession(request);
+    if (!canExport(session.user)) throw new ForbiddenError();
+    const input = await readJson(request);
+    const columns = input.columns;
+    if (columns !== undefined && (!Array.isArray(columns) || columns.some((value) => typeof value !== "string"))) {
+      throw new ValidationError({ columns: "invalid" });
+    }
+    const filters = input.filters === undefined ? {} : record(input.filters);
+    const result = await exportContacts(
+      getPool(),
+      { id: session.user.id, role: session.user.role, canExport: session.user.canExport },
+      {
+        format: text(input.format, 8) as ExportFormat,
+        columns: columns as string[] | undefined,
+        from: typeof input.from === "string" ? input.from : undefined,
+        to: typeof input.to === "string" ? input.to : undefined,
+        filters: {
+          q: typeof filters.q === "string" ? filters.q : undefined,
+          source: typeof filters.source === "string" ? filters.source as never : undefined,
+          verification: typeof filters.verification === "string" ? filters.verification as never : undefined,
+        },
+      },
+      await requestMeta(),
+    );
+    return new Response(new Uint8Array(result.body), {
+      headers: {
+        "Content-Type": result.contentType,
+        "Content-Disposition": `attachment; filename="${result.filename}"`,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch (error) {
+    return jsonError(error);
+  }
+}
+
+/** Accepts only authenticated staff uploads; core image processing validates and strips metadata on the VPS. */
+export async function bridgeImageUpload(request: NextRequest): Promise<Response> {
+  try {
+    assertBridgeService(request);
+    const { session } = await bridgeSession(request);
+    if (!can(session.user.role, "news.manage")) throw new ForbiddenError();
+    if (Number(request.headers.get("content-length") ?? 0) > MAX_UPLOAD_BYTES + 64 * 1024) {
+      throw new BridgeHttpError(413, "body_too_large");
+    }
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) throw new ValidationError({ file: "invalid" });
+    const result = await addImage(
+      getPool(),
+      actorOf(session),
+      Buffer.from(await file.arrayBuffer()),
+      typeof form.get("alt") === "string" ? String(form.get("alt")) : "",
+      await requestMeta(),
+    );
+    return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return jsonError(error);
+  }
+}
+
+/** Serves private draft media only to an authenticated staff member with news permission. */
+export async function bridgeAdminImage(request: NextRequest, id: string): Promise<Response> {
+  try {
+    assertBridgeService(request);
+    const { session } = await bridgeSession(request);
+    if (!can(session.user.role, "news.manage")) throw new ForbiddenError();
+    const image = await adminImage(getPool(), actorOf(session), id);
+    if (!image) return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
+    return new Response(new Uint8Array(image.data), {
+      headers: { "Content-Type": image.mime, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=60" },
+    });
   } catch (error) {
     return jsonError(error);
   }

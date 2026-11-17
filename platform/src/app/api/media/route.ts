@@ -5,6 +5,9 @@ import { can } from "../../../core/rbac.ts";
 import { getSession } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
+import { bridgeImageUpload, LegacyBridgeError, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "../../../server/env.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,9 +26,16 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) throw new ValidationError({ file: "Выберите файл" });
+    if (legacyBridgeEnabled()) {
+      const token = (await cookies()).get(SESSION_COOKIE)?.value;
+      if (!token) return new Response(null, { status: 401 });
+      await bridgeImageUpload(file, String(form.get("alt") ?? ""), token);
+      return back(request, "notice=uploaded");
+    }
     await addImage(getPool(), { id: session.user.id, role: session.user.role }, Buffer.from(await file.arrayBuffer()), String(form.get("alt") ?? ""), await requestMeta());
     return back(request, "notice=uploaded");
   } catch (error) {
+    if (error instanceof LegacyBridgeError) return back(request, `error=${error.code === "body_too_large" ? "too_big" : "failed"}`);
     if (error instanceof ForbiddenError) return new Response(null, { status: 403 });
     if (error instanceof ValidationError) return back(request, `error=${"alt" in error.fields ? "alt" : "file"}`);
     return back(request, "error=failed");

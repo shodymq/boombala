@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { bridgeExport, bridgeImage, bridgeImageUpload } from "../src/server/bridge-client.ts";
 import { FastApiCrmClient, FastApiCrmConfigurationError, FastApiCrmError, unifiedFastapiCrmEnabled } from "../src/server/fastapi-crm.ts";
 
 describe("FastAPI CRM adapter", () => {
@@ -66,5 +67,57 @@ describe("FastAPI CRM adapter", () => {
     else process.env.FASTAPI_ADMIN_BASE_URL = beforeBaseUrl;
     if (beforeFlag === undefined) delete process.env.UNIFIED_FASTAPI_CRM_ENABLED;
     else process.env.UNIFIED_FASTAPI_CRM_ENABLED = beforeFlag;
+  });
+
+  it("uses the bb.* bridge in Vercel mode without DATABASE_URL or a FastAPI URL", async () => {
+    const keys = ["UNIFIED_FASTAPI_CRM_ENABLED", "CRM_BRIDGE_MODE", "CRM_BRIDGE_URL", "CRM_SERVICE_TOKEN", "DATABASE_URL", "FASTAPI_ADMIN_BASE_URL"] as const;
+    const before = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    process.env.UNIFIED_FASTAPI_CRM_ENABLED = "1";
+    process.env.CRM_BRIDGE_MODE = "legacy";
+    process.env.CRM_BRIDGE_URL = "https://api.example.test";
+    process.env.CRM_SERVICE_TOKEN = "s".repeat(40);
+    delete process.env.DATABASE_URL;
+    delete process.env.FASTAPI_ADMIN_BASE_URL;
+    globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
+      requests.push({ url: typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url, init });
+      return requests.length === 1
+        ? Response.json({ branches: [], rooms: [], packages: [] })
+        : new Response("csv-bytes", { status: 200, headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=boombala-contacts-test.csv" } });
+    }) as typeof fetch;
+    try {
+      const client = new FastApiCrmClient({ accessToken: "opaque-platform-session-token" });
+      assert.deepEqual(await client.getBookingCatalog(), { branches: [], rooms: [], packages: [] });
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].url, "https://api.example.test/api/bridge/rpc");
+      const headers = new Headers(requests[0].init.headers);
+      assert.equal(headers.get("authorization"), "Bearer opaque-platform-session-token");
+      assert.equal(headers.get("x-crm-service-token"), "s".repeat(40));
+      assert.deepEqual(JSON.parse(String(requests[0].init.body)), { op: "calendar.catalog", input: {} });
+      const exported = await bridgeExport({ format: "csv", columns: ["name"] }, "opaque-platform-session-token");
+      assert.equal(await exported.text(), "csv-bytes");
+      assert.equal(requests[1].url, "https://api.example.test/api/bridge/export");
+      assert.equal(new Headers(requests[1].init.headers).get("accept"), "application/octet-stream");
+      assert.equal(new Headers(requests[1].init.headers).get("authorization"), "Bearer opaque-platform-session-token");
+
+      await bridgeImageUpload(new File(["synthetic-image-bytes"], "synthetic.png", { type: "image/png" }), "Synthetic image", "opaque-platform-session-token");
+      assert.equal(requests[2].url, "https://api.example.test/api/bridge/media");
+      assert.ok(requests[2].init.body instanceof FormData);
+      assert.equal(new Headers(requests[2].init.headers).get("content-type"), null, "fetch must set the multipart boundary");
+      const image = await bridgeImage("00000000-0000-4000-8000-000000000001", "opaque-platform-session-token");
+      assert.equal(await image.text(), "csv-bytes");
+      assert.equal(requests[3].url, "https://api.example.test/api/bridge/media/00000000-0000-4000-8000-000000000001");
+      assert.equal(new Headers(requests[3].init.headers).get("accept"), "image/webp");
+      assert.equal(process.env.DATABASE_URL, undefined);
+      assert.equal(process.env.FASTAPI_ADMIN_BASE_URL, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of keys) {
+        const value = before[key];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 });

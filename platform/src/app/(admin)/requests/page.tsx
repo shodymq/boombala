@@ -26,21 +26,31 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   const { user } = await requirePermission("requests.manage");
   const sp = await searchParams;
   const status = sp.status && STATUS[sp.status] ? sp.status : undefined;
-  const actor = { id: user.id, role: user.role };
-  const pool = getPool();
-  const token = legacyBridgeEnabled() ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
-  if (legacyBridgeEnabled() && !token) throw new Error("session_missing");
-  const remoteCatalog = legacyBridgeEnabled()
-    ? await bridgeRpc<{ packages: Awaited<ReturnType<typeof listPackages>>; rooms: Awaited<ReturnType<typeof listRooms>>; slots: Awaited<ReturnType<typeof listSlots>> }>("catalog", {}, token as string)
-    : null;
-  const [leads, packages, rooms, slots] = legacyBridgeEnabled()
-    ? await Promise.all([
-        bridgeRpc<Awaited<ReturnType<typeof listLeads>>>("requests.list", status ? { status } : {}, token as string).then((rows) => rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt) }))),
-        Promise.resolve(remoteCatalog!.packages),
-        Promise.resolve(remoteCatalog!.rooms),
-        Promise.resolve(remoteCatalog!.slots),
-      ])
-    : await Promise.all([listLeads(pool, actor, { status }), listPackages(pool), listRooms(pool), listSlots(pool)]);
+  let leads: Awaited<ReturnType<typeof listLeads>>;
+  let packages: Awaited<ReturnType<typeof listPackages>>;
+  let rooms: Awaited<ReturnType<typeof listRooms>>;
+  let slots: Awaited<ReturnType<typeof listSlots>>;
+  if (legacyBridgeEnabled()) {
+    const token = (await cookies()).get(SESSION_COOKIE)?.value;
+    if (!token) throw new Error("session_missing");
+    const [remoteCatalog, remoteLeads] = await Promise.all([
+      bridgeRpc<{ packages: Awaited<ReturnType<typeof listPackages>>; rooms: Awaited<ReturnType<typeof listRooms>>; slots: Awaited<ReturnType<typeof listSlots>> }>("catalog", {}, token),
+      bridgeRpc<Awaited<ReturnType<typeof listLeads>>>("requests.list", status ? { status } : {}, token),
+    ]);
+    leads = remoteLeads.map((row) => ({ ...row, createdAt: new Date(row.createdAt) }));
+    packages = remoteCatalog.packages;
+    rooms = remoteCatalog.rooms;
+    slots = remoteCatalog.slots;
+  } else {
+    const pool = getPool();
+    const actor = { id: user.id, role: user.role };
+    [leads, packages, rooms, slots] = await Promise.all([
+      listLeads(pool, actor, { status }),
+      listPackages(pool),
+      listRooms(pool),
+      listSlots(pool),
+    ]);
+  }
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
   const pkgName = (id: string | null) => packages.find((p) => p.id === id)?.name ?? "не выбран";
 

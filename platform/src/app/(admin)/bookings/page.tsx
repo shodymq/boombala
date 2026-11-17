@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getGrid, type Cell } from "@/core/bookings";
 import { listPackages } from "@/core/catalog";
 import { almatyToday, isValidDate } from "@/core/dates";
+import { legacyBridgeEnabled } from "@/server/bridge-client";
 import { unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
@@ -39,7 +40,7 @@ export default async function BookingsPage({
   const sp = await searchParams;
   // With the unified flag on, FastAPI is the only reader and writer of the calendar. The legacy grid below is kept only
   // for the flag-off rollback path and never writes while the flag is on.
-  if (unifiedFastapiCrmEnabled()) return <CrmCalendar session={session} search={sp} />;
+  if (unifiedFastapiCrmEnabled() || legacyBridgeEnabled()) return <CrmCalendar session={session} search={sp} />;
   const date = sp.date && isValidDate(sp.date) ? sp.date : almatyToday();
   const actor = { id: user.id, role: user.role };
   const [grid, packages] = await Promise.all([getGrid(getPool(), actor, date), listPackages(getPool())]);

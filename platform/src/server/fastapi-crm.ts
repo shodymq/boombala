@@ -151,13 +151,16 @@ export class FastApiCrmClient {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly requestId: string;
-  private readonly url: string;
+  private readonly url: string | null;
   private readonly actor: FastApiCrmActor;
 
   constructor(actor: FastApiCrmActor, options: FastApiCrmClientOptions = {}) {
     if (!unifiedFastapiCrmEnabled()) throw new FastApiCrmConfigurationError("crm_flag_disabled");
     if (!actor.accessToken.trim()) throw new FastApiCrmConfigurationError("crm_actor_missing");
-    this.url = baseUrl();
+    // In legacy bridge mode the Vercel function calls the typed bb.* bridge on
+    // the VPS. Requiring a FastAPI URL here breaks calendar reads before the
+    // bridge branch in request() can run.
+    this.url = legacyBridgeEnabled() ? null : baseUrl();
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = Math.min(Math.max(options.timeoutMs ?? 5000, 1000), 10000);
     this.requestId = actor.requestId?.trim() || randomUUID();
@@ -178,12 +181,14 @@ export class FastApiCrmClient {
         throw error;
       }
     }
+    const url = this.url;
+    if (!url) throw new FastApiCrmConfigurationError("crm_base_url_missing");
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.actor.accessToken}`);
     headers.set("Accept", "application/json");
     headers.set("X-Request-ID", this.requestId);
     if (init.body !== undefined) headers.set("Content-Type", "application/json");
-    const response = await this.fetchImpl(`${this.url}/api/v1${path}`, {
+    const response = await this.fetchImpl(`${url}/api/v1${path}`, {
       ...init,
       headers,
       cache: "no-store",
