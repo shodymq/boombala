@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { listEnrolledUserIds } from "@/core/mfa";
 import { ROLES } from "@/core/rbac";
 import { listUsers } from "@/core/users";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 import { changeRoleAction, createUserAction, resetMfaAction, resetPasswordAction, setActiveAction, setCanExportAction } from "./actions";
 
 export const metadata: Metadata = { title: "Сотрудники" };
@@ -38,8 +41,11 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const { user } = await requirePermission("users.manage");
   const { notice, error } = await searchParams;
   const actor = { id: user.id, role: user.role };
-  const users = await listUsers(getPool(), actor);
-  const enrolled = await listEnrolledUserIds(getPool(), actor);
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
+  const remote = legacyBridgeEnabled() ? await bridgeRpc<{ users: Awaited<ReturnType<typeof listUsers>>; enrolled: string[] }>("users.list", {}, token) : null;
+  const usersRaw = remote?.users ?? await listUsers(getPool(), actor);
+  const users = usersRaw.map((u) => ({ ...u, createdAt: new Date(u.createdAt), lastLoginAt: u.lastLoginAt ? new Date(u.lastLoginAt) : null }));
+  const enrolled = remote ? new Set(remote.enrolled) : await listEnrolledUserIds(getPool(), actor);
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
 
   return (

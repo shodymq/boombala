@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { listContacts, type ContactFilters } from "@/core/crm";
 import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
 
 export const metadata: Metadata = { title: "Клиенты" };
 
@@ -27,7 +30,11 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
     leadStatus: pick(sp.status, ["new", "in_progress", "confirmed", "cancelled", "completed"] as const),
   };
   const page = Math.max(Number.parseInt(sp.page ?? "1", 10) || 1, 1);
-  const { rows, total, pageSize } = await listContacts(getPool(), { id: user.id, role: user.role }, filters, page);
+  const remote = legacyBridgeEnabled()
+    ? await bridgeRpc<Awaited<ReturnType<typeof listContacts>>>("contacts.list", { filters, page }, (await cookies()).get(SESSION_COOKIE)?.value ?? "")
+    : await listContacts(getPool(), { id: user.id, role: user.role }, filters, page);
+  const rows = remote.rows.map((c) => ({ ...c, firstRegisteredAt: new Date(c.firstRegisteredAt), lastActivityAt: new Date(c.lastActivityAt) }));
+  const { total, pageSize } = remote;
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
   const qs = (n: number) => {
     const p = new URLSearchParams();

@@ -11,11 +11,15 @@ import { isValidDate } from "../core/dates.ts";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../core/errors.ts";
 import { beginEnrollment, isEnrolled } from "../core/mfa.ts";
 import { outboxStats } from "../core/outbox.ts";
-import { getPublished } from "../core/legal.ts";
+import { getPublished, listDocuments, createDraft, updateDraft, approveDocument, publishDocument, retireDocument, LEGAL_KINDS } from "../core/legal.ts";
 import { can, type Actor } from "../core/rbac.ts";
 import { validateSession, type ValidSession } from "../core/session.ts";
 import { listLeads, setLeadStatus } from "../core/bookings.ts";
-import { listContacts } from "../core/crm.ts";
+import { getContact, listContacts } from "../core/crm.ts";
+import { assessContact, anonymizeContact, revokeConsent, retentionReport } from "../core/privacy.ts";
+import { getPost, listImages, listPosts, createPost, updatePost, publishPost, unpublishPost, deletePost, deleteImage, type PostInput } from "../core/news.ts";
+import { createUser, listUsers, changeRole, setActive, setCanExport, setPassword } from "../core/users.ts";
+import { listEnrolledUserIds, resetUserMfa } from "../core/mfa.ts";
 import { nameKey } from "../core/phone.ts";
 import { attendanceSchemaReady } from "../core/preflight.ts";
 import { writeAudit } from "../core/audit.ts";
@@ -373,7 +377,38 @@ export async function bridgeRpc(request: NextRequest): Promise<Response> {
       case "attendance.manual": return Response.json(await addManualEntry(pool, actor, { childrenCount: Number(input.childrenCount), idempotencyKey: text(input.idempotencyKey, 120), onDate: parseDate(input.onDate) }, await requestMeta()));
       case "attendance.correct": return Response.json(await correctEntry(pool, actor, { entryId: text(input.entryId, 80), newCount: Number(input.newCount), expectedCount: Number(input.expectedCount), reason: text(input.reason, 80) }, await requestMeta()));
       case "contacts.list": return Response.json(await listContacts(pool, actor, input.filters as never, Number(input.page) || 1));
+      case "contacts.get": return Response.json(await getContact(pool, actor, text(input.id, 80)));
+      case "privacy.assess": return Response.json(await assessContact(pool, actor, text(input.id, 80)));
+      case "retention.report": return Response.json(await retentionReport(pool, actor));
       case "legal.published": return Response.json(await getPublished(pool));
+      case "legal.list": return Response.json(await listDocuments(pool, actor));
+      case "news.list": return Response.json(await listPosts(pool, actor, { status: typeof input.status === "string" ? input.status as never : undefined }));
+      case "news.get": return Response.json(await getPost(pool, actor, text(input.id, 80)));
+      case "news.images": return Response.json(await listImages(pool, actor));
+      case "users.list": return Response.json({ users: await listUsers(pool, actor), enrolled: [...await listEnrolledUserIds(pool, actor)] });
+      case "contacts.revoke": return Response.json(await revokeConsent(pool, actor, text(input.id, 80), await requestMeta()));
+      case "contacts.anonymize": return Response.json(await anonymizeContact(pool, actor, text(input.id, 80), await requestMeta()));
+      case "legal.create": {
+        const kind = text(input.kind, 80);
+        if (!(LEGAL_KINDS as readonly string[]).includes(kind)) throw new ValidationError({ kind: "invalid" });
+        return Response.json(await createDraft(pool, actor, { kind: kind as never, title: text(input.title, 200), body: text(input.body, 100000) }, await requestMeta()));
+      }
+      case "legal.update": return Response.json(await updateDraft(pool, actor, text(input.id, 80), { title: text(input.title, 200), body: text(input.body, 100000) }, await requestMeta()));
+      case "legal.approve": return Response.json(await approveDocument(pool, actor, text(input.id, 80), await requestMeta()));
+      case "legal.publish": return Response.json(await publishDocument(pool, actor, text(input.id, 80), await requestMeta()));
+      case "legal.retire": return Response.json(await retireDocument(pool, actor, text(input.id, 80), await requestMeta()));
+      case "news.create": return Response.json(await createPost(pool, actor, input as unknown as PostInput, await requestMeta()));
+      case "news.update": return Response.json(await updatePost(pool, actor, text(input.id, 80), input as unknown as PostInput, await requestMeta()));
+      case "news.publish": return Response.json(await publishPost(pool, actor, text(input.id, 80), input.publishAt ? new Date(text(input.publishAt, 40)) : null, await requestMeta()));
+      case "news.unpublish": return Response.json(await unpublishPost(pool, actor, text(input.id, 80), await requestMeta()));
+      case "news.delete": return Response.json(await deletePost(pool, actor, text(input.id, 80), await requestMeta()));
+      case "news.deleteImage": return Response.json(await deleteImage(pool, actor, text(input.id, 80), await requestMeta()));
+      case "users.create": return Response.json(await createUser(pool, actor, { email: text(input.email, 254), name: text(input.name, 120), role: text(input.role, 20) as never, password: text(input.password, 128) }, await requestMeta()));
+      case "users.role": await changeRole(pool, actor, text(input.id, 80), text(input.role, 20) as never, await requestMeta()); return Response.json({ ok: true });
+      case "users.active": await setActive(pool, actor, text(input.id, 80), input.active === true, await requestMeta()); return Response.json({ ok: true });
+      case "users.export": await setCanExport(pool, actor, text(input.id, 80), input.allowed === true, await requestMeta()); return Response.json({ ok: true });
+      case "users.password": await setPassword(pool, actor, text(input.id, 80), text(input.password, 128), await requestMeta()); return Response.json({ ok: true });
+      case "users.resetMfa": await resetUserMfa(pool, actor, text(input.id, 80), await requestMeta()); return Response.json({ ok: true });
       case "audit.list": {
         if (!can(session.user.role, "audit.view")) throw new ForbiddenError();
         const rows = await pool.query<{ id: string; at: Date; action: string; entity_type: string | null; entity_id: string | null; actor: string | null; detail: string | null }>(
