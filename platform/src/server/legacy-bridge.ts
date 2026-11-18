@@ -334,8 +334,10 @@ async function bookingTimeline(pool: Pool, date: string) {
 async function ensureIdempotent<T>(pool: Pool, actor: Actor, key: string, operation: string, input: unknown, run: (tx: import("../core/db.ts").Client) => Promise<T>): Promise<T> {
   const requestHash = hashInput(input);
   return withTx(pool, async (tx) => {
+    // The advisory transaction lock serialises every call with the same key; the primary key backs it up. No row lock is taken on
+    // booking_operations: it is append-only and bb_admin has no UPDATE privilege on it (SELECT ... FOR UPDATE would need one).
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`bridge-idempotency:${key}`]);
-    const found = await tx.query<{ request_hash: string; result: T }>("SELECT request_hash, result FROM bb.booking_operations WHERE idempotency_key=$1 FOR UPDATE", [key]);
+    const found = await tx.query<{ request_hash: string; result: T }>("SELECT request_hash, result FROM bb.booking_operations WHERE idempotency_key=$1", [key]);
     if (found.rows[0]) {
       if (found.rows[0].request_hash !== requestHash) throw new ConflictError("idempotency_conflict");
       return found.rows[0].result;
@@ -346,7 +348,7 @@ async function ensureIdempotent<T>(pool: Pool, actor: Actor, key: string, operat
   });
 }
 
-async function bridgeCreateRequest(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+export async function bridgeCreateRequest(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session);
   if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
   const key = text(input.idempotencyKey, 200);
@@ -368,7 +370,7 @@ async function bridgeCreateRequest(pool: Pool, session: ValidSession, input: Rec
   });
 }
 
-async function bridgePayment(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+export async function bridgePayment(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session);
   if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
   const requestId = text(input.requestId, 80);
@@ -378,9 +380,11 @@ async function bridgePayment(pool: Pool, session: ValidSession, input: Record<st
   const method = text(input.method, 30);
   if (!["cash", "card_terminal", "bank_transfer", "other_manual"].includes(method)) throw new ValidationError({ method: "invalid" });
   return ensureIdempotent(pool, actor, key, "payment", input, async (tx) => {
+    // The parent request row lock serialises payments for one request (also under different keys). manual_payment_facts is
+    // append-only (no UPDATE privilege), so it is read without a row lock; UNIQUE (lead_request_id) and UNIQUE (idempotency_key) back it up.
     const lead = await tx.query("SELECT id,status FROM bb.lead_requests WHERE id=$1 FOR UPDATE", [requestId]);
     if (!lead.rows[0]) throw new NotFoundError();
-    const existing = await tx.query<{ id: string; amount_kzt: number; payment_method: string }>("SELECT id,amount_kzt,payment_method FROM bb.manual_payment_facts WHERE lead_request_id=$1 FOR UPDATE", [requestId]);
+    const existing = await tx.query<{ id: string; amount_kzt: number; payment_method: string }>("SELECT id,amount_kzt,payment_method FROM bb.manual_payment_facts WHERE lead_request_id=$1", [requestId]);
     if (existing.rows[0]) {
       if (existing.rows[0].amount_kzt !== amount || existing.rows[0].payment_method !== method) throw new ConflictError("idempotency_conflict");
       return { id: existing.rows[0].id, amountKzt: existing.rows[0].amount_kzt, method: existing.rows[0].payment_method, status: "prepaid" };
@@ -390,7 +394,7 @@ async function bridgePayment(pool: Pool, session: ValidSession, input: Record<st
   });
 }
 
-async function bridgeReschedule(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+export async function bridgeReschedule(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError(); const key = text(input.idempotencyKey, 200); const id = text(input.reservationId, 80); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120);
   return ensureIdempotent(pool, actor, key, "reschedule", input, async (tx) => {
     const old = await tx.query<{ kind: "booking" | "block"; room_id: string; lead_request_id: string | null; contact_id: string | null; package_id: string | null; children: number | null; price_kzt: number | null; price_source: string | null; note: string | null }>("SELECT kind,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,note FROM bb.slot_reservations WHERE id=$1 AND released_at IS NULL FOR UPDATE", [id]);
@@ -404,7 +408,7 @@ async function bridgeReschedule(pool: Pool, session: ValidSession, input: Record
   });
 }
 
-async function bridgeConfirm(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+export async function bridgeConfirm(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session);
   if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
   const leadId = text(input.requestId, 80); const key = text(input.idempotencyKey, 200); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120); const packageId = text(input.packageId, 120);
@@ -425,7 +429,7 @@ async function bridgeConfirm(pool: Pool, session: ValidSession, input: Record<st
   });
 }
 
-async function bridgeBlock(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+export async function bridgeBlock(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError(); const key = text(input.idempotencyKey, 200); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120); const { startSql, endSql } = almatyInterval(date, start);
   return ensureIdempotent(pool, actor, key, "block", input, async (tx) => {
     const row = await tx.query<{ id: string }>("INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block',$1,NULL,$2,$3,$4,$5,$6) RETURNING id", [date, roomId, text(input.reason, 300), actor.id, startSql, endSql]);
@@ -433,7 +437,7 @@ async function bridgeBlock(pool: Pool, session: ValidSession, input: Record<stri
   });
 }
 
-async function bridgeRelease(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+export async function bridgeRelease(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError(); const key = text(input.idempotencyKey, 200); const id = text(input.reservationId, 80);
   return ensureIdempotent(pool, actor, key, "release", input, async (tx) => {
     const row = await tx.query<{ kind: string; lead_request_id: string | null }>("UPDATE bb.slot_reservations SET released_at=now(),released_by=$2,release_reason=$3 WHERE id=$1 AND released_at IS NULL RETURNING kind,lead_request_id", [id, actor.id, optionalText(input.reason)]);

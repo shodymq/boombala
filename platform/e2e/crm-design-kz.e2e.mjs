@@ -117,12 +117,11 @@ const owner = createPool(DB, { max: 4 });
 const ROLE_API_PW = rnd(24) + "A1";
 const ROLE_ADMIN_PW = rnd(24) + "B2";
 await applyRoles(owner, { apiPassword: ROLE_API_PW, adminPassword: ROLE_ADMIN_PW });
-// FINDING (not fixed here, the booking writer is not part of this change): main's bridge locks rows of the append-only tables with
-// `SELECT ... FOR UPDATE` (ensureIdempotent, bridgePayment), which PostgreSQL allows only with UPDATE privilege, while db-roles.ts
-// and preflight (#57) require bb_admin to have SELECT, INSERT only. With the guarded role every booking ends in
-// "permission denied for table booking_operations". The append-only trigger still blocks any real UPDATE/DELETE, so for this run
-// bb_admin gets the UPDATE privilege the locks need; everything else is exactly what db:roles grants.
-await owner.query("GRANT UPDATE ON bb.booking_operations, bb.manual_payment_facts TO bb_admin");
+// bb_admin has exactly what db:roles grants (append-only tables: SELECT and INSERT, no UPDATE); nothing is added for this run.
+for (const t of ["booking_operations", "manual_payment_facts"]) {
+  const u = (await owner.query(`SELECT has_table_privilege('bb_admin', 'bb.${t}', 'UPDATE') u`)).rows[0].u;
+  if (u) throw new Error(`bb_admin must not have UPDATE on ${t}`);
+}
 const asRole = (user, pass) => { const u = new URL(DB); u.username = user; u.password = pass; return u.toString(); };
 
 const staff = {};
