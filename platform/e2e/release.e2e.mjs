@@ -71,7 +71,7 @@ const intakeLead = async (name, ph, date) => {
   const r = await fetch(`${ADMIN}/api/intake/lead`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-    body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), name, phone: `+7${ph}`, date, consent: true, packageId: "wow-party", slotId: SLOT, roomId: ROOM }),
+    body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), name, phone: `+7${ph}`, date, consent: true, packageId: "star-party", slotId: SLOT, roomId: ROOM }),
   });
   return { status: r.status, ...(await r.json()) };
 };
@@ -119,7 +119,7 @@ const PH = phone(1);
   await page.locator('[data-testid=availability] [data-slot="2"]').waitFor({ timeout: 10000 });
   await page.locator('[data-testid=availability] [data-slot="2"]').click();
   await page.locator("dialog button[aria-haspopup=listbox]").nth(0).click();
-  await page.locator('dialog [role=option][data-value="wow-party"]').click();
+  await page.locator('dialog [role=option][data-value="star-party"]').click();
   await page.locator("[data-testid=price]").waitFor({ timeout: 8000 }).catch(() => {});
   const price = (await page.locator("[data-testid=price]").innerText().catch(() => "")).replace(/\D/g, "");
   await page.locator("dialog button[aria-haspopup=listbox]").nth(1).click();
@@ -134,7 +134,7 @@ const PH = phone(1);
   const lead = (await q(
     `SELECT l.id, l.seq, l.slot_id, l.room_id, l.package_id, to_char(l.requested_date,'YYYY-MM-DD') d, l.status, c.phone_e164 p, c.name
        FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id WHERE c.name = $1 ORDER BY l.seq DESC LIMIT 1`, [NAME])).rows[0];
-  ok(!!lead && lead.slot_id === SLOT && lead.room_id === ROOM && lead.package_id === "wow-party" && lead.d === D && lead.status === "new" && lead.p === `+7${PH}`, "the enquiry is in the CRM with date, slot, room, package and a normalised phone");
+  ok(!!lead && lead.slot_id === SLOT && lead.room_id === ROOM && lead.package_id === "star-party" && lead.d === D && lead.status === "new" && lead.p === `+7${PH}`, "the enquiry is in the CRM with date, slot, room, package and a normalised phone");
   ok((await scalar("SELECT count(*) v FROM bb.consent_events WHERE lead_request_id = $1", [lead.id])) === "1", "one consent event is stored with the enquiry");
   ok(await until(async () => (await scalar("SELECT status v FROM bb.outbox WHERE ref_id = $1", [lead.id])) === "sent"), "the Telegram notification task was created and delivered (outbox: sent)");
   ok(messages.some((t) => t.includes(`CRM №${lead.seq}`) && t.includes(NAME)), "the Telegram message carries the CRM number and the enquiry");
@@ -166,7 +166,7 @@ await login(mgr2.page, "owner@qa.test");
   ok((await cell.innerText()).includes(NAME), "the booked cell names the customer");
   const a = await avail(D);
   ok(!a.slots[SLOT - 1].freeRoomIds.includes(ROOM) && a.slots[SLOT - 1].freeRoomIds.length === 3, "the public calendar now shows that room and slot as taken, the others free");
-  ok((await scalar("SELECT price_kzt v FROM bb.slot_reservations WHERE lead_request_id = $1 AND released_at IS NULL", [lead.id])) === String(a.prices["wow-party"].amountKzt), "the price on that date is frozen on the booking");
+  ok((await scalar("SELECT price_kzt v FROM bb.slot_reservations WHERE lead_request_id = $1 AND released_at IS NULL", [lead.id])) === String(a.prices["star-party"].amountKzt), "the price on that date is frozen on the booking");
   await shot(mgr1.page, "2-grid-booked");
 
   const second = await intakeLead(`ТЕСТ Второй ${run}`, phone(2), D);

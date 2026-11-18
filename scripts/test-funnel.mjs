@@ -3,21 +3,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { BIRTHDAY_EVENTS, cleanPath, createDeduper, errorTypeFromStatus, sanitizeBirthdayParams } from "../src/lib/funnel-core.ts";
 
-const allowed = { packages: ["wow-party", "magic-party", "boom-party", "undecided"], rooms: ["roblox-room", "ice-room", "magic-room", "rapunzel-room"] };
+const allowed = { packages: ["star-party", "happy-party", "boom-bala-party", "undecided"], rooms: ["roblox-room", "ice-room", "magic-room", "rapunzel-room"] };
 
 test("the seven funnel events are exactly the agreed ones", () => {
   assert.deepEqual([...BIRTHDAY_EVENTS], ["birthday_package_select", "birthday_room_open", "birthday_room_select", "birthday_lead_form_open", "birthday_lead_submit_attempt", "birthday_lead_success", "birthday_lead_error"]);
 });
 
 test("only the five whitelisted keys survive; PII keys are dropped", () => {
-  const out = sanitizeBirthdayParams({ package_id: "wow-party", room_id: "ice-room", cta_source: "room_dialog", page_path: "/birthdays", name: "Айгерим", phone: "+77071234567", date: "2026-12-05", children: "8", text: "hello", token: "123:SECRET" }, allowed);
+  const out = sanitizeBirthdayParams({ package_id: "star-party", room_id: "ice-room", cta_source: "room_dialog", page_path: "/birthdays", name: "Айгерим", phone: "+77071234567", date: "2026-12-05", children: "8", text: "hello", token: "123:SECRET" }, allowed);
   assert.deepEqual(Object.keys(out).sort(), ["cta_source", "error_type", "package_id", "page_path", "room_id"]);
   const blob = JSON.stringify(out);
   for (const bad of ["Айгерим", "7071234567", "2026-12-05", "SECRET", "hello"]) assert.ok(!blob.includes(bad), bad);
 });
 
 test("package and room ids are checked against the allowed lists", () => {
-  assert.equal(sanitizeBirthdayParams({ package_id: "boom-party" }, allowed).package_id, "boom-party");
+  assert.equal(sanitizeBirthdayParams({ package_id: "boom-bala-party" }, allowed).package_id, "boom-bala-party");
   assert.equal(sanitizeBirthdayParams({ package_id: "+77071234567" }, allowed).package_id, "unknown");
   assert.equal(sanitizeBirthdayParams({ room_id: "Иван Иванов" }, allowed).room_id, "unknown");
   assert.equal(sanitizeBirthdayParams({}, allowed).room_id, "none");

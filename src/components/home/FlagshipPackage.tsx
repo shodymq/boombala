@@ -1,25 +1,21 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Check } from "@phosphor-icons/react/dist/ssr";
-import type { BirthdayPackage } from "@/types";
-import { formatTenge, pluralize } from "@/lib/format";
+import type { BirthdayPackage, Locale } from "@/types";
+import { formatTenge } from "@/lib/format";
 import { LeadButton } from "@/components/lead/LeadButton";
 import { TrackView } from "@/components/analytics/TrackView";
-
-function optionsNote(item: BirthdayPackage["program"][number]): string | null {
-  if (!item.options?.length) return null;
-  const n = item.options.length;
-  return item.key === "characters"
-    ? `${n} ${pluralize(n, ["кукла", "куклы", "кукол"])}`
-    : `${n} ${pluralize(n, ["вариант", "варианта", "вариантов"])}`;
-}
+import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
+import { badgeLabel, isChoiceTitle } from "@/components/birthdays/shared";
 
 /**
- * The complete package: yellow, tall, with Boom bursting out of the top edge.
- * The card bleeds past the container on the right (3.5rem). Near 1280 px the container has no outer margin
- * left, so the bleed is capped at 1.75rem + the margin that exists: the card never leaves the viewport.
+ * BOOM BALA PARTY: the flagship card. Yellow and tall, with Boom bursting out of the top edge. The card bleeds past the container on
+ * the right (3.5rem). Near 1280 px the container has no outer margin left, so the bleed is capped: the card never leaves the viewport.
  */
-export function FlagshipPackage({ pkg }: { pkg: BirthdayPackage }) {
+export function FlagshipPackage({ pkg, locale }: { pkg: BirthdayPackage; locale: Locale }) {
+  const ui = BIRTHDAYS_UI[locale];
+  const copy = pkg.copy[locale];
+  const badge = badgeLabel(pkg, locale);
   return (
     <article
       aria-labelledby={`${pkg.id}-title`}
@@ -35,28 +31,25 @@ export function FlagshipPackage({ pkg }: { pkg: BirthdayPackage }) {
         className="pointer-events-none absolute -top-24 right-3 h-52 w-auto drop-shadow-[0_14px_16px_rgba(20,6,50,0.35)] md:-top-32 md:right-8 md:h-72"
       />
 
-      <p className="inline-block rounded-full bg-grape-800 px-4 py-1.5 font-display text-xs font-extrabold uppercase tracking-[0.12em] text-sun-400">
-        {pkg.highlight}
-      </p>
-      <h3
-        id={`${pkg.id}-title`}
-        className="mt-4 font-display text-6xl font-black leading-[0.9] tracking-tighter text-grape-800 md:text-7xl xl:text-[5.5rem]"
-      >
+      {badge ? (
+        <p className="inline-block rounded-full bg-grape-800 px-4 py-1.5 font-display text-xs font-extrabold uppercase tracking-[0.12em] text-sun-400">{badge}</p>
+      ) : null}
+      <h3 id={`${pkg.id}-title`} className="mt-4 font-display text-6xl font-black leading-[0.9] tracking-tighter text-grape-800 md:text-7xl xl:text-[5.5rem]">
         BOOM
         <br />
-        PARTY
+        BALA PARTY
       </h3>
-      <p className="mt-3 text-lg font-semibold text-grape-900">{pkg.tagline}</p>
+      <p className="mt-3 text-lg font-semibold text-grape-900">{copy.tag}</p>
 
       <div className="mt-7 flex flex-wrap items-end gap-x-6 gap-y-3 border-t-2 border-grape-800/20 pt-6">
         <p className="font-display text-5xl font-black tabular-nums tracking-tight text-grape-800 md:text-6xl">
-          {formatTenge(pkg.price)}
+          <span className="sr-only">{ui.regularPrice}: </span>
+          {formatTenge(pkg.weekendPrice)}
         </p>
-        <p className="flex items-center gap-3 pb-1.5">
-          <span className="rounded-full bg-grape-800 px-3 py-1 font-display text-sm font-extrabold text-white">
-            в будни −{pkg.weekdayDiscountPercent}%
-          </span>
+        <p className="flex flex-wrap items-center gap-3 pb-1.5">
+          <span className="rounded-full bg-grape-800 px-3 py-1 font-display text-sm font-extrabold text-white">{ui.discountBadge}</span>
           <span className="font-display text-2xl font-black tabular-nums text-grape-700 md:text-3xl">
+            <span className="sr-only">{ui.weekdayCaption}: </span>
             {formatTenge(pkg.weekdayPrice)}
           </span>
         </p>
@@ -64,82 +57,45 @@ export function FlagshipPackage({ pkg }: { pkg: BirthdayPackage }) {
 
       <dl className="mt-6 grid grid-cols-3 divide-x-2 divide-grape-800/20 border-y-2 border-grape-800/20 text-center">
         <div className="py-4">
-          <dt className="sr-only">Бесплатный вход</dt>
-          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.freeChildren}</dd>
-          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">детей и именинник бесплатно</dd>
+          <dt className="sr-only">{copy.conditions[0].title}</dt>
+          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.kidsIncluded}</dd>
+          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{copy.conditions[0].note}</dd>
         </div>
         <div className="py-4">
-          <dt className="sr-only">Аниматоры</dt>
-          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">2</dd>
-          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">аниматора</dd>
+          <dt className="sr-only">{ui.rowAnimators}</dt>
+          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.animators}</dd>
+          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{ui.rowAnimators.toLowerCase()}</dd>
         </div>
         <div className="py-4">
-          <dt className="sr-only">Скидка гостям</dt>
-          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">−{pkg.extraGuestDiscountPercent}%</dd>
-          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">на вход доп. гостям</dd>
+          <dt className="sr-only">{ui.rowAdults}</dt>
+          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.adultsIncluded}</dd>
+          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{copy.conditions[1].title}</dd>
         </div>
       </dl>
 
-      <ul className="mt-6 grid gap-x-8 gap-y-3 max-md:hidden sm:grid-cols-2" aria-label={`Что входит в ${pkg.name}`}>
-        {pkg.program
-          .filter((i) => i.key !== "animators")
-          .map((item) => {
-            const note = optionsNote(item);
-            return (
-              <li key={item.key} className="flex items-start gap-3 text-base leading-snug">
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-grape-800 text-sun-400"
-                >
-                  <Check size={12} weight="bold" />
-                </span>
-                <span>
-                  <span className="font-bold">{item.title}</span>
-                  {note ? <span className="block text-sm text-grape-800">{note}</span> : null}
-                </span>
-              </li>
-            );
-          })}
+      <ul className="mt-6 grid gap-x-8 gap-y-3 max-md:hidden sm:grid-cols-2" aria-label={`${ui.includedTitle}: ${copy.name}`}>
+        {copy.program.map((item) => (
+          <li key={item.title} className="flex items-start gap-3 text-base leading-snug">
+            <span aria-hidden="true" className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-grape-800 text-sun-400">
+              <Check size={12} weight="bold" />
+            </span>
+            <span>
+              <span className="font-bold">{item.title}</span>
+              {item.choice && !isChoiceTitle(item.title) ? <span className="block text-sm text-grape-800">{ui.choiceNote}</span> : null}
+            </span>
+          </li>
+        ))}
       </ul>
 
-      <details className="group mt-6 border-b-2 border-grape-800/25 md:hidden">
-        <summary className="flex min-h-12 cursor-pointer items-center justify-between font-display text-base font-extrabold text-grape-800">
-          Что входит ({pkg.program.length - 1})
-          <span aria-hidden="true" className="faq-plus flex h-8 w-8 items-center justify-center rounded-full bg-grape-800 text-lg leading-none text-sun-400 transition-transform">+</span>
-        </summary>
-      <ul className="grid gap-y-3 pb-1 pt-4" aria-label={`Что входит в ${pkg.name}`}>
-        {pkg.program
-          .filter((i) => i.key !== "animators")
-          .map((item) => {
-            const note = optionsNote(item);
-            return (
-              <li key={item.key} className="flex items-start gap-3 text-base leading-snug">
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-grape-800 text-sun-400"
-                >
-                  <Check size={12} weight="bold" />
-                </span>
-                <span>
-                  <span className="font-bold">{item.title}</span>
-                  {note ? <span className="block text-sm text-grape-800">{note}</span> : null}
-                </span>
-              </li>
-            );
-          })}
-      </ul>
-
-      </details>
-
-      <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <LeadButton variant="primary" package={pkg.id} source="package-boom-party" className="w-full sm:w-auto">
-          Узнать о свободной дате
+      <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <LeadButton variant="accent" package={pkg.id} source={`package-${pkg.id}`} locale={locale} className="w-full sm:w-auto">
+          {ui.heroCta}
         </LeadButton>
         <Link
-          href={`/birthdays#${pkg.id}`}
+          href={locale === "kk" ? `/kk/birthdays#${pkg.id}` : `/birthdays#${pkg.id}`}
           className="inline-flex h-12 items-center justify-center px-4 font-display text-base font-extrabold text-grape-800 underline decoration-grape-800 decoration-2 underline-offset-4"
         >
-          Весь состав
+          {ui.includedTitle}
         </Link>
       </div>
     </article>

@@ -13,7 +13,7 @@ if (!url) {
 const pool = createPool(url, 2);
 try {
   const result = await seedCatalog(pool, {
-    packages: birthdayPackages.map((p) => ({ id: p.id, name: p.name, price: p.price, weekdayPrice: p.weekdayPrice })),
+    packages: birthdayPackages.map((p) => ({ id: p.id, name: p.copy.ru.name, price: p.weekendPrice, weekdayPrice: p.weekdayPrice })),
     rooms: birthdayRooms.map((r) => ({ id: r.id, name: r.name })),
   });
   console.log("seed:", JSON.stringify(result));

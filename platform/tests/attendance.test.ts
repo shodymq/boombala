@@ -14,7 +14,7 @@ import { migrate } from "../src/core/migrate.ts";
 import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeUser, MIGRATIONS_DIR, publishedVersions, startTestDb, submitConsentV, type TestDb } from "./helpers/db.ts";
+import { makeUser, MIGRATIONS_DIR, publishedVersions, startTestDb, submitConsentV, type TestDb, seedFromSite } from "./helpers/db.ts";
 
 const API_PW = "api-role-password-0123456789abc";
 const ADMIN_PW = "admin-role-password-0123456789";
@@ -546,8 +546,9 @@ describe("Deployment order: migrations 001-013 -> roles -> verification", () => 
       const r = await preflight(db.pool, MIGRATIONS_DIR);
       assert.equal(r.ok, false);
       assert.ok(r.problems.some((p) => p.startsWith("bb_api_cannot_execute_intake_insert_registration")), r.problems.join("; "));
-      // the documented order: roles again, then verification, then start
+      // the documented order: roles again, then the catalogue (db:seed), then verification, then start
       await applyRoles(db.pool, { apiPassword: API_PW, adminPassword: ADMIN_PW });
+      await seedFromSite(db.pool);
       const ok = await preflight(db.pool, MIGRATIONS_DIR);
       assert.deepEqual(ok, { ok: true, problems: [] });
       assert.equal((await call()).rows.length, 1, "bb_api registers a visitor now");

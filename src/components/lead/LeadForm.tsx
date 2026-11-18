@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, type FormEvent } from "react";
+import type { Locale } from "@/types";
 import { CalendarBlank, WhatsappLogo, X } from "@phosphor-icons/react";
 import {
   PACKAGE_OPTIONS,
@@ -23,6 +24,7 @@ import { ChoiceField, type ChoiceOption } from "./ChoiceField";
 import { useSelectedPackage } from "./SelectedPackage";
 import { AvailabilityPanel, calendarEnabled } from "@/components/booking/AvailabilityPanel";
 import { PreferredTime } from "@/components/booking/PreferredTime";
+import { LEAD_UI, leadErrorText } from "./leadCopy";
 
 /** A random UUID; `crypto.randomUUID` exists only in secure contexts, so fall back to getRandomValues. */
 function newKey(): string {
@@ -39,27 +41,29 @@ type Status = "idle" | "submitting" | "success" | "error";
 const field =
   "h-12 w-full rounded-2xl sm:h-14 border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500";
 
-const PACKAGE_CHOICES: ChoiceOption[] = PACKAGE_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
-const ROOM_CHOICES: ChoiceOption[] = [
-  { value: "", label: "Не выбрана" },
-  ...birthdayRooms.map((r) => ({ value: r.id, label: r.name, image: { src: r.coverImage.src } })),
-];
-
-/** "2026-10-20" -> "вт, 20 октября 2026 г." (Russian regardless of the phone's system language). The value itself stays YYYY-MM-DD. */
-const dateLabel = (iso: string): string | null =>
+/** "2026-10-20" -> "вт, 20 октября 2026 г." in the form's language. The value itself stays YYYY-MM-DD. */
+const dateLabel = (iso: string, tag: string): string | null =>
   /^\d{4}-\d{2}-\d{2}$/.test(iso)
-    ? new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${iso}T00:00:00Z`))
+    ? new Intl.DateTimeFormat(tag, { weekday: "short", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${iso}T00:00:00Z`))
     : null;
 
 export function LeadForm({
   initialPackage,
   initialRoom = "",
   onClose,
+  locale = "ru",
 }: {
   initialPackage: LeadPackage;
   initialRoom?: string;
   onClose: () => void;
+  locale?: Locale;
 }) {
+  const t = LEAD_UI[locale];
+  const PACKAGE_CHOICES: ChoiceOption[] = PACKAGE_OPTIONS.map((o) => ({ value: o.value, label: o.value === "undecided" ? t.undecided : o.label }));
+  const ROOM_CHOICES: ChoiceOption[] = [
+    { value: "", label: t.noRoom },
+    ...birthdayRooms.map((r) => ({ value: r.id, label: r.name, image: { src: r.coverImage.src } })),
+  ];
   const uid = useId();
   const [values, setValues] = useState<LeadFields>({
     name: "",
@@ -83,6 +87,16 @@ export function LeadForm({
   // editing any field starts a new one.
   const idempotencyKey = useRef<string | null>(null);
 
+  /** Validation text in the form's language (the server wording is Russian). */
+  const localized = (errs: LeadErrors): LeadErrors => {
+    const out: LeadErrors = {};
+    for (const key of Object.keys(errs) as (keyof LeadFields)[]) {
+      const message = errs[key];
+      if (message) out[key] = leadErrorText(key, message, locale);
+    }
+    return out;
+  };
+
   const set = <K extends keyof LeadFields>(key: K, value: LeadFields[K]) => {
     idempotencyKey.current = null;
     setValues((v) => ({ ...v, [key]: value }));
@@ -101,9 +115,9 @@ export function LeadForm({
     const national = phoneDigits(values.phone);
     const payload = { ...values, phone: national ? `+7${national}` : "" };
     const check = validateLead(payload);
-    if (check.errors.phone && national) check.errors.phone = "Введите 10 цифр после +7";
+    if (check.errors.phone && national) check.errors.phone = t.phoneDigitsError;
     if (!check.ok) {
-      setErrors(check.errors);
+      setErrors(localized(check.errors));
       fail("validation_client");
       const first = (Object.keys(check.errors) as (keyof LeadFields)[])[0];
       document.getElementById(`${uid}-${first}`)?.focus();
@@ -140,7 +154,7 @@ export function LeadForm({
       }
       fail(errorTypeFromStatus(res.status));
       if (res.status === 400 && data.fieldErrors) {
-        setErrors(data.fieldErrors);
+        setErrors(localized(data.fieldErrors));
         setStatus("idle");
         return;
       }
@@ -158,12 +172,12 @@ export function LeadForm({
   const header = (
     <div className="flex items-start justify-between gap-4">
       <h2 id="lead-title" className="font-display text-[1.375rem] font-black leading-tight tracking-tight text-grape-800 sm:text-3xl">
-        {status === "success" ? "Спасибо!" : "Забронировать праздник"}
+        {status === "success" ? t.thanks : t.title}
       </h2>
       <button
         type="button"
         onClick={onClose}
-        aria-label="Закрыть"
+        aria-label={t.close}
         className="group -mr-2.5 -mt-2.5 flex h-11 w-11 shrink-0 items-center justify-center"
       >
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-grape-100 text-grape-800 transition-colors group-hover:bg-grape-200">
@@ -179,12 +193,12 @@ export function LeadForm({
         <div className="shrink-0 px-5 pt-5 sm:px-8 sm:pt-8">{header}</div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4 sm:px-8">
           <p role="status" className="mt-4 text-lg leading-relaxed text-grape-900">
-            Заявка отправлена. Менеджер свяжется с вами.
+            {t.sent}
           </p>
         </div>
         <div className="shrink-0 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-8 sm:pb-8">
           <button type="button" onClick={onClose} className={buttonClass("primary", "w-full")}>
-            Закрыть
+            {t.close}
           </button>
           <a
             href={siteConfig.contacts.instagram}
@@ -217,14 +231,14 @@ export function LeadForm({
     <>
       <div aria-hidden="true" className="my-2 flex items-center gap-3 text-sm font-semibold text-muted">
         <span className="h-px flex-1 bg-line" />
-        или
+        {t.or}
         <span className="h-px flex-1 bg-line" />
       </div>
       <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className={buttonClass("outline", "w-full")}>
         <WhatsappLogo size={22} weight="bold" aria-hidden="true" />
-        Написать в WhatsApp
+        {t.writeWhatsApp}
       </a>
-      <p className="mt-1.5 text-center text-[0.8125rem] leading-snug text-muted">Откроется WhatsApp с готовым сообщением</p>
+      <p className="mt-1.5 text-center text-[0.8125rem] leading-snug text-muted">{t.whatsappHint}</p>
     </>
   ) : null;
 
@@ -232,7 +246,7 @@ export function LeadForm({
     <form onSubmit={onSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 px-5 pt-5 sm:px-8 sm:pt-8">
         {header}
-        <p className="mt-1 text-base text-muted">Менеджер свяжется с вами.</p>
+        <p className="mt-1 text-base text-muted">{t.managerNote}</p>
       </div>
 
       {/* The ONLY scrolling zone of the sheet. */}
@@ -240,7 +254,7 @@ export function LeadForm({
       <div className="grid gap-4 sm:gap-5">
         <div className="grid gap-2">
           <label htmlFor={idOf("name")} className="font-display text-sm font-extrabold text-grape-800">
-            Ваше имя
+            {t.nameLabel}
           </label>
           <input
             id={idOf("name")}
@@ -259,7 +273,7 @@ export function LeadForm({
 
         <div className="grid gap-2">
           <label htmlFor={idOf("phone")} className="font-display text-sm font-extrabold text-grape-800">
-            Телефон<span className="sr-only"> (после +7 — 10 цифр)</span>
+            {t.phoneLabel}<span className="sr-only">{t.phoneHint}</span>
           </label>
           <div className="relative">
             <span
@@ -275,7 +289,7 @@ export function LeadForm({
               inputMode="tel"
               autoComplete="tel-national"
               required
-              placeholder="707 123 45 67"
+              placeholder={t.phonePlaceholder}
               value={values.phone}
               onChange={(e) => {
                 // One typed character is never a country code; paste/autofill/replace may contain one.
@@ -293,23 +307,23 @@ export function LeadForm({
         <div className="grid gap-4 sm:grid-cols-[1.4fr_1fr] sm:gap-3">
           <div className="grid content-start gap-2">
             <label htmlFor={idOf("date")} className="font-display text-sm font-extrabold text-grape-800 sm:flex sm:min-h-10 sm:items-end">
-              Желаемая дата
+              {t.dateLabel}
             </label>
             {/* One date system: the native input is the single source of truth (YYYY-MM-DD) and does the picking; it sits
                 invisibly over a Russian-language display, so an English-language phone still shows "20 октября 2026 г.". */}
             <div className="relative rounded-2xl has-[input:focus-visible]:outline has-[input:focus-visible]:outline-[3px] has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-grape-500">
               <div
                 aria-hidden="true"
-                className={`${field} flex items-center justify-between gap-2 ${errors.date ? "border-lava-500" : ""} ${dateLabel(values.date) ? "font-semibold text-ink" : "text-muted/70"}`}
+                className={`${field} flex items-center justify-between gap-2 ${errors.date ? "border-lava-500" : ""} ${dateLabel(values.date, t.dateLocale) ? "font-semibold text-ink" : "text-muted/70"}`}
               >
-                <span className="min-w-0 truncate">{dateLabel(values.date) ?? "Выберите дату"}</span>
+                <span className="min-w-0 truncate">{dateLabel(values.date, t.dateLocale) ?? t.pickDate}</span>
                 <CalendarBlank size={20} weight="bold" className="shrink-0 text-grape-700" />
               </div>
               <input
                 id={idOf("date")}
                 name="date"
                 type="date"
-                lang="ru"
+                lang={locale}
                 required
                 min={minBookingDate()}
                 value={values.date}
@@ -331,7 +345,7 @@ export function LeadForm({
           <div className="grid content-start gap-2">
             <label htmlFor={idOf("children")} className="font-display text-sm font-extrabold text-grape-800 sm:flex sm:min-h-10 sm:items-end">
               <span>
-                Количество детей <span className="font-medium text-muted">(по желанию)</span>
+                {t.childrenLabel} <span className="font-medium text-muted">{t.optional}</span>
               </span>
             </label>
             <input
@@ -342,7 +356,7 @@ export function LeadForm({
               pattern="[0-9]*"
               autoComplete="off"
               maxLength={2}
-              placeholder="Например, 8"
+              placeholder={t.childrenPlaceholder}
               value={values.children}
               onChange={(e) => set("children", e.target.value.replace(/\D/g, "").slice(0, 2))}
               className={field}
@@ -362,12 +376,12 @@ export function LeadForm({
             minDate={minBookingDate()}
           />
         ) : (
-          <PreferredTime slot={values.slot} onSlot={(id) => set("slot", id)} />
+          <PreferredTime slot={values.slot} onSlot={(id) => set("slot", id)} locale={locale} />
         )}
 
         <div className="grid gap-2">
           <span id={`${idOf("package")}-label`} className="font-display text-sm font-extrabold text-grape-800">
-            Пакет праздника
+            {t.packageLabel}
           </span>
           <ChoiceField
             id={idOf("package")}
@@ -388,7 +402,7 @@ export function LeadForm({
 
         <div className="grid gap-2">
           <span id={`${idOf("room")}-label`} className="font-display text-sm font-extrabold text-grape-800">
-            Предпочитаемая комната <span className="font-medium text-muted">(по желанию)</span>
+            {t.roomLabel} <span className="font-medium text-muted">{t.optional}</span>
           </span>
           <ChoiceField
             id={idOf("room")}
@@ -405,7 +419,7 @@ export function LeadForm({
             }}
           />
           <p id={`${idOf("room")}-hint`} className="text-[0.8125rem] leading-snug text-muted">
-            Это пожелание: выбор не гарантирует, что комната свободна на вашу дату.
+            {t.roomHint}
           </p>
           {err("room")}
         </div>
@@ -422,16 +436,16 @@ export function LeadForm({
               {...aria("consent")}
             />
             <span>
-              Я согласен(на) на{" "}
+              {t.consentBefore}{" "}
               <a
                 href="/privacy"
                 target="_blank"
                 rel="noopener"
                 className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2"
               >
-                обработку персональных данных
+                {t.consentLink}
               </a>{" "}
-              для связи по заявке.
+              {t.consentAfter}
             </span>
           </label>
           <p className="mt-1.5 pl-8 text-xs leading-relaxed text-muted">
@@ -457,24 +471,20 @@ export function LeadForm({
       <div className="shrink-0 border-t border-line bg-paper px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-8 sm:pb-8 sm:pt-4">
       {status === "error" ? (
         <p role="alert" className="mb-3 max-h-32 overflow-y-auto rounded-2xl bg-sun-100 p-4 text-base font-semibold text-grape-900">
-          {errorKind === "rate"
-            ? "Слишком много попыток. Попробуйте чуть позже."
-            : whatsappLink
-              ? "Не удалось отправить заявку. Попробуйте ещё раз или напишите нам в WhatsApp."
-              : "Не удалось отправить заявку. Попробуйте ещё раз или напишите нам в Instagram."}{" "}
+          {errorKind === "rate" ? t.errorRate : whatsappLink ? t.errorWhatsApp : t.errorInstagram}{" "}
           <a
             href={whatsappLink ?? siteConfig.contacts.instagram}
             target="_blank"
             rel="noopener noreferrer"
             className="underline decoration-2 underline-offset-2"
           >
-            {whatsappLink ? "Написать в WhatsApp" : siteConfig.contacts.instagramHandle}
+            {whatsappLink ? t.writeWhatsApp : siteConfig.contacts.instagramHandle}
           </a>
         </p>
       ) : null}
 
       <button type="submit" disabled={status === "submitting"} className={buttonClass("primary", "w-full disabled:opacity-60")}>
-        {status === "submitting" ? "Отправляем…" : "Отправить заявку"}
+        {status === "submitting" ? t.submitting : t.submit}
       </button>
       {/* Second, equal way to reach us. A plain link built from the CURRENT form fields: it does not validate or
           submit the form, needs no consent tick, is not a lead and fires no analytics. On very short screens

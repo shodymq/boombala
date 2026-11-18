@@ -444,10 +444,10 @@ describe("Database roles: one per application, least privilege", () => {
 
       // enquiry -> booking -> release, manual booking
       const lead = await submitLead(api, { idempotencyKey: randomUUID(), name: "Заявка Роли", phone: "+77010000888", date: FUTURE, children: 4, consent: true });
-      const { reservationId } = await confirmLead(admin, owner2(), { leadId: lead.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party" });
-      await assert.rejects(() => createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party", name: "Конфликт", phone: "+77010000889" }), /slot_taken|conflict/i);
+      const { reservationId } = await confirmLead(admin, owner2(), { leadId: lead.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "star-party" });
+      await assert.rejects(() => createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "star-party", name: "Конфликт", phone: "+77010000889" }), /slot_taken|conflict/i);
       await releaseReservation(admin, owner2(), reservationId, "ТЕСТ");
-      await createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party", name: "Ручной Роли", phone: "+77010000890" });
+      await createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "star-party", name: "Ручной Роли", phone: "+77010000890" });
 
       // notifications (the worker is part of the staff application)
       const sent: string[] = [];

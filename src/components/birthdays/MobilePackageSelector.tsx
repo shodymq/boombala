@@ -3,30 +3,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { CaretDown, Check } from "@phosphor-icons/react";
-import type { BirthdayPackage, ProgramItem, PackageId } from "@/types";
+import type { BirthdayPackage, Locale, PackageId } from "@/types";
 import { formatTenge } from "@/lib/format";
 import { trackBirthday } from "@/lib/funnel";
 import { useSelectedPackage } from "@/components/lead/SelectedPackage";
+import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
+import { badgeLabel, ProgramList } from "./shared";
 
-/** Mobile-only (< lg) package picker: one package at a time, details behind an accordion. */
-
-const PRIORITY: ProgramItem["key"][] = ["quest", "shows", "workshop", "animation", "characters", "challenge", "pinata", "greeting"];
-
-/** 3–5 short selling points derived from the data (nothing is hard-coded per package). */
-function keyPoints(pkg: BirthdayPackage): string[] {
-  const points = [
-    `Именинник + ${pkg.freeChildren} детей бесплатно`,
-    `−${pkg.extraGuestDiscountPercent}% на вход дополнительным гостям`,
-  ];
-  const animators = pkg.program.find((i) => i.key === "animators");
-  if (animators) points.push(animators.title);
-  for (const key of PRIORITY) {
-    if (points.length >= 5) break;
-    const item = pkg.program.find((i) => i.key === key);
-    if (item) points.push(item.title);
-  }
-  return points;
-}
+/** Mobile-only (< lg) package picker: one package at a time, the full programme behind an accordion. */
 
 const THEMES = {
   dark: {
@@ -35,14 +19,14 @@ const THEMES = {
     tabOff: "text-white",
     title: "text-white",
     sub: "text-grape-200",
-    old: "text-grape-200",
-    weekday: "text-sun-400",
     text: "text-grape-50",
     check: "text-sun-400",
-    line: "border-white/20",
     btn: "border-white/40 text-white hover:bg-white/10",
+    weekday: "text-sun-400",
     muted: "text-grape-200",
     link: "text-white decoration-sun-400",
+    line: "border-white/20",
+    chip: "border-white/25 bg-white/10 text-white",
   },
   light: {
     tabs: "bg-grape-100",
@@ -50,46 +34,61 @@ const THEMES = {
     tabOff: "text-grape-800",
     title: "text-grape-800",
     sub: "text-muted",
-    old: "text-muted",
-    weekday: "text-grape-700",
     text: "text-grape-900",
     check: "text-grape-600",
-    line: "border-grape-200",
     btn: "border-grape-700 text-grape-700 hover:bg-grape-50",
+    weekday: "text-grape-700",
     muted: "text-muted",
     link: "text-grape-700 decoration-sun-400",
+    line: "border-grape-200",
+    chip: "border-grape-200 bg-grape-50 text-grape-800",
   },
 } as const;
 
+/** The short points under the price: the approved conditions first, then the first programme lines. */
+function keyPoints(pkg: BirthdayPackage, locale: Locale): string[] {
+  const copy = pkg.copy[locale];
+  const points = copy.conditions.slice(0, 2).map((c) => (c.note ? `${c.title} · ${c.note}` : c.title));
+  for (const item of copy.program) {
+    if (points.length >= 5) break;
+    points.push(item.title);
+  }
+  return points;
+}
+
 export function MobilePackageSelector({
   packages,
+  locale,
   tone,
   showCompareLink = false,
 }: {
   packages: BirthdayPackage[];
+  locale: Locale;
   tone: keyof typeof THEMES;
   showCompareLink?: boolean;
 }) {
   const t = THEMES[tone];
+  const ui = BIRTHDAYS_UI[locale];
   const uid = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const { setSelected } = useSelectedPackage();
-  const defaultId: PackageId = packages.find((p) => p.highlight)?.id ?? packages[0].id;
+  const defaultId: PackageId = packages.find((p) => p.badge === "optimal")?.id ?? packages[0].id;
   const [activeId, setActiveId] = useState<PackageId>(defaultId);
   const [open, setOpen] = useState(false);
 
   const active = packages.find((p) => p.id === activeId) ?? packages[0];
+  const copy = active.copy[locale];
 
-  // Deep link: /birthdays#wow-party selects that package and brings the selector into view.
+  // Deep link: /birthdays#star-party selects that package and brings the selector into view.
   useEffect(() => {
     const id = decodeURIComponent(window.location.hash.slice(1)) as PackageId;
     if (!packages.some((p) => p.id === id)) return;
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setActiveId(id);
       setSelected(id);
       window.setTimeout(() => rootRef.current?.scrollIntoView({ block: "start" }), 60);
     }, 0);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, [packages, setSelected]);
 
   // While the selector is on screen, the visible package is the "current" one for the booking bar.
@@ -117,9 +116,11 @@ export function MobilePackageSelector({
     document.getElementById(`${uid}-tab-${next.id}`)?.focus();
   };
 
+  const badge = badgeLabel(active, locale);
+
   return (
     <div ref={rootRef} className="scroll-mt-20">
-      <div role="tablist" aria-label="Праздничные пакеты" className={`grid grid-cols-3 gap-1 rounded-full p-1 ${t.tabs}`}>
+      <div role="tablist" aria-label={ui.tabsLabel} className={`grid grid-cols-3 gap-1 rounded-full p-1 ${t.tabs}`}>
         {packages.map((p, i) => {
           const on = p.id === activeId;
           return (
@@ -135,40 +136,43 @@ export function MobilePackageSelector({
               onKeyDown={(e) => onKeyDown(e, i)}
               className={`h-11 rounded-full font-display text-[0.9375rem] font-black tracking-tight transition-colors duration-200 ${on ? t.tabOn : t.tabOff}`}
             >
-              {p.shortName}
+              {p.copy[locale].name.split(" ")[0]}
             </button>
           );
         })}
       </div>
 
       <div id={`${uid}-panel`} role="tabpanel" aria-labelledby={`${uid}-tab-${active.id}`} className="mt-5">
-        {active.highlight ? (
+        {badge ? (
           <p className="mb-2 inline-block rounded-full bg-sun-400 px-3 py-1 font-display text-[0.6875rem] font-extrabold uppercase tracking-[0.1em] text-grape-900">
-            {active.highlight}
+            {badge}
           </p>
         ) : null}
-        <h3 className={`font-display text-[1.625rem] font-black leading-none tracking-tight ${t.title}`}>{active.name}</h3>
-        <p className={`mt-1 text-sm ${t.sub}`}>{active.tagline}</p>
+        <h3 className={`font-display text-[1.625rem] font-black leading-none tracking-tight ${t.title}`}>{copy.name}</h3>
+        <p className={`mt-1 text-sm ${t.sub}`}>{copy.tag}</p>
 
         <div className="mt-3">
-          <p className="flex items-center gap-2">
-            <s className={`font-display text-base font-extrabold tabular-nums decoration-2 ${t.old}`}>
-              <span className="sr-only">Обычная цена </span>
-              {formatTenge(active.price)}
+          <p className="flex flex-wrap items-center gap-2">
+            <s className={`font-display text-base font-extrabold tabular-nums decoration-2 ${t.sub}`}>
+              <span className="sr-only">{ui.regularPrice} </span>
+              {formatTenge(active.weekendPrice)}
             </s>
             <span className="rounded-full bg-lava-500 px-2 py-0.5 font-display text-xs font-extrabold text-ink">
-              <span className="sr-only">Скидка </span>−{active.weekdayDiscountPercent}%
+              {ui.discountBadge}
             </span>
           </p>
           <p className={`mt-0.5 font-display text-[2.25rem] font-black leading-none tabular-nums tracking-tight ${t.weekday}`}>
-            <span className="sr-only">Цена в будние дни </span>
+            <span className="sr-only">{ui.weekdayCaption} </span>
             {formatTenge(active.weekdayPrice)}
           </p>
-          <p className={`mt-1 text-sm ${t.sub}`}>в будние дни</p>
+          <p className={`mt-1 text-sm ${t.sub}`}>{ui.weekdayShort}</p>
+          <p className={`mt-0.5 text-sm font-semibold ${t.text}`}>
+            {ui.savingsLabel}: {formatTenge(active.weekdaySavings)}
+          </p>
         </div>
 
-        <ul className={`mt-4 grid gap-2 text-[0.9375rem] leading-snug ${t.text}`} aria-label={`Главное в ${active.name}`}>
-          {keyPoints(active).map((point) => (
+        <ul className={`mt-4 grid gap-2 text-[0.9375rem] leading-snug ${t.text}`} aria-label={ui.keyPointsLabel(copy.name)}>
+          {keyPoints(active, locale).map((point) => (
             <li key={point} className="flex items-start gap-2.5">
               <Check size={16} weight="bold" aria-hidden="true" className={`mt-0.5 shrink-0 ${t.check}`} />
               {point}
@@ -183,27 +187,17 @@ export function MobilePackageSelector({
           onClick={() => setOpen((v) => !v)}
           className={`mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full border-2 font-display text-[0.9375rem] font-extrabold transition-colors ${t.btn}`}
         >
-          {open ? "Скрыть состав" : "Показать полный состав"}
+          {open ? ui.hideFull : ui.showFull}
           <CaretDown size={16} weight="bold" aria-hidden="true" className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
         </button>
 
         <div id={`${uid}-full`} hidden={!open} className="mt-1">
-          <ul className={`divide-y ${t.line} ${t.text}`}>
-            {active.program.map((item) => {
-              const detail = [item.note, item.options?.join(" / ")].filter(Boolean).join(" · ");
-              return (
-                <li key={item.key} className="py-3">
-                  <p className="font-display text-base font-extrabold leading-snug">{item.title}</p>
-                  {detail ? <p className={`mt-0.5 text-sm leading-relaxed ${t.muted}`}>{detail}</p> : null}
-                </li>
-              );
-            })}
-          </ul>
+          <ProgramList items={copy.program} ui={ui} chipClass={t.chip} lineClass={t.line} muted={t.muted} />
         </div>
 
         {showCompareLink ? (
-          <Link href="/birthdays#compare" className={`mt-4 inline-flex h-11 items-center font-display text-[0.9375rem] font-extrabold underline decoration-2 underline-offset-4 ${t.link}`}>
-            Сравнить все пакеты
+          <Link href={locale === "kk" ? "/kk/birthdays#compare" : "/birthdays#compare"} className={`mt-4 inline-flex h-11 items-center font-display text-[0.9375rem] font-extrabold underline decoration-2 underline-offset-4 ${t.link}`}>
+            {ui.compareLink}
           </Link>
         ) : null}
       </div>

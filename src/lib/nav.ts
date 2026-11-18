@@ -14,7 +14,7 @@ export const homeLink: NavLink = { label: "Главная", href: "/", hint: "Ч
 /** Full pages of the site. */
 export const pageLinks: readonly NavLink[] = [
   { label: "Развлечения", href: "/attractions", hint: "Все аттракционы, возраст и рост" },
-  { label: "Дни рождения", href: "/birthdays", hint: "Пакеты WOW, MAGIC, BOOM и тематические комнаты" },
+  { label: "Дни рождения", href: "/birthdays", hint: "Пакеты HAPPY, STAR, BOOM BALA и тематические комнаты" },
   { label: "Меню кафе", href: "/menu", hint: "Блюда и цены" },
   // Shown only when the news section is switched on (NEXT_PUBLIC_NEWS=1); otherwise the navigation is exactly as before.
   ...(process.env.NEXT_PUBLIC_NEWS === "1" ? [{ label: "Новости", href: "/news", hint: "Новости и акции" }] : []),
