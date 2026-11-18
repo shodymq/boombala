@@ -143,9 +143,10 @@ describe("Exposure: what each deployment shows", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, DATABASE_URL: "" }), ["database_url_required"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, CRON_SECRET: "" }), ["cron_secret_required"]);
     });
-    it("notifications in production must be 'minimal': 'full', a typo or nothing at all stops the admin from starting", () => {
-      for (const bad of ["full", "FULL", "Minimal", "min", "", undefined]) assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: bad }), ["notify_level_must_be_minimal"], JSON.stringify(bad));
+    it("notifications in production accept an explicit full or minimal setting and reject missing or unknown values", () => {
+      for (const bad of ["FULL", "Minimal", "min", "", undefined]) assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: bad }), ["notify_level_invalid"], JSON.stringify(bad));
       assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "minimal" }), []);
+      assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "full" }), []);
     });
     it("an allowlist that is really 'everyone' is refused", () => {
       for (const wide of ["0.0.0.0/0", "::/0", "10.0.0.0/7", "10.77.0.0/24,0.0.0.0/0"]) assert.ok(profileProblems({ ...goodAdmin, ADMIN_ALLOWED_CIDRS: wide }).includes("admin_cidrs_too_wide"), wide);

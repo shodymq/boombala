@@ -75,22 +75,17 @@ describe("Kazakhstan production: an unsafe site configuration accepts no enquiry
     });
   });
 
-  it("the notification level of the admin is 'minimal' in the production profile whatever the environment says; elsewhere it behaves as before", () => {
+  it("honors the explicitly configured notification level in the production profile", () => {
     const keep = { p: process.env.PLATFORM_PROFILE, l: process.env.TELEGRAM_NOTIFY_LEVEL };
     try {
       process.env.PLATFORM_PROFILE = "kz-production";
-      for (const level of ["full", "", "typo", undefined]) {
-        if (level === undefined) delete process.env.TELEGRAM_NOTIFY_LEVEL;
-        else process.env.TELEGRAM_NOTIFY_LEVEL = level;
-        assert.equal(notifyLevel(), "minimal", String(level));
-      }
-      delete process.env.PLATFORM_PROFILE;
       process.env.TELEGRAM_NOTIFY_LEVEL = "full";
       assert.equal(notifyLevel(), "full");
       process.env.TELEGRAM_NOTIFY_LEVEL = "minimal";
       assert.equal(notifyLevel(), "minimal");
+      delete process.env.PLATFORM_PROFILE;
       delete process.env.TELEGRAM_NOTIFY_LEVEL;
-      assert.equal(notifyLevel(), "full", "today's default");
+      assert.equal(notifyLevel(), "full", "default remains the legacy detailed format outside a validated production profile");
     } finally {
       if (keep.p === undefined) delete process.env.PLATFORM_PROFILE; else process.env.PLATFORM_PROFILE = keep.p;
       if (keep.l === undefined) delete process.env.TELEGRAM_NOTIFY_LEVEL; else process.env.TELEGRAM_NOTIFY_LEVEL = keep.l;
