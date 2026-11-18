@@ -66,7 +66,10 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                     </select>
                     <select name="packageId" defaultValue={l.packageId ?? ""} required className={input} aria-label="Пакет">
                       <option value="" disabled>Пакет</option>
-                      {packages.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      {/* The enquiry's own package stays selectable even after it was taken off sale: confirming the booking must not silently change it. */}
+                      {packages.filter((p) => p.isActive || p.id === l.packageId).map((p) => (
+                        <option key={p.id} value={p.id}>{p.isActive ? p.name : `${p.name} (снят с продажи)`}</option>
+                      ))}
                     </select>
                     <button type="submit" className={btn + " sm:col-span-2 sm:justify-self-start"}>Подтвердить бронь</button>
                   </form>

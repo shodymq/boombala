@@ -17,7 +17,7 @@ import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
 export function WhatsAppCta({ locale }: { locale: Locale }) {
   const ui = BIRTHDAYS_UI[locale];
   const { selected, room } = useSelectedPackage();
-  const href = whatsappUrl(birthdayMessage({ packageId: selected, roomId: room }));
+  const href = whatsappUrl(birthdayMessage({ packageId: selected, roomId: room, locale }));
   if (!href) return null;
   const { phone } = siteConfig.contacts;
   return (

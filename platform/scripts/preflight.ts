@@ -12,7 +12,8 @@ if (!url) {
 }
 const pool = createPool(url, { max: 1 });
 try {
-  const r = await preflight(pool, join(dirname(fileURLToPath(import.meta.url)), "..", "migrations"));
+  // --final: after the site switch (the legacy packages must be off sale). Without it: "ready" for the switch.
+  const r = await preflight(pool, join(dirname(fileURLToPath(import.meta.url)), "..", "migrations"), process.argv.includes("--final") ? "final" : "ready");
   if (r.ok) console.log("preflight: OK (migrations, attendance schema, intake function, roles)");
   else {
     console.error(`preflight: ${r.problems.length} problem(s)`);

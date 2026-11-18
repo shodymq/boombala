@@ -93,7 +93,7 @@ const EXPECTED_GROUPS = ["Вторые блюда", "Пицца, фастфуд 
 if (JSON.stringify(menuGroups.map((g) => g.name)) !== JSON.stringify(EXPECTED_GROUPS)) problems.push(`groups are ${JSON.stringify(menuGroups.map((g) => g.name))}`);
 const service = read("../src/services/menu.ts");
 if (/from\s+["']\.\/http["']|resolve\(/.test(service.replace(/\/\*[\s\S]*?\*\//g, ""))) problems.push("services/menu.ts must read the local catalog only (no API resolve())");
-const pageSource = read("../src/app/menu/page.tsx");
+const pageSource = read("../src/app/(ru)/menu/page.tsx");
 if (/детск(ое|ого|ом|ий) меню|Детям/i.test(pageSource)) problems.push("the page still mentions a kids menu");
 if (!pageSource.includes("Обслуживание — 10%.")) problems.push('the page lacks the "Обслуживание — 10%." note');
 

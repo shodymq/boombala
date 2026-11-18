@@ -75,7 +75,7 @@ export function PackageDetail({ pkg, locale }: { pkg: BirthdayPackage; locale: L
               <div className="mt-2 border-y border-line">
                 <ProgramList items={copy.program} ui={ui} chipClass="border-grape-200 bg-grape-50 text-grape-800" lineClass="divide-line" muted="text-muted" />
               </div>
-              {pkg.cakeCarryOut ? <p className="mt-4 text-sm text-muted">{ui.flagshipNoteCake}</p> : null}
+              <p className="mt-4 text-sm text-muted">{ui.flagshipNoteCake}</p>
             </Reveal>
           </div>
         </div>

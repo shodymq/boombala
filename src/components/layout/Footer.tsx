@@ -13,7 +13,8 @@ import {
   WhatsappLogo,
 } from "@phosphor-icons/react/dist/ssr";
 import { siteConfig } from "@/services/config";
-import { homeLink, infoLinks, legalLinks, pageLinks } from "@/lib/nav";
+import { navFor, shellUi } from "@/lib/nav";
+import type { Locale } from "@/types";
 import { Container } from "@/components/ui/Container";
 
 const socialLinks: Array<{ label: string; href: string; icon: Icon }> = [
@@ -23,7 +24,9 @@ const socialLinks: Array<{ label: string; href: string; icon: Icon }> = [
   { label: "WhatsApp", href: `https://wa.me/${siteConfig.contacts.whatsapp}`, icon: WhatsappLogo },
 ];
 
-export function Footer() {
+export function Footer({ locale = "ru" }: { locale?: Locale }) {
+  const { homeLink, infoLinks, legalLinks, pageLinks } = navFor(locale);
+  const ui = shellUi[locale];
   return (
     <footer className="bg-grape-900 text-grape-100">
       <Container className="grid gap-10 py-12 md:grid-cols-[1.2fr_2fr] md:py-16">
@@ -37,20 +40,20 @@ export function Footer() {
             className="-ml-2 h-auto w-[168px] select-none"
           />
           <p className="mt-5 max-w-[34ch] text-base leading-relaxed text-grape-200">
-            Boom Bala — детский игровой и развлекательный центр в {siteConfig.city}.
+            {locale === "kk" ? `Boom Bala — Алматыдағы балаларға арналған ойын-сауық орталығы.` : `Boom Bala — детский игровой и развлекательный центр в ${siteConfig.city}.`}
           </p>
           <address className="mt-4 text-base not-italic leading-relaxed text-grape-200">
             <span className="flex items-start gap-2">
               <MapPin size={20} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 text-sun-400" />
               <span>
-                г. {siteConfig.location.city}, {siteConfig.location.street}, {siteConfig.location.mall}, 3-й этаж.
+                {ui.footerAddress(siteConfig.location.city, siteConfig.location.street, siteConfig.location.mall)}
               </span>
             </span>
             <span className="mt-3 flex items-start gap-2">
               <Clock size={20} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 text-sun-400" />
               <span>
-                <span className="block">Ежедневно: 10:00–22:00</span>
-                <span className="block">Последний вход: 21:00</span>
+                <span className="block">{ui.footerHours}</span>
+                <span className="block">{ui.footerLastEntry}</span>
               </span>
             </span>
             <a
@@ -75,14 +78,14 @@ export function Footer() {
             className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full border border-sun-400/70 px-4 py-2 font-display text-sm font-extrabold text-sun-400 transition-colors hover:bg-sun-400 hover:text-grape-900 focus-visible:bg-sun-400 focus-visible:text-grape-900"
           >
             <MapPin size={19} weight="bold" aria-hidden="true" />
-            Открыть в 2GIS
+            {ui.footerMap}
             <ArrowSquareOut size={17} weight="bold" aria-hidden="true" />
           </a>
         </div>
 
         <div className="grid grid-cols-2 gap-x-6 gap-y-9 min-[1200px]:grid-cols-4">
-          <nav aria-label="Страницы сайта">
-            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Страницы</p>
+          <nav aria-label={ui.footerPages}>
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerPages}</p>
             <ul className="grid gap-1">
               {[homeLink, ...pageLinks].map((item) => (
                 <li key={item.href}>
@@ -94,8 +97,8 @@ export function Footer() {
             </ul>
           </nav>
 
-          <nav aria-label="Информация на главной">
-            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Информация</p>
+          <nav aria-label={ui.footerInfo}>
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerInfo}</p>
             <ul className="grid gap-1">
               {infoLinks.map((item) => (
                 <li key={item.href}>
@@ -107,8 +110,8 @@ export function Footer() {
             </ul>
           </nav>
 
-          <nav aria-label="Юридические документы">
-            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Документы</p>
+          <nav aria-label={ui.footerDocs}>
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerDocs}</p>
             <ul className="grid gap-1">
               {legalLinks.map((item) => (
                 <li key={item.href}>
@@ -120,8 +123,8 @@ export function Footer() {
             </ul>
           </nav>
 
-          <nav aria-label="Мы в социальных сетях" className="col-span-2 min-[1200px]:col-span-1">
-            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Мы в соцсетях</p>
+          <nav aria-label={ui.footerSocial} className="col-span-2 min-[1200px]:col-span-1">
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerSocial}</p>
             <ul className="grid gap-1 sm:grid-cols-2 min-[1200px]:grid-cols-1">
               {socialLinks.map(({ label, href, icon: SocialIcon }) => (
                 <li key={label}>
@@ -129,7 +132,7 @@ export function Footer() {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label={`Boom Bala в ${label}`}
+                    aria-label={ui.footerSocialLabel(label)}
                     className="inline-flex min-h-11 items-center gap-2 py-1.5 text-base transition-colors hover:text-white focus-visible:text-white"
                   >
                     <SocialIcon size={22} weight="bold" aria-hidden="true" />

@@ -214,7 +214,7 @@ export function LeadForm({
   }
 
   // Fallback when delivery fails: WhatsApp with the package and room chosen in this form (a click is not a lead).
-  const whatsappLink = whatsappUrl(birthdayMessage({ packageId: values.package, roomId: values.room }));
+  const whatsappLink = whatsappUrl(birthdayMessage({ packageId: values.package, roomId: values.room, locale }));
   const idOf = (k: keyof LeadFields) => `${uid}-${k}`;
   const err = (k: keyof LeadFields) =>
     errors[k] ? (
