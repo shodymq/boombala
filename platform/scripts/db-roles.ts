@@ -43,6 +43,8 @@ export const API_FUNCTION_PREFIX = "intake_";
 
 /** Tables the staff application may delete from (everything else is append-only or never deleted). */
 export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "news_posts", "news_images"] as const;
+/** Append-only booking facts need no UPDATE/DELETE privilege; their triggers remain a second guard. */
+export const ADMIN_APPEND_ONLY = ["booking_operations", "manual_payment_facts"] as const;
 
 const ident = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -99,7 +101,8 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
   if (fns.length === 0) throw new Error("no bb.intake_* functions found: apply migration 012 first");
   for (const f of fns) await pool.query(`GRANT EXECUTE ON FUNCTION ${f.sig} TO ${ident(api)}`);
   for (const t of tables) {
-    await pool.query(`GRANT SELECT, INSERT, UPDATE ON bb.${ident(t)} TO ${ident(admin)}`);
+    const adminPrivileges = (ADMIN_APPEND_ONLY as readonly string[]).includes(t) ? "SELECT, INSERT" : "SELECT, INSERT, UPDATE";
+    await pool.query(`GRANT ${adminPrivileges} ON bb.${ident(t)} TO ${ident(admin)}`);
     if ((ADMIN_DELETE as readonly string[]).includes(t)) await pool.query(`GRANT DELETE ON bb.${ident(t)} TO ${ident(admin)}`);
     await pool.query(`CREATE POLICY ${ident(`${admin}_access`)} ON bb.${ident(t)} FOR ALL TO ${ident(admin)} USING (true) WITH CHECK (true)`);
   }

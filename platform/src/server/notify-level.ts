@@ -1,12 +1,3 @@
-/**
- * Full notifications include customer contact details. In the Kazakhstan production profile
- * they require an explicit, separate acknowledgement in addition to the selected level.
- */
-export const notifyLevel = (): "full" | "minimal" => {
-  if (process.env.PLATFORM_PROFILE === "kz-production") {
-    return process.env.TELEGRAM_NOTIFY_LEVEL === "full" && process.env.TELEGRAM_FULL_PII_ACK === "1"
-      ? "full"
-      : "minimal";
-  }
-  return process.env.TELEGRAM_NOTIFY_LEVEL === "minimal" ? "minimal" : "full";
-};
+/** In the Kazakhstan production profile the level is `minimal` whatever the environment says (the profile also refuses to start otherwise). */
+export const notifyLevel = (): "full" | "minimal" =>
+  process.env.PLATFORM_PROFILE === "kz-production" || process.env.TELEGRAM_NOTIFY_LEVEL === "minimal" ? "minimal" : "full";

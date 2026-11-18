@@ -37,7 +37,7 @@ describe("Kazakhstan production: an unsafe site configuration accepts no enquiry
   });
 
   it("the site must not hold anything that belongs to another process", () => {
-    for (const k of ["DATABASE_URL", "MFA_ENC_KEY", "CRON_SECRET", "PLATFORM_IP_PEPPER", "PLATFORM_ROLE", "PLATFORM_PROFILE", "ADMIN_ALLOWED_CIDRS", "SITE_REVALIDATE_URL", "TELEGRAM_NOTIFY_LEVEL", "TELEGRAM_FULL_PII_ACK"]) {
+    for (const k of ["DATABASE_URL", "MFA_ENC_KEY", "CRON_SECRET", "PLATFORM_IP_PEPPER", "PLATFORM_ROLE", "PLATFORM_PROFILE", "ADMIN_ALLOWED_CIDRS", "SITE_REVALIDATE_URL", "TELEGRAM_NOTIFY_LEVEL"]) {
       assert.deepEqual(siteProfileProblems({ ...good, [k]: "x" }), [`site_must_not_have_${k.toLowerCase()}`], k);
     }
   });
@@ -75,23 +75,16 @@ describe("Kazakhstan production: an unsafe site configuration accepts no enquiry
     });
   });
 
-  it("full production notifications require the separate acknowledgement; otherwise production stays minimal", () => {
-    const keep = { p: process.env.PLATFORM_PROFILE, l: process.env.TELEGRAM_NOTIFY_LEVEL, a: process.env.TELEGRAM_FULL_PII_ACK };
+  it("the notification level of the admin is 'minimal' in the production profile whatever the environment says; elsewhere it behaves as before", () => {
+    const keep = { p: process.env.PLATFORM_PROFILE, l: process.env.TELEGRAM_NOTIFY_LEVEL };
     try {
       process.env.PLATFORM_PROFILE = "kz-production";
       for (const level of ["full", "", "typo", undefined]) {
         if (level === undefined) delete process.env.TELEGRAM_NOTIFY_LEVEL;
         else process.env.TELEGRAM_NOTIFY_LEVEL = level;
-        delete process.env.TELEGRAM_FULL_PII_ACK;
         assert.equal(notifyLevel(), "minimal", String(level));
       }
-      process.env.TELEGRAM_NOTIFY_LEVEL = "full";
-      process.env.TELEGRAM_FULL_PII_ACK = "1";
-      assert.equal(notifyLevel(), "full");
-      process.env.TELEGRAM_FULL_PII_ACK = "true";
-      assert.equal(notifyLevel(), "minimal");
       delete process.env.PLATFORM_PROFILE;
-      delete process.env.TELEGRAM_FULL_PII_ACK;
       process.env.TELEGRAM_NOTIFY_LEVEL = "full";
       assert.equal(notifyLevel(), "full");
       process.env.TELEGRAM_NOTIFY_LEVEL = "minimal";
@@ -101,7 +94,6 @@ describe("Kazakhstan production: an unsafe site configuration accepts no enquiry
     } finally {
       if (keep.p === undefined) delete process.env.PLATFORM_PROFILE; else process.env.PLATFORM_PROFILE = keep.p;
       if (keep.l === undefined) delete process.env.TELEGRAM_NOTIFY_LEVEL; else process.env.TELEGRAM_NOTIFY_LEVEL = keep.l;
-      if (keep.a === undefined) delete process.env.TELEGRAM_FULL_PII_ACK; else process.env.TELEGRAM_FULL_PII_ACK = keep.a;
     }
   });
 });

@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { DM_Sans, Manrope } from "next/font/google";
 import "./globals.css";
+import "./snow-shell.css";
+import "./snow-overview.css";
+import "./(admin)/requests/snow-requests.css";
+import "./snow-pages.css";
+
+const bodyFont = DM_Sans({ subsets: ["latin", "latin-ext"], variable: "--font-body" });
+const headingFont = Manrope({ subsets: ["latin", "cyrillic"], variable: "--font-heading" });
 
 export const metadata: Metadata = {
   title: { default: "Boom Bala — управление", template: "%s — Boom Bala" },
@@ -13,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru">
+    <html lang="ru" className={[bodyFont.variable, headingFont.variable].join(" ")}>
       <body className="min-h-dvh antialiased">{children}</body>
     </html>
   );

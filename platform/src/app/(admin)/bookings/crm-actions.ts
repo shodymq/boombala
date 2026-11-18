@@ -5,7 +5,7 @@ import { z } from "zod";
 import { almatyDate, isCalendarDate, toMinutes } from "../../../core/booking-calendar.ts";
 import { withFastApiClient } from "../../../server/crm-actor.ts";
 import { unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
-import { confirmPaidRequestFlow, createBookingFlow, failureCode } from "../../../server/crm-flows.ts";
+import { confirmPaidRequestFlow, continueRequestFlow, createBookingFlow, failureCode } from "../../../server/crm-flows.ts";
 import { requirePermission } from "../../../server/dal.ts";
 
 /**
@@ -50,6 +50,12 @@ const confirmPaidSchema = z.object({
   packageId: id,
   agreedPriceKzt: money,
   idempotencyKey: key,
+});
+
+const continueSchema = confirmPaidSchema.extend({
+  prepaymentKzt: money,
+  prepaymentMethod: z.enum(["cash", "card_terminal", "bank_transfer", "other_manual"]),
+  note: optionalText(300),
 });
 
 const blockSchema = z.object({ branchId: id, date, roomId: id, startTime, reason: z.string().trim().min(1).max(300), idempotencyKey: key });
@@ -156,6 +162,31 @@ export async function confirmPaidRequestAction(formData: FormData): Promise<void
   const input = parsed.data;
   if (!unifiedFastapiCrmEnabled()) redirect(calendarUrl(input.branchId, input.date, "error=unavailable"));
   const result = await withFastApiClient(session, (client) => confirmPaidRequestFlow(client, { ...input }));
+  const outcome = result.ok ? okOutcome("booked", result.reservationId) : `error=${result.code}`;
+  redirect(calendarUrl(input.branchId, input.date, `${outcome}&request=${encodeURIComponent(input.requestId)}`));
+}
+
+/** Books the request the manager opened (no new request is created). */
+export async function continueRequestAction(formData: FormData): Promise<void> {
+  const session = await requirePermission("bookings.manage");
+  const { branchId, date: rawDate } = await branchAndDate(formData);
+  const parsed = continueSchema.safeParse({
+    requestId: field(formData, "requestId"),
+    branchId,
+    date: rawDate,
+    roomId: field(formData, "roomId"),
+    startTime: field(formData, "startTime"),
+    packageId: field(formData, "packageId"),
+    agreedPriceKzt: field(formData, "agreedPriceKzt"),
+    prepaymentKzt: field(formData, "prepaymentKzt") || "10000",
+    prepaymentMethod: field(formData, "prepaymentMethod") || "cash",
+    note: field(formData, "note"),
+    idempotencyKey: field(formData, "idempotencyKey"),
+  });
+  if (!parsed.success) redirect(calendarUrl(branchId, rawDate, "error=invalid"));
+  const input = parsed.data;
+  if (!unifiedFastapiCrmEnabled()) redirect(calendarUrl(input.branchId, input.date, "error=unavailable"));
+  const result = await withFastApiClient(session, (client) => continueRequestFlow(client, { ...input }));
   const outcome = result.ok ? okOutcome("booked", result.reservationId) : `error=${result.code}`;
   redirect(calendarUrl(input.branchId, input.date, `${outcome}&request=${encodeURIComponent(input.requestId)}`));
 }

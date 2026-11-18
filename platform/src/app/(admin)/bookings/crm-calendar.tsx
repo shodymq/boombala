@@ -12,7 +12,8 @@ import {
 import type { ValidSession } from "../../../core/session.ts";
 import { withFastApiClient } from "../../../server/crm-actor.ts";
 import { FastApiCrmError, type BookingCatalog, type BookingCatalogBranch, type BookingTimeline, type BirthdayLeadState, type FastApiLeadListItem } from "../../../server/fastapi-crm.ts";
-import { NewBookingForm, ReservationDetails } from "./booking-drawer";
+import { ContinueRequestForm, NewBookingForm, ReservationDetails, type ContinuedRequest } from "./booking-drawer";
+import { loadLead } from "../../../server/lead-data.ts";
 import { confirmPaidRequestAction } from "./crm-actions";
 import { FlashClean } from "./crm-flash-clean";
 import { StartTimeField } from "./start-time-field";
@@ -55,7 +56,7 @@ const input = "h-11 w-full rounded-xl border-2 border-grape-200 bg-white px-3 te
 const btn = "h-11 rounded-full bg-grape-700 px-5 text-sm font-extrabold text-white hover:bg-grape-600 disabled:opacity-50";
 const btnGhost = "flex h-11 items-center rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50";
 
-type Search = { branch?: string; date?: string; ok?: string; reservation?: string; error?: string; request?: string; new?: string; block?: string; move?: string; room?: string; start?: string };
+type Search = { continue?: string; branch?: string; date?: string; ok?: string; reservation?: string; error?: string; request?: string; new?: string; block?: string; move?: string; room?: string; start?: string };
 
 /** The state a successful action must produce in FastAPI. Anything else is shown as not confirmed. */
 const EXPECTED_STATUS: Record<string, "confirmed" | "blocked" | "released"> = { booked: "confirmed", rescheduled: "confirmed", blocked: "blocked", released: "released" };
@@ -82,6 +83,9 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
   let branch: BookingCatalogBranch | undefined;
   let requestState: BirthdayLeadState | null = null;
   let bookingLead: BirthdayLeadState | null = null;
+  // The request the manager is continuing from the "Заявки" card (read by id). Null when absent or unreadable.
+  let continued: ContinuedRequest | null = null;
+  let continueMissing = false;
   // null means "unknown": a failed read of requests is never shown as zero requests.
   let openRequests: FastApiLeadListItem[] | null = null;
   let requestsTruncated = false;
@@ -107,6 +111,12 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
     if (loaded.leads) {
       openRequests = openRequestsForDate(loaded.leads.items, date);
       requestsTruncated = loaded.leads.total > loaded.leads.items.length;
+    }
+    if (search.continue) {
+      const found = await loadLead({ id: session.user.id, role: session.user.role }, search.continue).catch(() => null);
+      if (found && found.status !== "cancelled" && found.reservationId === null) {
+        continued = { id: found.id, seq: found.seq, name: found.name, phone: found.phone, packageId: found.packageId, children: found.children, prepaymentKzt: found.prepaymentKzt };
+      } else continueMissing = true;
     }
   } catch (error) {
     // Fail closed: no grid, no guessed availability. Only the code is logged.
@@ -180,6 +190,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
       {verifiedOk ? <p role="status" className="rounded-2xl bg-green-100 p-3 text-sm font-bold text-grape-900">{NOTICES[verifiedOk]} Проверено по данным системы.</p> : null}
       {unverifiedOk ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">Результат действия не подтверждён системой. Обновите страницу и проверьте календарь: без этого ничего не считается выполненным.</p> : null}
       {errorText ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{errorText}</p> : null}
+      {continueMissing ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">Заявку нельзя продолжить: она не найдена, отменена или уже забронирована. Откройте раздел «Заявки».</p> : null}
       {search.request ? (
         requestState ? (
           <div role="alert" className="grid gap-1 rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">
@@ -293,6 +304,8 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
           rescheduleHref={q({ reservation: selected.id, move: "1" })}
           detailHref={q({ reservation: selected.id })}
         />
+      ) : continued && hours ? (
+        <ContinueRequestForm request={continued} rooms={rooms} packages={packages} quick={quick} branchId={branch.id} date={date} closeHref={dayHref} defaultRoomId={search.room} defaultStart={search.start ?? defaultStart} />
       ) : search.new === "1" && hours ? (
         <NewBookingForm rooms={rooms} packages={packages} quick={quick} branchId={branch.id} date={date} closeHref={dayHref} defaultRoomId={search.room} defaultStart={search.start ?? defaultStart} mode="booking" />
       ) : search.block === "1" && hours ? (

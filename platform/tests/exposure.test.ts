@@ -143,11 +143,8 @@ describe("Exposure: what each deployment shows", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, DATABASE_URL: "" }), ["database_url_required"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, CRON_SECRET: "" }), ["cron_secret_required"]);
     });
-    it("full notifications require an explicit PII acknowledgement; invalid levels fail closed", () => {
-      for (const bad of ["FULL", "Minimal", "min", "", undefined]) assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: bad }), ["notify_level_invalid"], JSON.stringify(bad));
-      assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "full" }), ["full_notify_ack_required"]);
-      assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "full", TELEGRAM_FULL_PII_ACK: "yes" }), ["full_notify_ack_required"]);
-      assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "full", TELEGRAM_FULL_PII_ACK: "1" }), []);
+    it("notifications in production must be 'minimal': 'full', a typo or nothing at all stops the admin from starting", () => {
+      for (const bad of ["full", "FULL", "Minimal", "min", "", undefined]) assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: bad }), ["notify_level_must_be_minimal"], JSON.stringify(bad));
       assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "minimal" }), []);
     });
     it("an allowlist that is really 'everyone' is refused", () => {
@@ -157,7 +154,7 @@ describe("Exposure: what each deployment shows", () => {
     it("secrets are separated: the admin has no intake token or IP pepper; the API has no MFA key, cron secret, Telegram or revalidate secret", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, PLATFORM_INTAKE_TOKEN: "t".repeat(32) }), ["admin_must_not_have_platform_intake_token"]);
       assert.deepEqual(profileProblems({ ...goodAdmin, PLATFORM_IP_PEPPER: "p" }), ["admin_must_not_have_platform_ip_pepper"]);
-      for (const [k, name] of [["MFA_ENC_KEY", "mfa_enc_key"], ["CRON_SECRET", "cron_secret"], ["TELEGRAM_BOT_TOKEN", "telegram_bot_token"], ["TELEGRAM_CHAT_ID", "telegram_chat_id"], ["TELEGRAM_NOTIFY_LEVEL", "telegram_notify_level"], ["TELEGRAM_FULL_PII_ACK", "telegram_full_pii_ack"], ["REVALIDATE_TOKEN", "revalidate_token"], ["SITE_REVALIDATE_URL", "site_revalidate_url"]] as const) {
+      for (const [k, name] of [["MFA_ENC_KEY", "mfa_enc_key"], ["CRON_SECRET", "cron_secret"], ["TELEGRAM_BOT_TOKEN", "telegram_bot_token"], ["TELEGRAM_CHAT_ID", "telegram_chat_id"], ["TELEGRAM_NOTIFY_LEVEL", "telegram_notify_level"], ["REVALIDATE_TOKEN", "revalidate_token"], ["SITE_REVALIDATE_URL", "site_revalidate_url"]] as const) {
         assert.deepEqual(profileProblems({ ...goodApi, [k]: "x".repeat(40) }), [`api_must_not_have_${name}`], k);
       }
       assert.deepEqual(profileProblems({ ...goodApi, ADMIN_ALLOWED_CIDRS: "10.77.0.0/24" }), ["api_must_not_have_admin_cidrs"]);

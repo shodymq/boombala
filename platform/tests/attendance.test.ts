@@ -502,7 +502,7 @@ describe("Attendance and the database roles", () => {
   });
 });
 
-describe("Deployment order: migrations 001-013 -> roles -> verification", () => {
+describe("Deployment order: migrations -> roles -> verification", () => {
   let db: TestDb;
   let dir: string;
   const as = (user: string, password: string) => {
@@ -533,7 +533,7 @@ describe("Deployment order: migrations 001-013 -> roles -> verification", () => 
     assert.ok(r.problems.some((p) => p.startsWith("intake_insert_registration_without_children_count_missing")));
   });
 
-  it("roles applied BEFORE 013 and 013 applied after: bb_api loses the function until the roles are applied again (the order matters), and the preflight sees it", async () => {
+  it("roles applied BEFORE migrations are incomplete: preflight catches missing API execution and booking-table ACL, then roles fix them", async () => {
     const owner = await makeUser(db.pool, "owner");
     await applyRoles(db.pool, { apiPassword: API_PW, adminPassword: ADMIN_PW });
     await migrate(db.pool, MIGRATIONS_DIR); // 013
@@ -546,10 +546,19 @@ describe("Deployment order: migrations 001-013 -> roles -> verification", () => 
       const r = await preflight(db.pool, MIGRATIONS_DIR);
       assert.equal(r.ok, false);
       assert.ok(r.problems.some((p) => p.startsWith("bb_api_cannot_execute_intake_insert_registration")), r.problems.join("; "));
+      for (const table of ["booking_operations", "manual_payment_facts"]) {
+        assert.ok(r.problems.some((p) => p.startsWith(`bb_admin_lacks_privilege: ${table}`)), r.problems.join("; "));
+        assert.ok(r.problems.some((p) => p.startsWith(`bb_admin_policy_missing: ${table}`)), r.problems.join("; "));
+      }
       // the documented order: roles again, then verification, then start
       await applyRoles(db.pool, { apiPassword: API_PW, adminPassword: ADMIN_PW });
       const ok = await preflight(db.pool, MIGRATIONS_DIR);
       assert.deepEqual(ok, { ok: true, problems: [] });
+      for (const table of ["booking_operations", "manual_payment_facts"]) {
+        assert.equal((await db.pool.query("SELECT has_table_privilege('bb_admin', $1, 'SELECT') AND has_table_privilege('bb_admin', $1, 'INSERT') AS ok", [`bb.${table}`])).rows[0].ok, true);
+        assert.equal((await db.pool.query("SELECT has_table_privilege('bb_admin', $1, 'UPDATE') AS ok", [`bb.${table}`])).rows[0].ok, false);
+        assert.equal((await db.pool.query("SELECT has_table_privilege('bb_api', $1, 'SELECT,INSERT,UPDATE,DELETE') AS ok", [`bb.${table}`])).rows[0].ok, false);
+      }
       assert.equal((await call()).rows.length, 1, "bb_api registers a visitor now");
       assert.equal(Number((await db.pool.query("SELECT count(*) AS n FROM bb.consent_registrations")).rows[0].n), 1);
       assert.ok(owner.id);
