@@ -41,6 +41,12 @@ export type ConfirmPaidInput = {
   idempotencyKey: string;
 };
 
+export type ContinueRequestInput = ConfirmPaidInput & {
+  prepaymentKzt: number;
+  prepaymentMethod: "cash" | "card_terminal" | "bank_transfer" | "other_manual";
+  note?: string;
+};
+
 export type FlowResult =
   | { ok: true; reservationId: string; requestId: string }
   | { ok: false; code: string; requestId: string | null };
@@ -183,6 +189,42 @@ export async function confirmPaidRequestFlow(client: BookingWriter, input: Confi
       packageId: input.packageId,
       agreedPriceKzt: input.agreedPriceKzt,
       idempotencyKey: `${input.idempotencyKey}:confirm`,
+    });
+    return settled(confirmed, input.requestId);
+  } catch (error) {
+    if (isUnauthorized(error)) throw error;
+    return { ok: false, code: failureCode(error), requestId: input.requestId };
+  }
+}
+
+/**
+ * Books an EXISTING request (the one the manager opened in "Заявки"): it never creates a request. If the manual prepayment is not
+ * recorded yet it records it once (idempotent per request), then confirms. A request that is already booked is refused, so
+ * continuing the same request twice can never produce two bookings.
+ */
+export async function continueRequestFlow(client: BookingWriter, input: ContinueRequestInput): Promise<FlowResult> {
+  try {
+    const lead = await client.getBirthdayLead(input.requestId);
+    if (lead.bookedAt != null) return { ok: false, code: "request_already_booked", requestId: input.requestId };
+    await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
+    const prepaid = lead.manualPaymentFactStatus === "prepaid" && lead.manualPaymentFactAmountKzt > 0;
+    if (!prepaid) {
+      await client.recordManualPayment(input.requestId, {
+        amountKzt: input.prepaymentKzt,
+        method: input.prepaymentMethod,
+        idempotencyKey: `${input.idempotencyKey}:payment`,
+        note: input.note,
+      });
+    }
+    const confirmed = await client.confirmBooking({
+      requestId: input.requestId,
+      bookingDate: input.date,
+      roomId: input.roomId,
+      startTime: input.startTime,
+      packageId: input.packageId,
+      agreedPriceKzt: input.agreedPriceKzt,
+      idempotencyKey: `${input.idempotencyKey}:confirm`,
+      note: input.note,
     });
     return settled(confirmed, input.requestId);
   } catch (error) {

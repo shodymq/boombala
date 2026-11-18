@@ -19,7 +19,7 @@ const catalog: BookingCatalog = {
     { id: "magic-room", branchId: "almaty", name: "Magic Room" },
     { id: "rapunzel-room", branchId: "almaty", name: "Rapunzel Room" },
   ],
-  packages: [{ id: "boom-party", branchId: "almaty", name: "Boom Bala Party" }],
+  packages: [{ id: "boom-party", branchId: "almaty", name: "Boom Bala Party", priceFrom: 0, priceLabel: "", guestCapacityLabel: "" }],
 };
 
 function plan(rows: Array<{ rowNumber: number; cells: string[] }>): BookingSheetsPlan {

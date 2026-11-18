@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMNS } from "@/core/export";
 import { canExport } from "@/core/rbac";
 import { requireUser } from "@/server/dal";
+import { DatePicker } from "@/components/date-picker";
 
 export const metadata: Metadata = { title: "Выгрузка" };
 const input = "h-11 rounded-xl border-2 border-grape-200 bg-white px-3 text-base text-ink focus:border-grape-600 focus:outline-none";
@@ -22,8 +23,8 @@ export default async function ExportPage() {
           <label className="flex items-center gap-2 text-sm"><input type="radio" name="format" value="xlsx" /> XLSX (Excel)</label>
         </fieldset>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1 text-xs font-bold text-muted">С даты первой регистрации<input type="date" name="from" className={input} /></label>
-          <label className="grid gap-1 text-xs font-bold text-muted">По дату<input type="date" name="to" className={input} /></label>
+          <label className="grid gap-1 text-xs font-bold text-muted">С даты первой регистрации<DatePicker name="from" label="С даты первой регистрации" /></label>
+          <label className="grid gap-1 text-xs font-bold text-muted">По дату<DatePicker name="to" label="По дату" /></label>
           <select name="source" className={input} aria-label="Источник"><option value="">Любой источник</option><option value="qr">QR-регистрация</option><option value="birthday_form">Заявка на праздник</option></select>
         </div>
         <fieldset className="grid gap-2">

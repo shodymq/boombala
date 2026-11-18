@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { FastApiCrmError } from "../src/server/fastapi-crm.ts";
-import { confirmPaidRequestFlow, createBookingFlow, type BookingWriter, type NewBookingInput } from "../src/server/crm-flows.ts";
+import { confirmPaidRequestFlow, continueRequestFlow, createBookingFlow, type BookingWriter, type NewBookingInput } from "../src/server/crm-flows.ts";
 
 /** A FastAPI stand-in that records every write. `timeline` decides the pre-check; `confirm` decides the kernel. */
 function fakeWriter(options: { reservations?: unknown[]; confirm?: () => unknown; leads?: unknown[]; lead?: unknown } = {}) {
@@ -134,5 +134,42 @@ describe("booking flows: the duplicate check is narrow", () => {
     });
     const result = await createBookingFlow(fake.writer, { ...input, phone: "77001112233" }, TODAY);
     assert.equal(result.ok, true);
+  });
+});
+
+describe("booking flows: continuing an existing request", () => {
+  const cont = { requestId: "req-existing", branchId: "stg-almaty", date: "2026-11-20", roomId: "stg-room-a", startTime: "14:25", packageId: "stg-pkg-start", agreedPriceKzt: 180000, prepaymentKzt: 10000, prepaymentMethod: "cash" as const, idempotencyKey: "key-cccccccc" };
+  const unpaid = { id: "req-existing", status: "new", bookedAt: null, manualPaymentFactStatus: "unpaid", manualPaymentFactAmountKzt: 0, customerName: "Тест" };
+
+  it("never creates a request: it records the prepayment on the SAME request and confirms it", async () => {
+    const fake = fakeWriter({ lead: unpaid });
+    const result = await continueRequestFlow(fake.writer, cont);
+    assert.equal(result.ok, true);
+    assert.equal(result.requestId, "req-existing");
+    assert.deepEqual(fake.ops(), ["timeline", "payment", "confirm"]);
+    assert.equal(fake.calls.find((c) => c.op === "payment")?.args[0], "req-existing");
+    assert.equal((fake.calls.find((c) => c.op === "confirm")?.args[0] as { requestId: string }).requestId, "req-existing");
+    assert.equal((fake.calls.find((c) => c.op === "confirm")?.args[0] as { startTime: string }).startTime, "14:25", "an arbitrary minute is passed through unchanged");
+  });
+
+  it("does not record a second prepayment when one already exists", async () => {
+    const fake = fakeWriter({ lead: { ...unpaid, manualPaymentFactStatus: "prepaid", manualPaymentFactAmountKzt: 10000 } });
+    const result = await continueRequestFlow(fake.writer, cont);
+    assert.equal(result.ok, true);
+    assert.deepEqual(fake.ops(), ["timeline", "confirm"]);
+  });
+
+  it("refuses a request that is already booked, writing nothing", async () => {
+    const fake = fakeWriter({ lead: { ...unpaid, bookedAt: "2026-11-19T10:00:00Z", manualPaymentFactStatus: "prepaid", manualPaymentFactAmountKzt: 10000 } });
+    const result = await continueRequestFlow(fake.writer, cont);
+    assert.deepEqual(result, { ok: false, code: "request_already_booked", requestId: "req-existing" });
+    assert.deepEqual(fake.ops(), []);
+  });
+
+  it("a known room conflict is refused before any payment is written", async () => {
+    const fake = fakeWriter({ lead: unpaid, reservations: occupied14to18 });
+    const result = await continueRequestFlow(fake.writer, { ...cont, startTime: "16:00" });
+    assert.equal(result.ok, false);
+    assert.equal(fake.ops().includes("payment"), false);
   });
 });
