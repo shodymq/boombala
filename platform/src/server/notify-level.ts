@@ -1,3 +1,3 @@
-/** In the Kazakhstan production profile the level is `minimal` whatever the environment says (the profile also refuses to start otherwise). */
+/** The deployment profile validates the explicit setting; minimal is available, and full preserves the owner-approved detailed format. */
 export const notifyLevel = (): "full" | "minimal" =>
-  process.env.PLATFORM_PROFILE === "kz-production" || process.env.TELEGRAM_NOTIFY_LEVEL === "minimal" ? "minimal" : "full";
+  process.env.TELEGRAM_NOTIFY_LEVEL?.trim() === "minimal" ? "minimal" : "full";

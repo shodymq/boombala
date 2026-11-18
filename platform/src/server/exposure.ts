@@ -153,8 +153,8 @@ export function profileProblems(env: Record<string, string | undefined> = proces
     if (cidrs.some((c) => !validCidr(c))) p.push("admin_cidrs_invalid");
     if (cidrs.some((c) => c === "0.0.0.0/0" || c === "::/0" || /\/([0-7])$/.test(c))) p.push("admin_cidrs_too_wide");
     if (!remoteBridge && !env.CRON_SECRET) p.push("cron_secret_required");
-    // Notifications in production never carry a name or a phone: the message says "new enquiry N", the details are in the CRM.
-    if (env.TELEGRAM_NOTIFY_LEVEL !== "minimal") p.push("notify_level_must_be_minimal");
+    // The owner may explicitly choose either supported notification privacy level; missing or unknown values fail closed.
+    if (env.TELEGRAM_NOTIFY_LEVEL !== "minimal" && env.TELEGRAM_NOTIFY_LEVEL !== "full") p.push("notify_level_invalid");
     for (const k of API_ONLY) if (env[k]) p.push(`admin_must_not_have_${k.toLowerCase()}`);
   }
   if (role === "api") {
