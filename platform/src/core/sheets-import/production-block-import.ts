@@ -14,10 +14,10 @@ const planSchema = z.object({
   spreadsheetId: z.literal(BOOKING_SHEETS_ID),
   sheetId: z.literal(0),
   sheetTitle: z.literal(SHEET_TITLE),
-  headers: z.array(z.string().max(200)).min(3).max(26),
+  headers: z.array(z.string().max(200)).length(14),
   rows: z.array(z.object({
     rowNumber: z.number().int().min(3).max(1049),
-    cells: z.array(z.string().max(1000)).min(1).max(26),
+    cells: z.array(z.string().max(1000)).min(1).max(14),
   }).strict()).max(600),
 }).strict();
 
@@ -43,6 +43,11 @@ export function parseBookingSheetsPlan(value: unknown): BookingSheetsPlan {
   if (!parsed.success) throw new SheetBlockImportError("invalid_plan");
   const headerMap = mapHeader(parsed.data.headers);
   if (!headerMap) throw new SheetBlockImportError("invalid_headers");
+  const rowNumbers = new Set<number>();
+  for (const row of parsed.data.rows) {
+    if (rowNumbers.has(row.rowNumber)) throw new SheetBlockImportError("duplicate_source_row_number");
+    rowNumbers.add(row.rowNumber);
+  }
   return parsed.data;
 }
 
@@ -165,8 +170,12 @@ export async function importBookingSheetBlocks(
     const normalized = normalizeRow(raw, {
       spreadsheetId: plan.spreadsheetId, sheetId: plan.sheetId, rowNumber: sourceRow.rowNumber,
     }, { rooms: catalog.rooms, packages: catalog.packages });
-    if (!normalized.date || normalized.date < today) { historicalCount.value += 1; continue; }
-    if (!normalized.time || !isValidDate(normalized.date) || !normalized.roomId) {
+    if (!normalized.date || !isValidDate(normalized.date)) {
+      items.push({ rowNumber: sourceRow.rowNumber, status: "skipped", reason: "date_unresolved" });
+      continue;
+    }
+    if (normalized.date < today) { historicalCount.value += 1; continue; }
+    if (!normalized.time || !normalized.roomId) {
       items.push({ rowNumber: sourceRow.rowNumber, status: "skipped", reason: "date_time_or_room_unresolved" });
       continue;
     }
