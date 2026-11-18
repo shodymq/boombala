@@ -1,4 +1,5 @@
 import type { ImageRow, PostRow } from "@/core/news";
+import { DatePicker } from "@/components/date-picker";
 
 export const input = "h-11 w-full rounded-xl border-2 border-grape-200 bg-white px-3 text-base text-ink focus:border-grape-600 focus:outline-none";
 export const textarea = "w-full rounded-xl border-2 border-grape-200 bg-white px-3 py-2 text-base text-ink focus:border-grape-600 focus:outline-none";
@@ -37,7 +38,7 @@ export function PostFields({ post, images }: { post?: PostRow; images: ImageRow[
         </select>
       </label>
       <label className="grid gap-1 text-sm font-extrabold text-grape-800">Для акции: действует до (включительно)
-        <input type="date" name="validUntil" defaultValue={post?.validUntil ?? ""} className={input} />
+        <DatePicker name="validUntil" label="Для акции: действует до" defaultValue={post?.validUntil ?? ""} />
       </label>
       <details className="rounded-2xl border border-line p-3">
         <summary className="flex min-h-11 cursor-pointer items-center text-sm font-extrabold text-grape-700">Для поисковых систем (по желанию)</summary>
