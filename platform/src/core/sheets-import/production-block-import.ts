@@ -51,6 +51,55 @@ export function parseBookingSheetsPlan(value: unknown): BookingSheetsPlan {
   return parsed.data;
 }
 
+function parseTsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"' && cell.length === 0) quoted = true;
+    else if (ch === "\t") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else cell += ch;
+  }
+  if (quoted) throw new SheetBlockImportError("invalid_tsv");
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+/** Accept the JSON plan or a direct rectangular copy of Google Sheets A1:N300. */
+export function parseBookingSheetsText(value: string): BookingSheetsPlan {
+  const trimmed = value.trim();
+  if (!trimmed) throw new SheetBlockImportError("invalid_plan");
+  if (trimmed.startsWith("{")) {
+    try { return parseBookingSheetsPlan(JSON.parse(trimmed)); }
+    catch (error) {
+      if (error instanceof SheetBlockImportError) throw error;
+      throw new SheetBlockImportError("invalid_plan");
+    }
+  }
+  const grid = parseTsv(value);
+  const headerIndex = grid.findIndex((cells) => mapHeader(Array.from({ length: 14 }, (_, index) => cells[index] ?? "")) !== null);
+  // The source row number is meaningful only when the copy starts at cell A1 and its known header is on row 2.
+  if (headerIndex !== 1) throw new SheetBlockImportError("invalid_headers");
+  const headers = Array.from({ length: 14 }, (_, index) => grid[headerIndex][index] ?? "");
+  const rows = grid.slice(headerIndex + 1).map((cells, index) => ({
+    rowNumber: index + 3,
+    cells: Array.from({ length: 14 }, (_, cellIndex) => cells[cellIndex] ?? ""),
+  }));
+  return parseBookingSheetsPlan({ spreadsheetId: BOOKING_SHEETS_ID, sheetId: 0, sheetTitle: SHEET_TITLE, headers, rows });
+}
+
 function minutes(value: string): number | null {
   const match = /^(\d{2}):(\d{2})$/.exec(value);
   if (!match) return null;
