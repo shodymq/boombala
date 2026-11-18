@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { listLeads } from "@/core/bookings";
 import { listPackages, listRooms, listSlots } from "@/core/catalog";
 import { requirePermission } from "@/server/dal";
+import { loadLead } from "@/server/lead-data";
 import { getPool } from "@/server/db";
 import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
 import { SESSION_COOKIE } from "@/server/env";
@@ -28,35 +28,28 @@ type Catalog = { packages: Awaited<ReturnType<typeof listPackages>>; rooms: Awai
 
 /**
  * Request card on the current production contract: the list RPC (bridge) or the database (direct mode).
- * There is no per-request endpoint, so the card is looked up in the full list. Payments and refunds are deliberately absent:
- * production has no supported operation for them on this path.
+ * The record is read by id. Payments and refunds are deliberately absent: production has no supported operation for
+ * them on this path; the recorded manual prepayment is shown read-only.
  */
 export default async function RequestCardPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string; error?: string }> }) {
   const { user } = await requirePermission("requests.manage");
   const { id } = await params;
-  if (!/^[0-9a-fA-F-]{36}$/.test(id)) notFound();
-  const sp = await searchParams;
-  let leads: Awaited<ReturnType<typeof listLeads>>;
-  let cat: Catalog;
+    const sp = await searchParams;
+  const actor = { id: user.id, role: user.role };
   const bridge = legacyBridgeEnabled();
+  // The concrete record by id (typed bridge operation `requests.get`), not a search through a truncated list.
+  const lead = await loadLead(actor, id);
+  if (!lead) notFound();
+  let cat: Catalog;
   if (bridge) {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    const [remoteCatalog, remoteLeads] = await Promise.all([
-      bridgeRpc<Catalog>("catalog", {}, token),
-      bridgeRpc<Awaited<ReturnType<typeof listLeads>>>("requests.list", {}, token),
-    ]);
-    leads = remoteLeads.map((row) => ({ ...row, createdAt: new Date(row.createdAt) }));
-    cat = remoteCatalog;
+    cat = await bridgeRpc<Catalog>("catalog", {}, token);
   } else {
     const pool = getPool();
-    const actor = { id: user.id, role: user.role };
-    const [l, packages, rooms, slots] = await Promise.all([listLeads(pool, actor, {}, 500), listPackages(pool), listRooms(pool), listSlots(pool)]);
-    leads = l;
+    const [packages, rooms, slots] = await Promise.all([listPackages(pool), listRooms(pool), listSlots(pool)]);
     cat = { packages, rooms, slots };
   }
-  const lead = leads.find((l) => l.id === id);
-  if (!lead) notFound();
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: "Asia/Almaty" });
   const open = lead.status === "new" || lead.status === "in_progress";
   const pkg = cat.packages.find((p) => p.id === lead.packageId)?.name ?? "не выбран";
@@ -84,6 +77,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
           <div><dt className="text-muted">Пакет</dt><dd className="font-bold">{pkg}</dd></div>
           <div><dt className="text-muted">Комната</dt><dd className="font-bold">{room}</dd></div>
           <div><dt className="text-muted">Детей</dt><dd className="font-bold">{lead.children ?? "—"}</dd></div>
+          <div><dt className="text-muted">Предоплата</dt><dd className="font-bold">{lead.prepaymentKzt === null ? "не записана" : `${lead.prepaymentKzt.toLocaleString("ru-RU")} ₸ (ручная)`}</dd></div>
         </dl>
         {lead.reservationId ? <p className="mt-4 text-sm"><Link href={`/bookings?date=${lead.requestedDate}`} className="font-extrabold text-grape-700 underline">Показать бронь в календаре</Link></p> : null}
       </section>
@@ -92,7 +86,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
         <section className={panel} aria-labelledby="req-actions">
           <h2 id="req-actions" className="text-lg font-black text-grape-800">Действия</h2>
           {bridge ? (
-            <p className="mt-3 text-sm font-bold text-muted">Подтверждение выполняется в календаре после фиксации ручной предоплаты. <Link href={`/bookings?date=${lead.requestedDate ?? ""}&new=1`} className="text-grape-700 underline">Открыть календарь</Link></p>
+            <p className="mt-3 text-sm font-bold text-muted">Подтверждение выполняется в календаре после фиксации ручной предоплаты. <Link href={`/bookings?date=${lead.requestedDate}&continue=${encodeURIComponent(lead.id)}`} className="text-grape-700 underline" data-testid="continue-in-calendar">Продолжить в календаре</Link></p>
           ) : (
             <form action={confirmLeadAction} className="crm-requests-confirm mt-3">
               <input type="hidden" name="id" value={lead.id} />

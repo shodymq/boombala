@@ -8,6 +8,7 @@ import { attendanceSchemaReady } from "@/core/preflight";
 import { BUSINESS_TIME_ZONE, catalogSummary } from "@/core/catalog";
 import { almatyToday } from "@/core/dates";
 import { outboxStats } from "@/core/outbox";
+import { dashboardCounters, type DashboardCounters } from "@/core/lead-queue";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermission } from "@/server/dal";
@@ -37,8 +38,8 @@ type Data = {
   summary: Summary | null;
   outbox: Awaited<ReturnType<typeof outboxStats>> | null;
   attendance: Awaited<ReturnType<typeof dayFigures>> | "outdated" | null;
-  requests: { new: number; inProgress: number } | null;
-  bookings: { booked: number; blocked: number; capacity: number } | null;
+  /** Real counters from the database; null when the role may not see them or they are unavailable. Never invented. */
+  counters: DashboardCounters | null;
 };
 
 export default async function DashboardPage() {
@@ -46,13 +47,12 @@ export default async function DashboardPage() {
   if (legacyBridgeEnabled()) {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    const remote = await bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null }>("dashboard", {}, token);
-    // The bridge dashboard call carries no request or booking counters: those cards stay hidden rather than invented.
-    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, requests: null, bookings: null }} />;
+    const remote = await bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters }>("dashboard", {}, token);
+    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null }} />;
   }
   const pool = getPool();
   const today = almatyToday();
-  const [migrations, summary, outbox, attendance, requests, bookings] = await Promise.all([
+  const [migrations, summary, outbox, attendance, counters] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
@@ -61,30 +61,20 @@ export default async function DashboardPage() {
       ? (async (): Promise<Awaited<ReturnType<typeof dayFigures>> | "outdated"> =>
           (await attendanceSchemaReady(pool)) ? dayFigures(pool, { id: user.id, role: user.role }, today) : "outdated")()
       : Promise.resolve(null),
-    can(user.role, "requests.manage")
-      ? pool.query<{ status: string; total: number }>(
-          "SELECT status, count(*)::int AS total FROM bb.lead_requests WHERE status IN ('new', 'in_progress') GROUP BY status")
-      : Promise.resolve(null),
-    can(user.role, "bookings.manage")
-      ? pool.query<{ booked: number; blocked: number; capacity: number }>(
-          `SELECT count(*) FILTER (WHERE kind = 'booking')::int AS booked,
-                  count(*) FILTER (WHERE kind = 'block')::int AS blocked,
-                  (SELECT count(*)::int FROM bb.rooms WHERE is_active) * (SELECT count(*)::int FROM bb.time_slots) AS capacity
-             FROM bb.slot_reservations WHERE slot_date = $1 AND released_at IS NULL`, [today])
-      : Promise.resolve(null),
+    dashboardCounters(pool, user.role),
   ]);
   return (
     <DashboardView data={{
       user, migration: migrations.rows[0]?.name ?? null, summary, outbox, attendance,
-      requests: requests ? { new: requests.rows.find((r) => r.status === "new")?.total ?? 0, inProgress: requests.rows.find((r) => r.status === "in_progress")?.total ?? 0 } : null,
-      bookings: bookings?.rows[0] ?? null,
+      counters,
     }} />
   );
 }
 
 function DashboardView({ data }: { data: Data }) {
-  const { user, summary, outbox, attendance, requests } = data;
-  const todayBookings = data.bookings;
+  const { user, summary, outbox, attendance } = data;
+  const requests = data.counters?.requests ?? null;
+  const todayBookings = data.counters?.bookings ?? null;
   const migrations = { rows: [{ name: data.migration }] };
   const timestamp = new Date();
   const activePackages = summary?.packages.filter((item) => item.isActive) ?? [];
@@ -98,7 +88,8 @@ function DashboardView({ data }: { data: Data }) {
     metrics.push({ label: "В работе", value: requests.inProgress, note: "Открытые обращения", href: "/requests?status=in_progress", icon: "ticket" });
   }
   if (todayBookings) {
-    metrics.push({ label: "Брони сегодня", value: todayBookings.booked, suffix: ` / ${todayBookings.capacity}`, note: `Блокировки: ${todayBookings.blocked}`, href: "/bookings", icon: "calendar" });
+    metrics.push({ label: "Брони сегодня", value: todayBookings.booked, note: "Подтверждённые брони", href: "/bookings", icon: "calendar" });
+    metrics.push({ label: "Блокировки сегодня", value: todayBookings.blocked, note: "Комнаты закрыты вручную", href: "/bookings", icon: "settings" });
   }
   if (attendance && attendance !== "outdated") {
     metrics.push({ label: "Дети вошли сегодня", value: attendance.childrenEntered, note: `Ожидается: ${attendance.childrenExpected}`, href: "/attendance", icon: "check" });

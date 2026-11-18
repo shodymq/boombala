@@ -482,3 +482,5 @@
     transition: none;
   }
 }
+
+.crm-requests-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 16px; font-size: 13px; color: #6b5f57; }

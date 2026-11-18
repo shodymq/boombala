@@ -29,6 +29,7 @@
     "db:restore": "node --no-warnings scripts/restore-db.mjs",
     "e2e": "node --no-warnings e2e/platform.e2e.mjs",
     "test": "node --no-warnings --conditions=react-server --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "e2e:crm-design": "node --no-warnings e2e/crm-design-kz.e2e.mjs",
     "e2e:booking": "node --no-warnings e2e/booking.e2e.mjs",
     "e2e:crm-calendar": "node --no-warnings e2e/crm-calendar.e2e.mjs",
     "e2e:crm-race": "node --no-warnings --conditions=react-server e2e/crm-race.e2e.mjs",

@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { BrandArt } from "@/components/brand-art";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { listLeads } from "@/core/bookings";
 import { listPackages } from "@/core/catalog";
 import { isValidDate } from "@/core/dates";
 import { DatePicker } from "@/components/date-picker";
@@ -11,6 +10,7 @@ import { requirePermission } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
 import { SESSION_COOKIE } from "@/server/env";
+import { loadLeadPage } from "@/server/lead-data";
 import { leadStatusAction } from "./actions";
 
 export const metadata: Metadata = { title: "Заявки" };
@@ -26,7 +26,7 @@ const input = "crm-requests-control";
 const btn = "crm-requests-action";
 const btnGhost = "crm-requests-action crm-requests-action-secondary";
 
-export default async function RequestsPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; createdFrom?: string; createdTo?: string; notice?: string; error?: string }> }) {
+export default async function RequestsPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; createdFrom?: string; createdTo?: string; page?: string; notice?: string; error?: string }> }) {
   const { user } = await requirePermission("requests.manage");
   const sp = await searchParams;
   const status = sp.status && STATUS[sp.status] ? sp.status : undefined;
@@ -34,41 +34,30 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   const createdFrom = sp.createdFrom && isValidDate(sp.createdFrom) ? sp.createdFrom : undefined;
   const createdTo = sp.createdTo && isValidDate(sp.createdTo) ? sp.createdTo : undefined;
   const hasFilters = Boolean(status || q || createdFrom || createdTo);
-  let leads: Awaited<ReturnType<typeof listLeads>>;
+  const page = Math.max(Math.trunc(Number(sp.page)) || 1, 1);
+  const actor = { id: user.id, role: user.role };
   let packages: Awaited<ReturnType<typeof listPackages>>;
   if (legacyBridgeEnabled()) {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    const [remoteCatalog, remoteLeads] = await Promise.all([
-      bridgeRpc<{ packages: Awaited<ReturnType<typeof listPackages>> }>("catalog", {}, token),
-      bridgeRpc<Awaited<ReturnType<typeof listLeads>>>("requests.list", status ? { status } : {}, token),
-    ]);
-    leads = remoteLeads.map((row) => ({ ...row, createdAt: new Date(row.createdAt) }));
-    packages = remoteCatalog.packages;
+    packages = (await bridgeRpc<{ packages: Awaited<ReturnType<typeof listPackages>> }>("catalog", {}, token)).packages;
   } else {
     const pool = getPool();
-    const actor = { id: user.id, role: user.role };
-    [leads, packages] = await Promise.all([listLeads(pool, actor, { status }), listPackages(pool)]);
+    packages = await listPackages(pool);
   }
+  // Search, dates, status and pagination are executed by PostgreSQL (typed bridge operation `requests.search`).
+  const result = await loadLeadPage(actor, { status, q, createdFrom, createdTo, page });
+  const leads = result.items;
+  const pages = Math.max(Math.ceil(result.total / result.pageSize), 1);
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
-  const almatyDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" });
-  // Search and date filters run on the already loaded page of requests (status filter stays server-side), so the bridge contract is unchanged.
-  const needle = q?.toLowerCase();
-  const digits = q?.replace(/\D/g, "");
-  leads = leads.filter((l) => {
-    if (needle && !(l.name.toLowerCase().includes(needle) || (digits ? l.phone.replace(/\D/g, "").includes(digits) : false))) return false;
-    const day = almatyDay.format(l.createdAt);
-    if (createdFrom && day < createdFrom) return false;
-    if (createdTo && day > createdTo) return false;
-    return true;
-  });
   const pkgName = (id: string | null) => packages.find((p) => p.id === id)?.name ?? "не выбран";
-  function statusHref(next?: string) {
+  function statusHref(next?: string, toPage?: number) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (createdFrom) params.set("createdFrom", createdFrom);
     if (createdTo) params.set("createdTo", createdTo);
     if (next) params.set("status", next);
+    if (toPage && toPage > 1) params.set("page", String(toPage));
     const query = params.toString();
     return query ? `/requests?${query}` : "/requests";
   }
@@ -81,7 +70,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
           <h1 className="crm-page-title">Заявки</h1>
           <p className="crm-page-subtitle">Рабочая очередь обращений филиала.</p>
         </div>
-        <p className="crm-requests-count" aria-live="polite">Показано: <strong>{leads.length}</strong></p>
+        <p className="crm-requests-count" aria-live="polite">Всего: <strong>{result.total}</strong></p>
       </header>
       <p className="crm-requests-note">Заявка не занимает слот. Слот занимает только подтверждение. Цена фиксируется в момент подтверждения.</p>
       {sp.notice && NOTICES[sp.notice] ? <p role="status" className="crm-requests-message crm-requests-message-success">{NOTICES[sp.notice]}</p> : null}
@@ -170,6 +159,13 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
             {!hasFilters ? <BrandArt className="mx-auto mb-3" size={88} /> : null}
             {hasFilters ? "По этим условиям заявок нет. Измените фильтры или сбросьте поиск." : "Заявок пока нет. Новые обращения появятся здесь."}
           </p>
+        ) : null}
+        {pages > 1 ? (
+          <nav className="crm-requests-pager" aria-label="Страницы заявок">
+            {result.page > 1 ? <Link href={statusHref(status, result.page - 1)} rel="prev" className={btnGhost}>← Назад</Link> : null}
+            <span aria-live="polite">Страница {result.page} из {pages}</span>
+            {result.page < pages ? <Link href={statusHref(status, result.page + 1)} rel="next" className={btnGhost}>Вперёд →</Link> : null}
+          </nav>
         ) : null}
       </section>
     </div>

@@ -17,6 +17,7 @@ import { exportContacts, type ExportFormat } from "../core/export.ts";
 import { MAX_UPLOAD_BYTES } from "../core/images.ts";
 import { validateSession, type ValidSession } from "../core/session.ts";
 import { listLeads, setLeadStatus } from "../core/bookings.ts";
+import { dashboardCounters, getLead, searchLeads, type LeadFilter } from "../core/lead-queue.ts";
 import { getContact, listContacts } from "../core/crm.ts";
 import { assessContact, anonymizeContact, revokeConsent, retentionReport } from "../core/privacy.ts";
 import { adminImage, addImage, getPost, listImages, listPosts, createPost, updatePost, publishPost, unpublishPost, deletePost, deleteImage, type PostInput } from "../core/news.ts";
@@ -243,6 +244,19 @@ export async function bridgeAdminImage(request: NextRequest, id: string): Promis
   }
 }
 
+/** Typed filter of the request queue: only known keys with the expected types reach the query. */
+function leadFilter(input: Record<string, unknown>): LeadFilter {
+  const optional = (value: unknown, max: number) => (typeof value === "string" && value !== "" ? text(value, max) : undefined);
+  return {
+    status: optional(input.status, 30),
+    q: optional(input.q, 80),
+    createdFrom: optional(input.createdFrom, 10),
+    createdTo: optional(input.createdTo, 10),
+    page: typeof input.page === "number" ? input.page : undefined,
+    pageSize: typeof input.pageSize === "number" ? input.pageSize : undefined,
+  };
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ValidationError({ body: "invalid" });
   return value as Record<string, unknown>;
@@ -296,7 +310,7 @@ async function dashboard(pool: Pool, session: ValidSession) {
     can(session.user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
     can(session.user.role, "attendance.manage") ? attendanceSchemaReady(pool) : Promise.resolve(false),
   ]);
-  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, attendance: ready && can(session.user.role, "attendance.manage") ? await dayFigures(pool, actor, (await import("../core/dates.ts")).almatyToday()) : null };
+  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, counters: await dashboardCounters(pool, session.user.role), attendance: ready && can(session.user.role, "attendance.manage") ? await dayFigures(pool, actor, (await import("../core/dates.ts")).almatyToday()) : null };
 }
 
 async function bookingCatalog(pool: Pool) {
@@ -441,6 +455,8 @@ export async function bridgeRpc(request: NextRequest): Promise<Response> {
     switch (op) {
       case "dashboard": return Response.json(await dashboard(pool, session), { headers: { "Cache-Control": "no-store" } });
       case "requests.list": return Response.json(await listLeads(pool, actor, typeof input.status === "string" ? { status: input.status } : {}), { headers: { "Cache-Control": "no-store" } });
+      case "requests.search": return Response.json(await searchLeads(pool, actor, leadFilter(input)), { headers: { "Cache-Control": "no-store" } });
+      case "requests.get": { const lead = await getLead(pool, actor, text(input.id, 80)); if (!lead) throw new NotFoundError(); return Response.json(lead, { headers: { "Cache-Control": "no-store" } }); }
       case "requests.status": await setLeadStatus(pool, actor, text(input.id, 80), text(input.status, 30) as "new" | "in_progress" | "cancelled", await requestMeta()); return Response.json({ ok: true });
       // The legacy slot-confirmation writer is deliberately unavailable in bridge mode.
       // Booking confirmation must go through payment -> interval reservation -> read-after-write.

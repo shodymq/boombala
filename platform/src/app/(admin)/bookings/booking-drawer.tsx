@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { remainingKzt, paymentLabel } from "../../../core/booking-calendar.ts";
 import type { BookingCatalogPackage, BookingTimelineReservation } from "../../../server/fastapi-crm.ts";
-import { blockAction, createBookingAction, releaseAction, rescheduleAction } from "./crm-actions";
+import { blockAction, continueRequestAction, createBookingAction, releaseAction, rescheduleAction } from "./crm-actions";
 import { StartTimeField } from "./start-time-field";
 import { SubmitButton } from "./submit-button";
 import { clock } from "./timeline";
@@ -195,6 +195,55 @@ export function NewBookingForm({
           <SubmitButton className={primary} pending="Создаём бронь…">Создать заявку, записать предоплату и подтвердить</SubmitButton>
         </form>
       )}
+    </Drawer>
+  );
+}
+
+export type ContinuedRequest = { id: string; seq: number; name: string; phone: string; packageId: string | null; children: number | null; prepaymentKzt: number | null };
+
+/** Books an existing request: the customer data comes from the request, nothing is typed twice, no new request is created. */
+export function ContinueRequestForm({ request, rooms, packages, quick, branchId, date, closeHref, defaultRoomId, defaultStart }: {
+  request: ContinuedRequest;
+  rooms: { id: string; name: string }[];
+  packages: BookingCatalogPackage[];
+  quick: string[];
+  branchId: string;
+  date: string;
+  closeHref: string;
+  defaultRoomId?: string;
+  defaultStart: string;
+}) {
+  const prepaid = request.prepaymentKzt !== null && request.prepaymentKzt > 0;
+  return (
+    <Drawer title={`Заявка №${request.seq}: подтвердить бронь`} closeHref={closeHref}>
+      <form action={continueRequestAction} className="grid gap-2" aria-label="Подтверждение брони по заявке" data-testid="continue-request-form">
+        <Hidden branchId={branchId} />
+        <input type="hidden" name="requestId" value={request.id} />
+        <input type="hidden" name="idempotencyKey" value={randomUUID()} />
+        <dl className="grid gap-1 rounded-xl bg-grape-50 p-3 text-sm">
+          <div className="flex justify-between gap-3"><dt className="text-muted">Клиент</dt><dd className="font-bold">{request.name}</dd></div>
+          <div className="flex justify-between gap-3"><dt className="text-muted">Телефон</dt><dd className="font-bold">{request.phone}</dd></div>
+          {request.children !== null ? <div className="flex justify-between gap-3"><dt className="text-muted">Детей</dt><dd className="font-bold">{request.children}</dd></div> : null}
+        </dl>
+        <label className={label}>Дата<input type="date" name="date" required defaultValue={date} className={field} /></label>
+        <label className={label}>Комната<select name="roomId" required defaultValue={defaultRoomId} className={field}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
+        <StartTimeField defaultValue={defaultStart} quick={quick} />
+        <label className={label}>Пакет
+          <select name="packageId" required defaultValue={request.packageId ?? undefined} className={field}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} (от {kzt.format(p.priceFrom)} ₸)</option>)}</select>
+        </label>
+        <input name="agreedPriceKzt" type="number" required min={1} max={10000000} placeholder="Сумма праздника, ₸" aria-label="Сумма праздника" className={field} />
+        {prepaid ? (
+          <p className="text-sm font-bold text-grape-900">Предоплата уже записана вручную: {kzt.format(request.prepaymentKzt ?? 0)} ₸. Повторно она не записывается.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            <input name="prepaymentKzt" type="number" required min={1} max={10000000} defaultValue={DEFAULT_PREPAYMENT_KZT} aria-label="Предоплата" className={field} />
+            <select name="prepaymentMethod" required className={field} aria-label="Способ предоплаты">{Object.entries(METHOD_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          </div>
+        )}
+        <textarea name="note" maxLength={300} placeholder="Комментарий" aria-label="Комментарий" className="min-h-20 rounded-xl border-2 border-grape-200 bg-white p-3 text-base" />
+        <p className="text-xs text-muted">Бронь продолжит эту заявку: новая заявка не создаётся. Предоплата — ручная запись менеджера, не онлайн-оплата.</p>
+        <SubmitButton className={primary} pending="Подтверждаем…">{prepaid ? "Подтвердить бронь" : "Записать предоплату и подтвердить"}</SubmitButton>
+      </form>
     </Drawer>
   );
 }
