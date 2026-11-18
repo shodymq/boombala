@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   importBookingSheetBlocks,
   parseBookingSheetsPlan,
+  parseBookingSheetsText,
   SheetBlockImportError,
   BOOKING_SHEETS_ID,
   type BookingSheetsPlan,
@@ -150,4 +151,25 @@ test("the import plan is strict and rejects payment-operation fields", () => {
   assert.throws(() => parseBookingSheetsPlan({ ...value, payment: { amountKzt: 10_000 } }), (error) =>
     error instanceof SheetBlockImportError && error.code === "invalid_plan");
   assert.equal(parseBookingSheetsPlan(value).rows.length, 1);
+});
+
+test("direct Google Sheets clipboard input preserves A1:N row numbers and quoted cells", () => {
+  const event = row(3, "20.11.2026", "14:00", "Roblox room");
+  event.cells[11] = 'Комментарий с табом\tи строкой\nпереноса';
+  const tsvCell = (value: string) => /[\t\r\n"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  const title = Array(14).fill("");
+  title[0] = "чё";
+  title[1] = "17.11.2026";
+  const clipboard = [title, headers, event.cells].map((cells) => cells.map(tsvCell).join("\t")).join("\n");
+  const parsed = parseBookingSheetsText(clipboard);
+  assert.equal(parsed.sheetId, 0);
+  assert.equal(parsed.rows[0].rowNumber, 3);
+  assert.deepEqual(parsed.rows[0].cells, event.cells);
+  assert.equal(parseBookingSheetsText(JSON.stringify(plan([event]))).rows.length, 1);
+});
+
+test("clipboard input refuses shifted headers so it cannot misattribute source rows", () => {
+  const clipboard = [headers, row(3, "20.11.2026", "14:00", "Roblox room").cells].map((cells) => cells.join("\t")).join("\n");
+  assert.throws(() => parseBookingSheetsText(clipboard), (error) =>
+    error instanceof SheetBlockImportError && error.code === "invalid_headers");
 });
