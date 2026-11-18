@@ -54,7 +54,7 @@ export default async function SheetsImportPage({ searchParams }: { searchParams:
 
       <section className="rounded-2xl border border-line bg-white p-4 sm:p-6">
         <p className="text-sm leading-6">
-          Принимается JSON-план, сформированный из свежих значений Google Sheets: ID таблицы, ID листа, заголовки и строки A:N.
+          Вставьте скопированный из актуальной Google Sheets прямоугольный диапазон A1:N300. Импортёр принимает только таблицу «Банкеты», лист «Лист1» с заголовками на строке 2 и проверяет ID/колонки на сервере.
           Система пропускает прошедшие события, неизвестные комнаты, выход за часы работы, дубли и занятые интервалы.
         </p>
         <p className="mt-3 text-sm leading-6">
@@ -62,7 +62,7 @@ export default async function SheetsImportPage({ searchParams }: { searchParams:
           Исходные ячейки строки сохраняются в заметке блока; указанная в таблице предоплата помечается как неподтверждённая.
         </p>
         <form action={runBookingSheetsBlockImport} className="mt-5 grid gap-3">
-          <label htmlFor="plan" className="font-bold text-grape-800">План импорта JSON</label>
+          <label htmlFor="plan" className="font-bold text-grape-800">Данные из Google Sheets (табличный диапазон A1:N300)</label>
           <textarea
             id="plan"
             name="plan"
@@ -74,7 +74,7 @@ export default async function SheetsImportPage({ searchParams }: { searchParams:
             className="w-full rounded-xl border border-line bg-paper p-3 font-mono text-xs leading-5"
             aria-describedby="plan-help"
           />
-          <p id="plan-help" className="text-xs text-muted">Максимальный размер — 100 000 символов. Данные остаются в защищённой сессии CRM и не попадают в URL или журналы приложения.</p>
+          <p id="plan-help" className="text-xs text-muted">В Firefox выделите диапазон A1:N300 на листе «Лист1», скопируйте и вставьте сюда. Также поддерживается JSON-план. До 100 000 символов; данные не попадают в URL или журналы приложения.</p>
           <button type="submit" className="h-12 rounded-full bg-grape-700 px-5 font-extrabold text-white hover:bg-grape-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-grape-800">
             Проверить конфликты и записать блокировки
           </button>
