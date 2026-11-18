@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { StaticImage } from "@/components/static-image";
+import { BrandArt } from "@/components/brand-art";
 import Link from "next/link";
-import { FlaticonIcon, type FlaticonIconName } from "@/components/flaticon-icon";
+import { Icon, type IconName } from "@/components/icon";
 import { cookies } from "next/headers";
 import { dayFigures } from "@/core/attendance";
 import { attendanceSchemaReady } from "@/core/preflight";
@@ -92,7 +92,7 @@ function DashboardView({ data }: { data: Data }) {
   const pricePackages = activePackages.filter((item) => item.basePrice != null);
   const maxPrice = Math.max(1, ...pricePackages.map((item) => item.basePrice ?? 0));
   const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(timestamp);
-  const metrics: Array<{ label: string; value: number; suffix?: string; note: string; href: string; icon: FlaticonIconName }> = [];
+  const metrics: Array<{ label: string; value: number; suffix?: string; note: string; href: string; icon: IconName }> = [];
   if (requests) {
     metrics.push({ label: "Новые заявки", value: requests.new, note: "Ждут ответа", href: "/requests?status=new", icon: "inbox" });
     metrics.push({ label: "В работе", value: requests.inProgress, note: "Открытые обращения", href: "/requests?status=in_progress", icon: "ticket" });
@@ -112,7 +112,7 @@ function DashboardView({ data }: { data: Data }) {
           <h1>
             Добрый день, {user.name}
             <span className="so-greeting-art">
-              <StaticImage src="/illustrations/milano-hello.svg" alt="" width={58} height={58} />
+              <BrandArt size={48} />
             </span>
           </h1>
           <p>Заявки, бронирования и посещаемость филиала — на одном экране.</p>
@@ -130,7 +130,7 @@ function DashboardView({ data }: { data: Data }) {
           <div className="so-metrics">
             {metrics.map((metric) => (
               <Link className="so-metric" href={metric.href} key={metric.label}>
-                <span className="so-metric-icon" aria-hidden="true"><FlaticonIcon name={metric.icon} size={16} /></span>
+                <span className="so-metric-icon" aria-hidden="true"><Icon name={metric.icon} size={16} /></span>
                 <span className="so-metric-label">{metric.label}</span>
                 <strong className="so-metric-value">{metric.value}{metric.suffix ? <span>{metric.suffix}</span> : null}</strong>
                 <span className="so-metric-note">{metric.note}</span>

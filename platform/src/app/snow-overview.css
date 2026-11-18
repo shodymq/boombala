@@ -67,7 +67,7 @@
   background: var(--so-purple-light);
 }
 
-.so-greeting-art img {
+.so-greeting-art svg {
   width: 48px;
   height: 48px;
   object-fit: cover;
@@ -194,10 +194,10 @@
   font-weight: 700;
 }
 
-.so-metric-icon .flaticon-icon {
+.so-metric-icon .ui-icon {
   width: 16px;
   height: 16px;
-  filter: brightness(0) saturate(100%) invert(23%) sepia(32%) saturate(2080%) hue-rotate(228deg) brightness(84%) contrast(91%);
+  color: #3b1e78;
 }
 
 .so-metric-label {

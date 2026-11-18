@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { FlaticonIcon, type FlaticonIconName } from "@/components/flaticon-icon";
+import { Icon, type IconName } from "@/components/icon";
 
 export interface NavItem {
   href: string;
@@ -11,7 +11,7 @@ export interface NavItem {
 }
 
 const PRIMARY_HREFS = new Set(["/", "/bookings", "/requests", "/attendance", "/contacts"]);
-const ICON_NAMES: Record<string, FlaticonIconName> = {
+const ICON_NAMES: Record<string, IconName> = {
   "/": "dashboard",
   "/bookings": "calendar",
   "/requests": "inbox",
@@ -38,7 +38,7 @@ function NavList({ items, pathname, onNavigate }: { items: NavItem[]; pathname: 
         return (
           <li key={item.href}>
             <Link href={item.href} onClick={onNavigate} aria-current={active ? "page" : undefined} className="snow-nav-link">
-              <FlaticonIcon name={ICON_NAMES[item.href]} size={17} className="snow-nav-icon" />
+              <Icon name={ICON_NAMES[item.href]} size={17} className="snow-nav-icon" />
               <span>{item.label}</span>
             </Link>
           </li>
@@ -68,7 +68,7 @@ export function NavLinks({ items }: { items: NavItem[] }) {
         aria-controls="snow-nav-sections"
         onClick={() => setMenu({ pathname, open: !menuOpen })}
       >
-        <FlaticonIcon name={menuOpen ? "plus" : "menu"} size={15} className={menuOpen ? "mobile-menu-icon mobile-menu-icon-close" : "mobile-menu-icon"} />
+        <Icon name={menuOpen ? "plus" : "menu"} size={15} className={menuOpen ? "mobile-menu-icon mobile-menu-icon-close" : "mobile-menu-icon"} />
         {menuOpen ? "Закрыть меню" : "Меню"}
       </button>
       <div id="snow-nav-sections" className="snow-nav-sections">

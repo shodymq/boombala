@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { StaticImage } from "@/components/static-image";
+import { BrandArt } from "@/components/brand-art";
 import { redirect } from "next/navigation";
 import { getPendingSession, getSession } from "@/server/dal";
 import { LoginForm } from "./login-form";
@@ -15,7 +15,7 @@ export default async function LoginPage() {
         <p className="text-xs font-extrabold uppercase tracking-[0.16em]">Boom Bala · CRM</p>
         <h1>Рабочее пространство команды</h1>
         <p>Заявки, расписание и работа филиала — в одной панели.</p>
-        <StaticImage className="crm-login-art" src="/illustrations/milano-hello.svg" alt="" width={128} height={128} />
+        <BrandArt className="crm-login-art" size={128} />
       </section>
       <section className="crm-login-card">
         <p className="crm-eyebrow">Вход для сотрудников</p>

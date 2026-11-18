@@ -1,14 +1,9 @@
 # CRM design assets: provenance and licences
 
-Status of every third-party asset shipped with the CRM design (`platform/public/icons`, `platform/public/illustrations`).
-**Not legally cleared yet**: the repository carries no licence record for either set, and this file does not invent one.
-
-| Asset | Where | What the repository shows | What must be confirmed before production |
+| Asset | Where | Licence | Status |
 | --- | --- | --- | --- |
-| 17 PNG icons (`bell`, `calendar`, ...) | `platform/public/icons/flaticon/` | Named after Flaticon and credited as «Designed by Flaticon» in the sidebar. No receipt, pack name or author is recorded. | Which Flaticon pack and author each icon comes from, and that the account used has a licence that allows commercial use with the attribution shown (free plan requires attribution per author; Premium does not). Replace with an owned or open-licence set (for example Lucide, ISC) if this cannot be shown. |
-| 3 SVG illustrations (`milano-*.svg`) | `platform/public/illustrations/` | Credited as «Illustrations by Streamline»; the source link is the Figma Community file «1-600 Free Illustrations» (URL in `src/app/(admin)/layout.tsx`). | The licence stated on that Community page (Streamline free illustration packs are normally CC BY 4.0, which requires attribution and a link to the licence). The sidebar credit links to Flaticon and the Figma source only; add the licence name and link once confirmed. |
+| Interface icons | `lucide-react` 1.75.0 (npm), rendered as inline SVG by `platform/src/components/icon.tsx` | ISC, https://lucide.dev/license (the npm package declares `ISC`). Three icons are also saved as SVG files for CSS backgrounds: `platform/public/icons/lucide/` (generated from the same package). | Cleared. The ISC text requires keeping the copyright notice with copies: it ships in `node_modules/lucide-react/LICENSE` and the sidebar links to the licence. |
+| Decorative artwork | `platform/src/components/brand-art.tsx` | Drawn for this project from plain shapes; no third-party material. | Cleared (owned). |
 
-Why this matters: an icon or illustration without a provable licence is a liability, not a design detail. Merge only after
-both rows are filled in with a licence name, a link and the account or author. Until then the credits in the sidebar stay.
-The assets are public files served without authentication (they contain no data); the proxy lets them through only after the
-exposure checks (role, host, network).
+Removed in this change: the 17 PNG icons labelled Flaticon and the 3 Streamline illustrations from the Figma Community file.
+No licence for them could be shown in the repository. Do not restore them without a written licence record.

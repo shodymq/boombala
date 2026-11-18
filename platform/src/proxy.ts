@@ -10,8 +10,8 @@ const dev = process.env.NODE_ENV === "development";
  * 2. OPTIMISTIC redirect of visitors without a session cookie. This is only a convenience: real authorization
  *    happens on the server in the data access layer (src/server/dal.ts) for every page and action.
  */
-// /icons and /illustrations are public brand assets (no data); the image optimizer fetches them without the visitor's cookie.
-const STATIC_ASSET = /^\/(_next\/(static|image)\/|favicon\.ico$|icons\/|illustrations\/)/;
+// /icons holds public interface icons that the CSS refers to (no data). Served only after the exposure decision below.
+const STATIC_ASSET = /^\/(_next\/(static|image)\/|favicon\.ico$|icons\/)/;
 const exposure = exposureFromEnv();
 const problems = profileProblems();
 if (problems.length) console.error(JSON.stringify({ event: "profile.invalid", problems }));

@@ -22,7 +22,7 @@
     "sessions:revoke": "node --no-warnings scripts/revoke-sessions.ts",
     "db:roles": "node --no-warnings scripts/db-roles.ts",
     "sheets:dry-run": "node --no-warnings scripts/sheets-import-dry-run.ts",
-    "preflight":"node --no-warnings scripts/preflight.ts",
+    "preflight": "node --no-warnings scripts/preflight.ts",
     "db:export": "node --no-warnings scripts/export-db.mjs",
     "verify:roles": "node --no-warnings scripts/verify-roles.mjs",
     "legal:load": "node --no-warnings scripts/legal-load.ts",
@@ -45,6 +45,7 @@
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
     "@vercel/oidc": "4.0.9",
+    "lucide-react": "1.75.0",
     "next": "16.4.6",
     "pg": "^8.23.1",
     "react": "19.2.8",
