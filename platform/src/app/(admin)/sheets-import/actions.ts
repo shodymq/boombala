@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { importBookingSheetBlocks, parseBookingSheetsPlan, SheetBlockImportError } from "@/core/sheets-import/production-block-import";
+import { importBookingSheetBlocks, parseBookingSheetsText, SheetBlockImportError } from "@/core/sheets-import/production-block-import";
 import { FastApiCrmError, legacyCrmBridgeEnabled, unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
 import { withFastApiClient } from "@/server/crm-actor";
 import { requirePermission } from "@/server/dal";
@@ -22,14 +22,14 @@ export async function runBookingSheetsBlockImport(formData: FormData): Promise<v
   if (typeof raw !== "string" || raw.length < 2 || raw.length > 100_000) fail("invalid_plan");
   let json: unknown;
   try {
-    json = JSON.parse(raw);
+    json = raw;
   } catch {
     fail("invalid_plan");
   }
 
   let result: Awaited<ReturnType<typeof importBookingSheetBlocks>>;
   try {
-    const plan = parseBookingSheetsPlan(json);
+    const plan = parseBookingSheetsText(json as string);
     result = await withFastApiClient(session, (client) => importBookingSheetBlocks(plan, client));
   } catch (error) {
     if (error instanceof SheetBlockImportError) fail(error.code);
