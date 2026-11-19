@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Icon, type IconName } from "@/components/icon";
+import { Icon } from "@/components/icon";
+import { adminNavIcon } from "@/core/admin-nav-icons";
 
 export interface NavItem {
   href: string;
@@ -11,20 +12,6 @@ export interface NavItem {
 }
 
 const PRIMARY_HREFS = new Set(["/", "/bookings", "/requests", "/attendance", "/contacts"]);
-const ICON_NAMES: Record<string, IconName> = {
-  "/": "dashboard",
-  "/bookings": "calendar",
-  "/requests": "inbox",
-  "/attendance": "check",
-  "/contacts": "users",
-  "/news": "bell",
-  "/export": "download",
-  "/legal": "check",
-  "/retention": "heart",
-  "/users": "user",
-  "/audit": "more",
-  "/account": "settings",
-};
 
 function isCurrent(item: NavItem, pathname: string) {
   return item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -38,7 +25,7 @@ function NavList({ items, pathname, onNavigate }: { items: NavItem[]; pathname: 
         return (
           <li key={item.href}>
             <Link href={item.href} onClick={onNavigate} aria-current={active ? "page" : undefined} className="snow-nav-link">
-              <Icon name={ICON_NAMES[item.href]} size={17} className="snow-nav-icon" />
+              <Icon name={adminNavIcon(item.href)} size={17} className="snow-nav-icon" />
               <span>{item.label}</span>
             </Link>
           </li>
