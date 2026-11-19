@@ -7,7 +7,7 @@ const source = (path: string) => readFileSync(new URL(path, import.meta.url), "u
 describe("Vercel legacy bridge mode without a local PostgreSQL URL", () => {
   it("does not create a Vercel pool before branching for requests or attendance", () => {
     const requests = source("../src/app/(admin)/requests/page.tsx");
-    assert.match(requests, /if \(legacyBridgeEnabled\(\)\) \{/);
+    assert.match(requests, /if \(indexed\) \{/);
     assert.match(requests, /else \{\s*const pool = getPool\(\);/);
     assert.doesNotMatch(requests, /const pool = getPool\(\);\s*const token = legacyBridgeEnabled/);
 
@@ -39,7 +39,7 @@ describe("Vercel legacy bridge mode without a local PostgreSQL URL", () => {
     assert.ok(audit.indexOf('bridgeRpc<') < audit.indexOf("getPool().query"));
 
     const contacts = source("../src/app/(admin)/contacts/page.tsx");
-    assert.match(contacts, /legacyBridgeEnabled\(\)\s*\?\s*await bridgeRpc/);
+    assert.match(contacts, /requirePermissionAnd\("contacts\.view"[\s\S]*bridgeRpc/);
     const contact = source("../src/app/(admin)/contacts/[id]/page.tsx");
     assert.match(contact, /legacyBridgeEnabled\(\)\s*\?\s*await bridgeRpc/);
 
@@ -69,7 +69,7 @@ describe("Vercel legacy bridge mode without a local PostgreSQL URL", () => {
   it("keeps mutations allowlisted and fails legacy slot-writer actions closed", () => {
     const bridge = source("../src/server/legacy-bridge.ts");
     for (const operation of [
-      'case "requests.list"', 'case "requests.status"', 'case "calendar.catalog"',
+      'case "requests.list"', 'case "requests.status"', 'case "requests.index"', 'case "requests.card"', 'case "calendar.view"', 'case "calendar.catalog"',
       'case "calendar.timeline"', 'case "booking.request"', 'case "booking.payment"',
       'case "booking.confirm"', 'case "attendance.view"', 'case "contacts.list"',
       'case "legal.list"', 'case "news.list"', 'case "users.list"', 'case "audit.list"',

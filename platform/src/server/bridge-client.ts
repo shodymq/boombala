@@ -63,7 +63,12 @@ async function send(path: string, init: RequestInit = {}, sessionToken?: string,
   if (init.body !== undefined && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
+  const startedAt = performance.now();
   const response = await fetch(`${bridgeBase()}${path}`, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+  if (process.env.CRM_PERF_LOG === "1") {
+    // Durations only (round trip as seen from the frontend, and the bridge's own Server-Timing). No bodies, no tokens.
+    console.info(`[bridge-client] ${init.method ?? "GET"} ${path} op=${headers.get("x-crm-op") ?? "-"} status=${response.status} rtt=${(performance.now() - startedAt).toFixed(1)}ms server="${response.headers.get("server-timing") ?? ""}"`);
+  }
   if (!response.ok) {
     const text = await response.text();
     let body: unknown = null;
@@ -113,7 +118,7 @@ export function bridgeLogout(token: string | undefined): Promise<void> {
 }
 
 export function bridgeRpc<T>(op: string, input: unknown, sessionToken: string): Promise<T> {
-  return call<T>("/api/bridge/rpc", { method: "POST", body: JSON.stringify({ op, input }) }, sessionToken);
+  return call<T>("/api/bridge/rpc", { method: "POST", body: JSON.stringify({ op, input }), headers: { "X-CRM-Op": op } }, sessionToken);
 }
 
 export type BridgeExportInput = {

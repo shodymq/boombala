@@ -11,8 +11,8 @@ import { outboxStats } from "@/core/outbox";
 import { dashboardCounters, type DashboardCounters } from "@/core/lead-queue";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
-import { requirePermission } from "@/server/dal";
-import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { requirePermissionAnd } from "@/server/dal";
+import { bridgeRpc } from "@/server/bridge-client";
 import { SESSION_COOKIE } from "@/server/env";
 
 export const metadata: Metadata = { title: "Обзор" };
@@ -43,11 +43,14 @@ type Data = {
 };
 
 export default async function DashboardPage() {
-  const { user } = await requirePermission("dashboard.view");
-  if (legacyBridgeEnabled()) {
+  // Bridge mode: the dashboard RPC starts together with the session check (one round trip instead of two in sequence).
+  const { session, data: remote } = await requirePermissionAnd("dashboard.view", async () => {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    const remote = await bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters }>("dashboard", {}, token);
+    return bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters }>("dashboard", {}, token);
+  });
+  const { user } = session;
+  if (remote) {
     return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null }} />;
   }
   const pool = getPool();

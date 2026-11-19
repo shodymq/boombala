@@ -1,13 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { listPackages, listRooms, listSlots } from "@/core/catalog";
-import { requirePermission } from "@/server/dal";
-import { loadLead } from "@/server/lead-data";
+import { requirePermissionAnd } from "@/server/dal";
+import { loadLead, loadRequestCard } from "@/server/lead-data";
 import { getPool } from "@/server/db";
-import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
-import { SESSION_COOKIE } from "@/server/env";
+import { legacyBridgeEnabled } from "@/server/bridge-client";
 import { confirmLeadAction, leadStatusAction } from "../actions";
 
 export const metadata: Metadata = { title: "Карточка заявки" };
@@ -32,20 +30,22 @@ type Catalog = { packages: Awaited<ReturnType<typeof listPackages>>; rooms: Awai
  * them on this path; the recorded manual prepayment is shown read-only.
  */
 export default async function RequestCardPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ notice?: string; error?: string }> }) {
-  const { user } = await requirePermission("requests.manage");
   const { id } = await params;
-    const sp = await searchParams;
-  const actor = { id: user.id, role: user.role };
+  const sp = await searchParams;
   const bridge = legacyBridgeEnabled();
-  // The concrete record by id (typed bridge operation `requests.get`), not a search through a truncated list.
-  const lead = await loadLead(actor, id);
-  if (!lead) notFound();
+  // Bridge mode: the record by id and the catalog are ONE round trip (`requests.card`) that starts together with the session check.
+  const { session, data: card } = await requirePermissionAnd("requests.manage", () => loadRequestCard(id));
+  const { user } = session;
+  const actor = { id: user.id, role: user.role };
+  let lead: NonNullable<Awaited<ReturnType<typeof loadLead>>> | null;
   let cat: Catalog;
   if (bridge) {
-    const token = (await cookies()).get(SESSION_COOKIE)?.value;
-    if (!token) throw new Error("session_missing");
-    cat = await bridgeRpc<Catalog>("catalog", {}, token);
+    lead = card?.lead ?? null;
+    if (!lead || !card) notFound();
+    cat = card.catalog;
   } else {
+    lead = await loadLead(actor, id);
+    if (!lead) notFound();
     const pool = getPool();
     const [packages, rooms, slots] = await Promise.all([listPackages(pool), listRooms(pool), listSlots(pool)]);
     cat = { packages, rooms, slots };

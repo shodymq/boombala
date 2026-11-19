@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Icon } from "@/components/icon";
@@ -17,6 +17,12 @@ function isCurrent(item: NavItem, pathname: string) {
   return item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
+/** Instant feedback on a click: the link shows it is being opened while the server renders the next page. */
+function NavPending() {
+  const { pending } = useLinkStatus();
+  return <span className="snow-nav-pending" data-pending={pending ? "true" : "false"} aria-hidden="true" />;
+}
+
 function NavList({ items, pathname, onNavigate }: { items: NavItem[]; pathname: string; onNavigate: () => void }) {
   return (
     <ul className="snow-nav-list">
@@ -27,6 +33,7 @@ function NavList({ items, pathname, onNavigate }: { items: NavItem[]; pathname: 
             <Link href={item.href} onClick={onNavigate} aria-current={active ? "page" : undefined} className="snow-nav-link">
               <Icon name={adminNavIcon(item.href)} size={17} className="snow-nav-icon" />
               <span>{item.label}</span>
+              <NavPending />
             </Link>
           </li>
         );

@@ -7,7 +7,7 @@ import { attendanceSeries, addManualEntry, confirmRegistrationEntry, correctEntr
 import { catalogSummary, listPackages, listRooms, listSlots, resolvePrice } from "../core/catalog.ts";
 import type { Pool } from "../core/db.ts";
 import { withTx } from "../core/db.ts";
-import { isValidDate } from "../core/dates.ts";
+import { almatyToday, isValidDate } from "../core/dates.ts";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../core/errors.ts";
 import { beginEnrollment, isEnrolled } from "../core/mfa.ts";
 import { outboxStats } from "../core/outbox.ts";
@@ -29,6 +29,7 @@ import { writeAudit } from "../core/audit.ts";
 import { mfaRequired, mfaKey } from "./env.ts";
 import { getPool } from "./db.ts";
 import { requestMeta } from "./request.ts";
+import { runWithPerf } from "../core/perf.ts";
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -120,8 +121,11 @@ export async function bridgeSessionResponse(request: NextRequest): Promise<Respo
   try {
     assertBridgeService(request);
     const state = new URL(request.url).searchParams.get("state") === "pending" ? "pending" : "verified";
-    const result = await bridgeSession(request, state);
-    return Response.json({ session: result.session }, { headers: { "Cache-Control": "no-store" } });
+    const started = performance.now();
+    const { result, perf } = await runWithPerf(() => bridgeSession(request, state));
+    const timing = `handler;dur=${(performance.now() - started).toFixed(1)}, db;dur=${perf.dbMs.toFixed(1)};desc="${perf.queries} queries"`;
+    if (process.env.CRM_PERF_LOG === "1") console.info(`[bridge-perf] op=auth.session ${timing}`);
+    return Response.json({ session: result.session }, { headers: { "Cache-Control": "no-store", "Server-Timing": timing } });
   } catch (error) {
     if (error instanceof BridgeHttpError && error.code === "session_invalid") return Response.json({ session: null }, { headers: { "Cache-Control": "no-store" } });
     return jsonError(error);
@@ -304,13 +308,18 @@ function ensureWorkingHours(start: string): void {
 
 async function dashboard(pool: Pool, session: ValidSession) {
   const actor = actorOf(session);
-  const [migrations, summary, outbox, ready] = await Promise.all([
+  // Every read is independent, so they run together; the attendance figures follow only when the schema check passed.
+  const attendance = can(session.user.role, "attendance.manage")
+    ? attendanceSchemaReady(pool).then((ok) => (ok ? dayFigures(pool, actor, almatyToday()) : null))
+    : Promise.resolve(null);
+  const [migrations, summary, outbox, counters, figures] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(session.user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(session.user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
-    can(session.user.role, "attendance.manage") ? attendanceSchemaReady(pool) : Promise.resolve(false),
+    dashboardCounters(pool, session.user.role),
+    attendance,
   ]);
-  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, counters: await dashboardCounters(pool, session.user.role), attendance: ready && can(session.user.role, "attendance.manage") ? await dayFigures(pool, actor, (await import("../core/dates.ts")).almatyToday()) : null };
+  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, counters, attendance: figures };
 }
 
 async function bookingCatalog(pool: Pool) {
@@ -329,6 +338,80 @@ async function bookingTimeline(pool: Pool, date: string) {
        FROM bb.slot_reservations r LEFT JOIN bb.packages p ON p.id=r.package_id LEFT JOIN bb.contacts c ON c.id=r.contact_id
        LEFT JOIN bb.users u ON u.id=r.created_by WHERE r.slot_date=$1 ORDER BY r.starts_at`, [date]);
   return { branchId: "almaty", date, timezone: "Asia/Almaty", bufferMinutes: 0, rooms: rooms.rows, reservations: rows.rows.map((r) => ({ id: r.id, kind: r.kind, status: r.released_at ? "released" : r.kind === "block" ? "blocked" : "confirmed", roomId: r.room_id, startsAt: new Date(r.starts_at).toISOString(), endsAt: new Date(r.ends_at).toISOString(), occupiedEndsAt: new Date(r.ends_at).toISOString(), slotId: r.slot_id == null ? null : String(r.slot_id), packageName: r.package_name, priceKzt: r.price_kzt, priceSource: r.price_source, paidKzt: r.paid_kzt ?? 0, paymentStatus: r.paid_kzt ? "prepaid" : "unpaid", note: r.note, requestId: r.lead_request_id, customerName: r.customer_name, customerPhone: r.customer_phone, createdByAdminId: r.created_by, createdByName: r.created_by_name, releasedAt: r.released_at ? new Date(r.released_at).toISOString() : null })) };
+}
+
+type CalendarLeadState = { id: string; status: string; bookedAt: string | null; manualPaymentFactStatus: "prepaid" | "unpaid"; manualPaymentFactAmountKzt: number; customerName: string };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The state of one request for the calendar (payment fact and whether a reservation exists). Null for an unknown or malformed id. */
+async function calendarLeadState(pool: Pool, id: string): Promise<CalendarLeadState | null> {
+  if (!UUID_RE.test(id)) return null;
+  const row = await pool.query<{ id: string; status: string; booked_at: string | null; name: string; payment_amount: number | null }>(
+    "SELECT l.id,l.status,r.created_at booked_at,c.name,(SELECT amount_kzt FROM bb.manual_payment_facts p WHERE p.lead_request_id=l.id) payment_amount FROM bb.lead_requests l JOIN bb.contacts c ON c.id=l.contact_id LEFT JOIN bb.slot_reservations r ON r.lead_request_id=l.id AND r.released_at IS NULL WHERE l.id=$1",
+    [id],
+  );
+  const x = row.rows[0];
+  if (!x) return null;
+  return { id: x.id, status: x.status, bookedAt: x.booked_at, manualPaymentFactStatus: x.payment_amount ? "prepaid" : "unpaid", manualPaymentFactAmountKzt: x.payment_amount ?? 0, customerName: x.name };
+}
+
+/** Requests of one day that still wait for a decision. Filtered in SQL: the calendar never needs the whole request list. */
+const CALENDAR_OPEN_REQUESTS_LIMIT = 200;
+async function calendarOpenRequests(pool: Pool, date: string) {
+  const rows = await pool.query<{ id: string; status: string; phone_e164: string; name: string; created_at: Date; requested_date: string }>(
+    `SELECT l.id, l.status, c.phone_e164, c.name, l.created_at, to_char(l.requested_date,'YYYY-MM-DD') requested_date
+       FROM bb.lead_requests l JOIN bb.contacts c ON c.id=l.contact_id
+      WHERE l.requested_date=$1 AND l.status IN ('new','in_progress')
+      ORDER BY l.created_at DESC LIMIT ${CALENDAR_OPEN_REQUESTS_LIMIT + 1}`,
+    [date],
+  );
+  const items = rows.rows.slice(0, CALENDAR_OPEN_REQUESTS_LIMIT).map((l) => ({ id: l.id, type: "birthday_request", status: l.status, phone: l.phone_e164, customerName: l.name, createdAt: l.created_at.toISOString(), requestedDate: l.requested_date, branch: { id: "almaty" } }));
+  // `total` larger than `items` is how the page learns that the list was cut.
+  return { items, total: rows.rows.length > CALENDAR_OPEN_REQUESTS_LIMIT ? CALENDAR_OPEN_REQUESTS_LIMIT + 1 : items.length };
+}
+
+/**
+ * Everything the calendar page needs in ONE round trip: catalog, the day's timeline, open requests of the day and the request
+ * states it displays. The reads run in parallel on the VPS. Reservation availability is never cached: the timeline is read
+ * fresh on every call. Requires the same permission as the calendar page.
+ */
+export async function calendarView(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+  if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  const date = parseDate(input.date);
+  const optionalId = (value: unknown) => (typeof value === "string" && UUID_RE.test(value) ? value : null);
+  const requestId = optionalId(input.request);
+  const reservationId = optionalId(input.reservation);
+  const continueId = optionalId(input.continue);
+  const timeline = bookingTimeline(pool, date);
+  const [catalog, tl, leads, lead, bookingLead, continued] = await Promise.all([
+    bookingCatalog(pool),
+    timeline,
+    calendarOpenRequests(pool, date),
+    requestId ? calendarLeadState(pool, requestId) : Promise.resolve(null),
+    // The request behind a selected reservation: resolved in SQL, so it does not wait for the timeline to travel anywhere.
+    reservationId
+      ? pool
+          .query<{ lead_request_id: string | null }>("SELECT lead_request_id FROM bb.slot_reservations WHERE id=$1 AND slot_date=$2", [reservationId, date])
+          .then((r) => (r.rows[0]?.lead_request_id ? calendarLeadState(pool, r.rows[0].lead_request_id) : null))
+      : Promise.resolve(null),
+    continueId ? getLead(pool, actorOf(session), continueId) : Promise.resolve(null),
+  ]);
+  return { catalog, timeline: tl, leads, lead, bookingLead, continued };
+}
+
+/** The request queue page in one round trip: the filtered page and the package names it shows. */
+export async function requestsIndex(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+  const actor = actorOf(session);
+  const [result, packages] = await Promise.all([searchLeads(pool, actor, leadFilter(input)), listPackages(pool)]);
+  return { result, packages };
+}
+
+/** One request card with the catalog it needs, in one round trip. Not found is a 404 like `requests.get`. */
+export async function requestCard(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
+  const actor = actorOf(session);
+  const [lead, packages, rooms, slots] = await Promise.all([getLead(pool, actor, text(input.id, 80)), listPackages(pool), listRooms(pool), listSlots(pool)]);
+  if (!lead) throw new NotFoundError();
+  return { lead, catalog: { packages, rooms, slots } };
 }
 
 async function ensureIdempotent<T>(pool: Pool, actor: Actor, key: string, operation: string, input: unknown, run: (tx: import("../core/db.ts").Client) => Promise<T>): Promise<T> {
@@ -448,17 +531,39 @@ export async function bridgeRelease(pool: Pool, session: ValidSession, input: Re
   });
 }
 
+/**
+ * Measured wrapper: the answer carries `Server-Timing` (session check, whole handler, SQL count and summed SQL time) and,
+ * with CRM_PERF_LOG=1, the same numbers go to the log. Only the operation name and durations are recorded, never input or rows.
+ */
 export async function bridgeRpc(request: NextRequest): Promise<Response> {
+  const started = performance.now();
+  const marks = { op: "?", sessionMs: 0 };
+  const { result: response, perf } = await runWithPerf(() => rpcCore(request, marks));
+  const total = performance.now() - started;
+  const timing = `session;dur=${marks.sessionMs.toFixed(1)}, handler;dur=${total.toFixed(1)}, db;dur=${perf.dbMs.toFixed(1)};desc="${perf.queries} queries"`;
+  const out = new Response(response.body, response);
+  out.headers.set("Server-Timing", timing);
+  if (process.env.CRM_PERF_LOG === "1") console.info(`[bridge-perf] op=${marks.op} status=${response.status} ${timing}`);
+  return out;
+}
+
+async function rpcCore(request: NextRequest, marks: { op: string; sessionMs: number }): Promise<Response> {
   try {
     assertBridgeService(request);
+    const sessionStarted = performance.now();
     const { session } = await bridgeSession(request);
+    marks.sessionMs = performance.now() - sessionStarted;
     const body = await readJson(request);
     const op = text(body.op, 80);
+    marks.op = op;
     const input = record(body.input ?? {});
     const pool = getPool(); const actor = actorOf(session);
     switch (op) {
       case "dashboard": return Response.json(await dashboard(pool, session), { headers: { "Cache-Control": "no-store" } });
       case "requests.list": return Response.json(await listLeads(pool, actor, typeof input.status === "string" ? { status: input.status } : {}), { headers: { "Cache-Control": "no-store" } });
+      case "requests.index": return Response.json(await requestsIndex(pool, session, input), { headers: { "Cache-Control": "no-store" } });
+      case "requests.card": return Response.json(await requestCard(pool, session, input), { headers: { "Cache-Control": "no-store" } });
+      case "calendar.view": return Response.json(await calendarView(pool, session, input), { headers: { "Cache-Control": "no-store" } });
       case "requests.search": return Response.json(await searchLeads(pool, actor, leadFilter(input)), { headers: { "Cache-Control": "no-store" } });
       case "requests.get": { const lead = await getLead(pool, actor, text(input.id, 80)); if (!lead) throw new NotFoundError(); return Response.json(lead, { headers: { "Cache-Control": "no-store" } }); }
       case "requests.status": await setLeadStatus(pool, actor, text(input.id, 80), text(input.status, 30) as "new" | "in_progress" | "cancelled", await requestMeta()); return Response.json({ ok: true });
@@ -469,7 +574,7 @@ export async function bridgeRpc(request: NextRequest): Promise<Response> {
       case "calendar.catalog": return Response.json(await bookingCatalog(pool), { headers: { "Cache-Control": "no-store" } });
       case "calendar.timeline": return Response.json(await bookingTimeline(pool, parseDate(input.date)), { headers: { "Cache-Control": "no-store" } });
       case "calendar.leads": { const leads = await listLeads(pool, actor, {}); return Response.json({ items: leads.map((l) => ({ id: l.id, type: "birthday_request", status: l.status, phone: l.phone, customerName: l.name, createdAt: l.createdAt.toISOString(), requestedDate: l.requestedDate, branch: { id: "almaty" } })), total: leads.length }); }
-      case "calendar.lead": { const row = await pool.query<{ id: string; status: string; booked_at: string | null; name: string; payment_amount: number | null }>("SELECT l.id,l.status,r.created_at booked_at,c.name,(SELECT amount_kzt FROM bb.manual_payment_facts p WHERE p.lead_request_id=l.id) payment_amount FROM bb.lead_requests l JOIN bb.contacts c ON c.id=l.contact_id LEFT JOIN bb.slot_reservations r ON r.lead_request_id=l.id AND r.released_at IS NULL WHERE l.id=$1", [text(input.id, 80)]); const x = row.rows[0]; if (!x) throw new NotFoundError(); return Response.json({ id: x.id, status: x.status, bookedAt: x.booked_at, manualPaymentFactStatus: x.payment_amount ? "prepaid" : "unpaid", manualPaymentFactAmountKzt: x.payment_amount ?? 0, customerName: x.name }); }
+      case "calendar.lead": { const state = await calendarLeadState(pool, text(input.id, 80)); if (!state) throw new NotFoundError(); return Response.json(state); }
       case "booking.request": return Response.json(await bridgeCreateRequest(pool, session, input));
       case "booking.payment": return Response.json(await bridgePayment(pool, session, input));
       case "booking.confirm": return Response.json(await bridgeConfirm(pool, session, input));

@@ -1,16 +1,13 @@
 import type { Metadata } from "next";
 import { BrandArt } from "@/components/brand-art";
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { listPackages } from "@/core/catalog";
 import { isValidDate } from "@/core/dates";
 import { DatePicker } from "@/components/date-picker";
 import { Icon } from "@/components/icon";
-import { requirePermission } from "@/server/dal";
+import { requirePermissionAnd } from "@/server/dal";
 import { getPool } from "@/server/db";
-import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
-import { SESSION_COOKIE } from "@/server/env";
-import { loadLeadPage } from "@/server/lead-data";
+import { loadLeadPage, loadRequestsIndex } from "@/server/lead-data";
 import { leadStatusAction } from "./actions";
 
 export const metadata: Metadata = { title: "Заявки" };
@@ -27,7 +24,6 @@ const btn = "crm-requests-action";
 const btnGhost = "crm-requests-action crm-requests-action-secondary";
 
 export default async function RequestsPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; createdFrom?: string; createdTo?: string; page?: string; notice?: string; error?: string }> }) {
-  const { user } = await requirePermission("requests.manage");
   const sp = await searchParams;
   const status = sp.status && STATUS[sp.status] ? sp.status : undefined;
   const q = sp.q?.trim().slice(0, 80) || undefined;
@@ -35,18 +31,22 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   const createdTo = sp.createdTo && isValidDate(sp.createdTo) ? sp.createdTo : undefined;
   const hasFilters = Boolean(status || q || createdFrom || createdTo);
   const page = Math.max(Math.trunc(Number(sp.page)) || 1, 1);
+  const filter = { status, q, createdFrom, createdTo, page };
+  // Bridge mode: the page and the package names are ONE round trip that starts together with the session check.
+  const { session, data: indexed } = await requirePermissionAnd("requests.manage", () => loadRequestsIndex(filter));
+  const { user } = session;
   const actor = { id: user.id, role: user.role };
   let packages: Awaited<ReturnType<typeof listPackages>>;
-  if (legacyBridgeEnabled()) {
-    const token = (await cookies()).get(SESSION_COOKIE)?.value;
-    if (!token) throw new Error("session_missing");
-    packages = (await bridgeRpc<{ packages: Awaited<ReturnType<typeof listPackages>> }>("catalog", {}, token)).packages;
+  let result: Awaited<ReturnType<typeof loadLeadPage>>;
+  if (indexed) {
+    packages = indexed.packages;
+    // Search, dates, status and pagination are executed by PostgreSQL (typed bridge operation `requests.index`).
+    result = indexed.result;
   } else {
     const pool = getPool();
     packages = await listPackages(pool);
+    result = await loadLeadPage(actor, filter);
   }
-  // Search, dates, status and pagination are executed by PostgreSQL (typed bridge operation `requests.search`).
-  const result = await loadLeadPage(actor, { status, q, createdFrom, createdTo, page });
   const leads = result.items;
   const pages = Math.max(Math.ceil(result.total / result.pageSize), 1);
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });
