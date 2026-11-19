@@ -1,0 +1,15 @@
+{
+  "status": 422,
+  "body": {
+    "error": {
+      "code": "validation_error",
+      "message": "Request validation failed.",
+      "details": [
+        {
+          "field": "status",
+          "message": "Input should be 'new', 'contacted', 'qualified', 'booked', 'paid', 'completed', 'lost', 'in_progress', 'confirmed', 'cancelled' or 'closed'"
+        }
+      ]
+    }
+  }
+}
