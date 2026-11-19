@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { listContacts, type ContactFilters } from "@/core/crm";
-import { requirePermission } from "@/server/dal";
+import { requirePermissionAnd } from "@/server/dal";
 import { getPool } from "@/server/db";
-import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { bridgeRpc } from "@/server/bridge-client";
 import { SESSION_COOKIE } from "@/server/env";
 
 export const metadata: Metadata = { title: "Клиенты" };
@@ -19,7 +19,6 @@ const pick = <T extends string>(v: string | undefined, allowed: readonly T[]): T
 const date = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
 
 export default async function ContactsPage({ searchParams }: { searchParams: Promise<Params> }) {
-  const { user } = await requirePermission("contacts.view");
   const sp = await searchParams;
   const filters: ContactFilters = {
     q: sp.q?.slice(0, 80),
@@ -30,9 +29,11 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
     leadStatus: pick(sp.status, ["new", "in_progress", "confirmed", "cancelled", "completed"] as const),
   };
   const page = Math.max(Number.parseInt(sp.page ?? "1", 10) || 1, 1);
-  const remote = legacyBridgeEnabled()
-    ? await bridgeRpc<Awaited<ReturnType<typeof listContacts>>>("contacts.list", { filters, page }, (await cookies()).get(SESSION_COOKIE)?.value ?? "")
-    : await listContacts(getPool(), { id: user.id, role: user.role }, filters, page);
+  // Bridge mode: the list RPC starts together with the session check.
+  const { session, data } = await requirePermissionAnd("contacts.view", async () =>
+    bridgeRpc<Awaited<ReturnType<typeof listContacts>>>("contacts.list", { filters, page }, (await cookies()).get(SESSION_COOKIE)?.value ?? ""));
+  const { user } = session;
+  const remote = data ?? (await listContacts(getPool(), { id: user.id, role: user.role }, filters, page));
   const rows = remote.rows.map((c) => ({ ...c, firstRegisteredAt: new Date(c.firstRegisteredAt), lastActivityAt: new Date(c.lastActivityAt) }));
   const { total, pageSize } = remote;
   const fmt = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Almaty" });

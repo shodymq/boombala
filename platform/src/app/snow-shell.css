@@ -83,6 +83,10 @@
 .snow-nav-link[aria-current="page"] { background: #3b1e78; color: #fff; box-shadow: 0 8px 18px rgba(59, 30, 120, .16); }
 .ui-icon { display: block; flex: 0 0 auto; object-fit: contain; }
 .snow-nav-icon { width: 17px; height: 17px; color: #7d746c; opacity: .75; }
+.snow-nav-pending { margin-left: auto; width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; opacity: 0; }
+.snow-nav-pending[data-pending="true"] { opacity: .8; animation: snow-spin .7s linear infinite; }
+.snow-nav-link:has(.snow-nav-pending[data-pending="true"]) { background: #f1ebfa; color: #3b1e78; }
+@keyframes snow-spin { to { transform: rotate(360deg); } }
 .snow-nav-link:hover .snow-nav-icon,
 .snow-nav-link[aria-current="page"] .snow-nav-icon { opacity: 1; }
 .snow-nav-link[aria-current="page"] .snow-nav-icon { color: #fff; }
@@ -144,4 +148,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .snow-nav-link, .snow-logout { transition: none; }
+  .snow-nav-pending[data-pending="true"] { animation: none; }
 }

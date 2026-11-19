@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import type { LeadDetail, LeadFilter, LeadPage } from "../core/lead-queue.ts";
 import { getLead, searchLeads } from "../core/lead-queue.ts";
+import type { CatalogItem, TimeSlot } from "../core/catalog.ts";
 import type { Actor } from "../core/rbac.ts";
 import { bridgeRpc, legacyBridgeEnabled, LegacyBridgeError } from "./bridge-client.ts";
 import { getPool } from "./db.ts";
@@ -53,4 +54,26 @@ export async function loadLead(actor: Actor, id: string): Promise<LeadDetail | n
     }
   }
   return getLead(getPool(), actor, id);
+}
+
+const catalogItem = z.object({ id: z.string(), name: z.string() }).passthrough();
+const requestsIndex = z.object({ result: leadPage, packages: z.array(catalogItem) });
+const requestCard = z.object({
+  lead: leadDetail,
+  catalog: z.object({ packages: z.array(catalogItem), rooms: z.array(catalogItem), slots: z.array(z.object({ id: z.number() }).passthrough()) }),
+});
+
+/** Bridge mode only: the filtered request page and its package names in ONE round trip (`requests.index`). */
+export async function loadRequestsIndex(filter: LeadFilter): Promise<{ result: LeadPage; packages: CatalogItem[] }> {
+  return requestsIndex.parse(await bridgeRpc<unknown>("requests.index", filter, await token())) as unknown as { result: LeadPage; packages: CatalogItem[] };
+}
+
+/** Bridge mode only: one request and the catalog its card shows, in ONE round trip (`requests.card`). Null when it does not exist. */
+export async function loadRequestCard(id: string): Promise<{ lead: LeadDetail; catalog: { packages: CatalogItem[]; rooms: CatalogItem[]; slots: TimeSlot[] } } | null> {
+  try {
+    return requestCard.parse(await bridgeRpc<unknown>("requests.card", { id }, await token())) as unknown as { lead: LeadDetail; catalog: { packages: CatalogItem[]; rooms: CatalogItem[]; slots: TimeSlot[] } };
+  } catch (error) {
+    if (error instanceof LegacyBridgeError && error.status === 404) return null;
+    throw error;
+  }
 }

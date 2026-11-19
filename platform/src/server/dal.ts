@@ -37,3 +37,20 @@ export async function requirePermission(permission: Permission): Promise<ValidSe
   if (!can(session.user.role, permission)) redirect("/");
   return session;
 }
+
+/**
+ * Verifies the session and, in bridge mode, reads the page data AT THE SAME TIME. Each bridge round trip crosses the network to
+ * the VPS, so waiting for the session before starting the data read doubled the latency of every page.
+ *
+ * This is safe because every bridge operation validates the session and checks the role on the VPS by itself: the data read is
+ * authorized independently, and if the session or permission here is refused, the redirect wins and the data is discarded.
+ * Outside bridge mode `data` is null and the page reads the database as before, after the session check.
+ */
+export async function requirePermissionAnd<T>(permission: Permission, load: () => Promise<T>): Promise<{ session: ValidSession; data: T | null }> {
+  const sessionPromise = requirePermission(permission);
+  const dataPromise = legacyBridgeEnabled() ? load() : null;
+  // A refused session redirects first; the unused read must not surface as an unhandled rejection.
+  dataPromise?.catch(() => undefined);
+  const session = await sessionPromise;
+  return { session, data: dataPromise ? await dataPromise : null };
+}

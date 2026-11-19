@@ -13,6 +13,7 @@ import type { ValidSession } from "../../../core/session.ts";
 import { withFastApiClient } from "../../../server/crm-actor.ts";
 import { FastApiCrmError, type BookingCatalog, type BookingCatalogBranch, type BookingTimeline, type BirthdayLeadState, type FastApiLeadListItem } from "../../../server/fastapi-crm.ts";
 import { ContinueRequestForm, NewBookingForm, ReservationDetails, type ContinuedRequest } from "./booking-drawer";
+import type { CalendarView } from "../../../server/calendar-data.ts";
 import { loadLead } from "../../../server/lead-data.ts";
 import { confirmPaidRequestAction } from "./crm-actions";
 import { FlashClean } from "./crm-flash-clean";
@@ -75,7 +76,11 @@ function plural(n: number, one: string, few: string, many: string): string {
   return many;
 }
 
-export async function CrmCalendar({ session, search }: { session: ValidSession; search: Search }) {
+/**
+ * `view` is the whole page read in ONE bridge round trip (bridge mode); without it the page reads through the typed client
+ * step by step as before.
+ */
+export async function CrmCalendar({ session, search, view = null }: { session: ValidSession; search: Search; view?: CalendarView | null }) {
   const today = almatyDate();
   const date = isCalendarDate(search.date) ? search.date : today;
   let catalog: BookingCatalog | null = null;
@@ -90,7 +95,13 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
   let openRequests: FastApiLeadListItem[] | null = null;
   let requestsTruncated = false;
   try {
-    const loaded = await withFastApiClient(session, async (client) => {
+    const loaded = view
+      ? (() => {
+          const branches = [...view.catalog.branches].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+          const picked = branches.find((b) => b.id === search.branch) ?? branches[0];
+          return { cat: view.catalog, picked, tl: picked ? view.timeline : null, lead: view.lead, bookingLead: view.bookingLead, leads: view.leads };
+        })()
+      : await withFastApiClient(session, async (client) => {
       const cat = await client.getBookingCatalog();
       const branches = [...cat.branches].sort((a, b) => a.name.localeCompare(b.name, "ru"));
       // For an operator the server returns only the assigned branch, so a foreign branch in the URL falls back to the first
@@ -113,7 +124,7 @@ export async function CrmCalendar({ session, search }: { session: ValidSession; 
       requestsTruncated = loaded.leads.total > loaded.leads.items.length;
     }
     if (search.continue) {
-      const found = await loadLead({ id: session.user.id, role: session.user.role }, search.continue).catch(() => null);
+      const found = view ? view.continued : await loadLead({ id: session.user.id, role: session.user.role }, search.continue).catch(() => null);
       if (found && found.status !== "cancelled" && found.reservationId === null) {
         continued = { id: found.id, seq: found.seq, name: found.name, phone: found.phone, packageId: found.packageId, children: found.children, prepaymentKzt: found.prepaymentKzt };
       } else continueMissing = true;

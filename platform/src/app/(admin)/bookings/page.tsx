@@ -5,7 +5,8 @@ import { listPackages } from "@/core/catalog";
 import { almatyToday, isValidDate } from "@/core/dates";
 import { legacyBridgeEnabled } from "@/server/bridge-client";
 import { unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
-import { requirePermission } from "@/server/dal";
+import { loadCalendarView } from "@/server/calendar-data";
+import { requirePermissionAnd } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { blockAction, manualBookingAction, releaseAction } from "./actions";
 import { CrmCalendar } from "./crm-calendar";
@@ -33,14 +34,15 @@ const shift = (date: string, days: number) => {
 export default async function BookingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; notice?: string; error?: string; branch?: string; start?: string }>;
+  searchParams: Promise<{ date?: string; notice?: string; error?: string; branch?: string; start?: string; request?: string; reservation?: string; continue?: string }>;
 }) {
-  const session = await requirePermission("bookings.manage");
-  const { user } = session;
   const sp = await searchParams;
+  // Bridge mode: the whole calendar is one RPC that starts together with the session check (see requirePermissionAnd).
+  const { session, data: view } = await requirePermissionAnd("bookings.manage", () => loadCalendarView(sp));
+  const { user } = session;
   // With the unified flag on, FastAPI is the only reader and writer of the calendar. The legacy grid below is kept only
   // for the flag-off rollback path and never writes while the flag is on.
-  if (unifiedFastapiCrmEnabled() || legacyBridgeEnabled()) return <CrmCalendar session={session} search={sp} />;
+  if (unifiedFastapiCrmEnabled() || legacyBridgeEnabled()) return <CrmCalendar session={session} search={sp} view={view} />;
   const date = sp.date && isValidDate(sp.date) ? sp.date : almatyToday();
   const actor = { id: user.id, role: user.role };
   const [grid, packages] = await Promise.all([getGrid(getPool(), actor, date), listPackages(getPool())]);

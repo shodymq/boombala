@@ -3,9 +3,9 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { isValidDate } from "@/core/dates";
 import { DatePicker } from "@/components/date-picker";
-import { requirePermission } from "@/server/dal";
+import { requirePermissionAnd } from "@/server/dal";
 import { getPool } from "@/server/db";
-import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { bridgeRpc } from "@/server/bridge-client";
 import { SESSION_COOKIE } from "@/server/env";
 
 export const metadata: Metadata = { title: "Журнал действий" };
@@ -149,13 +149,15 @@ function detailFromSnippet(detail: string | null): string | null {
 const field = "h-11 rounded-xl border-2 border-grape-200 bg-white px-3 text-base text-ink focus:border-grape-600 focus:outline-none";
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<{ q?: string; actor?: string; action?: string; from?: string; to?: string }> }) {
-  await requirePermission("audit.view");
   const sp = await searchParams;
-  let rows: Row[];
-  if (legacyBridgeEnabled()) {
+  // Bridge mode: the audit RPC starts together with the session check.
+  const { data: remote } = await requirePermissionAnd("audit.view", async () => {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    const remote = await bridgeRpc<{ rows: Array<Omit<Row, "at"> & { at: string }> }>("audit.list", {}, token);
+    return bridgeRpc<{ rows: Array<Omit<Row, "at"> & { at: string }> }>("audit.list", {}, token);
+  });
+  let rows: Row[];
+  if (remote) {
     rows = remote.rows.map((row) => ({ ...row, at: new Date(row.at) }));
   } else {
     ({ rows } = await getPool().query<Row>(

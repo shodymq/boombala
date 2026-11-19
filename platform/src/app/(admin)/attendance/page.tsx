@@ -6,7 +6,7 @@ import { attendanceSeries, CORRECTION_REASONS, dayFigures, listEntries, searchRe
 import { BUSINESS_TIME_ZONE } from "@/core/catalog";
 import { almatyToday, isValidDate } from "@/core/dates";
 import { attendanceSchemaReady } from "@/core/preflight";
-import { requirePermission } from "@/server/dal";
+import { requirePermissionAnd } from "@/server/dal";
 import { getPool } from "@/server/db";
 import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
 import { SESSION_COOKIE } from "@/server/env";
@@ -76,14 +76,27 @@ function Card({ label, value, hint, testId }: { label: string; value: number; hi
 }
 
 export default async function AttendancePage({ searchParams }: { searchParams: Promise<{ date?: string; days?: string; notice?: string; error?: string; reg?: string; cnt?: string }> }) {
-  const { user } = await requirePermission("attendance.manage");
   const sp = await searchParams;
   const today = almatyToday();
   const date = sp.date && isValidDate(sp.date) ? sp.date : today;
   const days = sp.days === "30" ? 30 : 14;
-  const actor = { id: user.id, role: user.role };
   const bridgeMode = legacyBridgeEnabled();
   const token = bridgeMode ? (await cookies()).get(SESSION_COOKIE)?.value : undefined;
+  const range = rangeEndingAt(date, days);
+  const saved = savedSearch((await cookies()).get("bb_att")?.value);
+  type AttendanceView = {
+    figures: Awaited<ReturnType<typeof dayFigures>>;
+    found: Awaited<ReturnType<typeof searchRegistrations>>;
+    entries: Awaited<ReturnType<typeof listEntries>>;
+    series: Awaited<ReturnType<typeof attendanceSeries>>;
+  };
+  // Bridge mode: the attendance RPC starts together with the session check.
+  const { session, data: remote } = await requirePermissionAnd("attendance.manage", async () => {
+    if (!token) throw new Error("session_missing");
+    return bridgeRpc<AttendanceView>("attendance.view", { date, q: saved.q, filter: saved.f, limit: saved.n, from: range.from, to: range.to }, token);
+  });
+  const { user } = session;
+  const actor = { id: user.id, role: user.role };
   const pool = bridgeMode ? null : getPool();
   const ready = bridgeMode ? true : await attendanceSchemaReady(pool!);
   if (!ready) {
@@ -96,18 +109,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
       </div>
     );
   }
-  if (bridgeMode && !token) throw new Error("session_missing");
   const isToday = date === today;
-  const range = rangeEndingAt(date, days);
-  const saved = savedSearch((await cookies()).get("bb_att")?.value);
-  const remote = legacyBridgeEnabled()
-    ? await bridgeRpc<{
-        figures: Awaited<ReturnType<typeof dayFigures>>;
-        found: Awaited<ReturnType<typeof searchRegistrations>>;
-        entries: Awaited<ReturnType<typeof listEntries>>;
-        series: Awaited<ReturnType<typeof attendanceSeries>>;
-      }>("attendance.view", { date, q: saved.q, filter: saved.f, limit: saved.n, from: range.from, to: range.to }, token as string)
-    : null;
   const [figures, found, entries, series] = remote
     ? [remote.figures, remote.found, remote.entries, remote.series]
     : await Promise.all([dayFigures(pool!, actor, date), searchRegistrations(pool!, actor, date, { q: saved.q, filter: saved.f, limit: saved.n }), listEntries(pool!, actor, date), attendanceSeries(pool!, actor, range.from, range.to)]);
