@@ -32,14 +32,16 @@ export function googleSheetsClient(keyFile: { client_email: string; private_key:
     const res = await fetchImpl("https://oauth2.googleapis.com/token", {
       method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: `${head}.${claim}.${b64u(sig)}` }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`google_token_failed:${res.status}`);
     const j = (await res.json()) as { access_token: string; expires_in: number };
+    if (typeof j.access_token !== "string" || !j.access_token || !Number.isFinite(j.expires_in) || j.expires_in <= 0) throw new Error("google_token_invalid");
     token = { value: j.access_token, exp: now + j.expires_in };
     return token.value;
   }
   async function get(url: string): Promise<unknown> {
-    const res = await fetchImpl(url, { headers: { authorization: `Bearer ${await accessToken()}` } });
+    const res = await fetchImpl(url, { headers: { authorization: `Bearer ${await accessToken()}` }, signal: AbortSignal.timeout(10_000) });
     if (res.status === 403 || res.status === 404) throw new Error(`sheets_access_denied:${res.status} (share the sheet read-only with the service account)`);
     if (!res.ok) throw new Error(`sheets_api_failed:${res.status}`);
     return res.json();

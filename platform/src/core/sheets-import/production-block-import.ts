@@ -174,7 +174,7 @@ function sourceMatch(reservation: BookingTimeline["reservations"][number], candi
   return active(reservation) && reservation.roomId === candidate.roomId && local?.date === candidate.date && local.time === candidate.time && hasSource(reservation, candidate.sourceKey);
 }
 
-type Candidate = { rowNumber: number; cells: string[]; sourceKey: string; date: string; time: string; roomId: string; reason: string; idempotencyKey: string };
+type Candidate = { rowNumber: number; cells: string[]; sourceKey: string; date: string; time: string; roomId: string; roomMode: "exclusive" | "shared"; reason: string; idempotencyKey: string };
 
 function countResult(items: SheetBlockImportResult["items"], historical: number, futureRows: number): SheetBlockImportResult["counts"] {
   return {
@@ -251,7 +251,7 @@ export async function importBookingSheetBlocks(
     }
     candidates.push({
       rowNumber: sourceRow.rowNumber, cells, sourceKey: normalized.sourceKey, date: normalized.date,
-      time: normalized.time, roomId: normalized.roomId, reason, idempotencyKey: idempotencyKey(normalized.sourceKey),
+      time: normalized.time, roomId: normalized.roomId, roomMode: room.occupancyMode === "shared" ? "shared" : "exclusive", reason, idempotencyKey: idempotencyKey(normalized.sourceKey),
     });
   }
 
@@ -261,6 +261,7 @@ export async function importBookingSheetBlocks(
     const aStart = intervalStart(a.date, a.time);
     for (let j = i + 1; j < candidates.length; j++) {
       const b = candidates[j];
+      if (a.roomMode === "shared" || b.roomMode === "shared") continue;
       if (a.date !== b.date || a.roomId !== b.roomId) continue;
       const bStart = intervalStart(b.date, b.time);
       if (aStart < bStart + BLOCK_MINUTES * 60_000 && bStart < aStart + BLOCK_MINUTES * 60_000) {
@@ -286,9 +287,9 @@ export async function importBookingSheetBlocks(
       items.push({ rowNumber: candidate.rowNumber, status: "already_present" });
       continue;
     }
-    if (sameSource || timeline.reservations.some((reservation) =>
+    if (sameSource || (candidate.roomMode !== "shared" && timeline.reservations.some((reservation) =>
       active(reservation) && reservation.roomId === candidate.roomId &&
-      overlap(intervalStart(candidate.date, candidate.time), intervalStart(candidate.date, candidate.time) + BLOCK_MINUTES * 60_000, reservation))) {
+      overlap(intervalStart(candidate.date, candidate.time), intervalStart(candidate.date, candidate.time) + BLOCK_MINUTES * 60_000, reservation)))) {
       items.push({ rowNumber: candidate.rowNumber, status: "conflict", reason: "room_interval_occupied" });
       continue;
     }

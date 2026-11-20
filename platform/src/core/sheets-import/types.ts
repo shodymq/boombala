@@ -10,7 +10,7 @@ export interface SourceRef {
 export type RawRow = Partial<Record<Column, string>>;
 
 export const COLUMNS = [
-  "date", "time", "package", "animator", "room", "client", "phone", "child", "age", "prepayment", "children", "adults",
+  "sourceId", "date", "time", "package", "animator", "room", "client", "phone", "child", "age", "prepayment", "children", "adults", "comment",
 ] as const;
 export type Column = (typeof COLUMNS)[number];
 

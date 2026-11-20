@@ -4,10 +4,12 @@ import { isValidDate } from "../dates.ts";
 import { COLUMNS, type Catalog, type Column, type NormalizedRow, type RawRow, type Reason, type SourceRef } from "./types.ts";
 
 const HEADER_ALIASES: Record<Column, string[]> = {
+  sourceId: ["sync id", "sheets sync id", "source id", "id синхронизации", "id записи", "идентификатор записи", "crm id"],
   date: ["дата"], time: ["время"], package: ["пакет", "наименование пакет", "наименование пакета", "программа"], animator: ["аниматор"],
   room: ["комната", "кабинка", "зал"], client: ["клиент", "заказчик", "имя"], phone: ["телефон", "тел", "номер"],
   child: ["ребенок", "ребёнок", "именинник", "имя ребенка"], age: ["возраст"], prepayment: ["предоплата"],
   children: ["количество детей", "кол-во детей", "детей", "дет"], adults: ["количество взрослых", "кол-во взрослых", "взрослых", "взр"],
+  comment: ["комментарий", "примечание", "коммент", "comment", "notes"],
 };
 
 const norm = (s: string) => s.normalize("NFKC").toLocaleLowerCase("ru-RU").replace(/ё/g, "е").replace(/[^a-zа-я0-9]+/g, " ").trim();
@@ -90,6 +92,7 @@ export function parseAge(raw: string): number | null {
 
 const ROOM_ALIASES: Record<string, string[]> = {
   "roblox-room": ["роблокс"], "ice-room": ["айс"], "magic-room": ["мэджик"], "rapunzel-room": ["рапунцель"],
+  "general-hall": ["общий зал", "общий зал 1 этаж"], "general-hall-2f": ["общий зал 2 этаж", "общий зал второй этаж"],
 };
 const PACKAGE_ALIASES: Record<string, string[]> = { "boom-party": ["boom bala party", "boom bala", "бум бала"] };
 const dropWord = (n: string, w: RegExp) => n.replace(w, "").replace(/\s+/g, " ").trim();

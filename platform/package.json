@@ -22,6 +22,8 @@
     "sessions:revoke": "node --no-warnings scripts/revoke-sessions.ts",
     "db:roles": "node --no-warnings scripts/db-roles.ts",
     "sheets:dry-run": "node --no-warnings scripts/sheets-import-dry-run.ts",
+    "sheets:live-sync": "node --conditions=react-server --no-warnings scripts/sheets-live-sync.ts",
+    "sheets:live-sync:dry-run": "node --conditions=react-server --no-warnings scripts/sheets-live-sync.ts --dry-run",
     "preflight": "node --no-warnings scripts/preflight.ts",
     "db:export": "node --no-warnings scripts/export-db.mjs",
     "verify:roles": "node --no-warnings scripts/verify-roles.mjs",
