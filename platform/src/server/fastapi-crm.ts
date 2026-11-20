@@ -40,7 +40,15 @@ export type BookingTimelineReservation = {
   releasedAt?: string | null;
   /** Set for records whose source of truth is currently the Sheets sync; CRM edits are blocked while sync is enabled. */
   sourceManaged?: boolean;
-  sourceState?: "active" | "manual_review" | "source_missing" | null;
+  sourceState?: "active" | "manual_review" | "source_missing" | "crm_managed" | null;
+  /** The record came from Google Sheets and was handed over to the CRM: sync no longer touches it. */
+  sourceHandedOver?: boolean;
+  /** The booking card summary (Booking V2). Null for an event that has no card yet. */
+  card?: {
+    programStatus: "draft" | "approved" | string | null; propsStatus: string | null; invitationStatus: string | null;
+    totalKzt: number | null; pricingStatus: "complete" | "incomplete" | string | null; childName: string | null;
+    childrenTotal: number | null; adultsTotal: number | null; headcountMode: "exact" | "by_fact" | string | null; responsibleName: string | null;
+  } | null;
   sourceDetails?: {
     childName: string | null; childAge: string | null; animator: string | null;
     children: string | null; adults: string | null; prepaymentRaw: string | null; comment: string | null;

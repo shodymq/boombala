@@ -104,7 +104,7 @@ describe("Supabase safety: closed schema, row security, pooler compatibility", (
       assert.ok(await createSession(strict, user.id));
       await setPriceRule(strict, { id: user.id, role: "owner" }, { packageId: "wow-party", ruleType: "date", date: "2027-05-01", amountKzt: 40000 });
       assert.deepEqual(await resolvePrice(strict, "wow-party", "2027-05-01"), { amountKzt: 40000, source: "date" });
-      assert.equal((await catalogSummary(strict)).packages.length, 3);
+      assert.equal((await catalogSummary(strict)).packages.length, 6, "three V4.2 packages and the three archived ones");
     } finally {
       await strict.end();
     }

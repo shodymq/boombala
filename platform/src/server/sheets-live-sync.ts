@@ -41,7 +41,7 @@ type EventRow = {
 type Reservation = { id: string; roomId: string; startsAt: string; endsAt: string; occupiedEndsAt: string; note: string | null; status: string };
 type StoredRecord = {
   source_key: string; fingerprint: string; legacy_key_prefix: string | null; reservation_id: string | null;
-  state: "active" | "manual_review" | "source_missing"; source_row_number: number | null; source_payload: RawRow;
+  state: "active" | "manual_review" | "source_missing" | "crm_managed"; source_row_number: number | null; source_payload: RawRow;
 };
 type ItemStatus = "created" | "updated" | "unchanged" | "conflict" | "error" | "manual_review" | "source_missing" | "historical";
 type Item = { rowNumber: number; sourceKey?: string; status: ItemStatus; safeCode?: string; reservationId?: string | null; event?: EventRow; raw?: RawRow };
@@ -301,6 +301,8 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
       if (event.date < today) { items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, status: "historical" }); continue; }
       const timeline = byDate.get(event.date)!;
       const prior = stored.get(event.sourceKey);
+      // A record handed over to the CRM is managed there from now on: the sheet row is ignored, never moved or released by sync.
+      if (prior?.state === "crm_managed") { items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: prior.reservation_id ?? undefined, status: "unchanged" }); continue; }
       const existingMapped = prior?.reservation_id ? await loadReservation(pool, prior.reservation_id) : undefined;
       const legacyCandidates = [...new Map([...new Set([event.legacyIdentityKey, event.sourceKey].filter((key): key is string => !!key))]
         .flatMap((key) => legacyBlocks.get(key) ?? []).filter((item) => item.status !== "released").map((item) => [item.id, item])).values()];
@@ -404,13 +406,13 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
 
     if (apply) {
       for (const item of unresolved) await upsertManualReview(pool, item);
-      const absent = allRecords.rows.filter((record) => record.state !== "source_missing" && !seen.has(record.source_key));
+      const absent = allRecords.rows.filter((record) => record.state !== "source_missing" && record.state !== "crm_managed" && !seen.has(record.source_key));
       for (const record of absent) {
         await pool.query("UPDATE bb.sheet_sync_records SET state='source_missing',safe_review_code='source_row_missing',missing_since=COALESCE(missing_since,now()),updated_at=now() WHERE source_key=$1", [record.source_key]);
         items.push({ rowNumber: record.source_row_number ?? 0, sourceKey: record.source_key, reservationId: record.reservation_id, status: "source_missing", safeCode: "source_row_missing" });
       }
     } else {
-      const absent = allRecords.rows.filter((record) => record.state !== "source_missing" && !seen.has(record.source_key));
+      const absent = allRecords.rows.filter((record) => record.state !== "source_missing" && record.state !== "crm_managed" && !seen.has(record.source_key));
       for (const record of absent) items.push({ rowNumber: record.source_row_number ?? 0, sourceKey: record.source_key, reservationId: record.reservation_id, status: "source_missing", safeCode: "source_row_missing" });
     }
 

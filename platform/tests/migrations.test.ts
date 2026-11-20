@@ -68,7 +68,7 @@ describe("migrations and DB-level guarantees", () => {
     const oldDir = mkdtempSync(join(tmpdir(), "bb-before-017-"));
     const pre017 = await startTestDb({ migrate: false });
     try {
-      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name !== "017_sheets_live_sync.sql")) {
+      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name < "017_sheets_live_sync.sql")) {
         cpSync(join(MIGRATIONS_DIR, file), join(oldDir, file));
       }
       await migrate(pre017.pool, oldDir);
@@ -89,7 +89,7 @@ describe("migrations and DB-level guarantees", () => {
     const collisionDb = await startTestDb({ migrate: false });
     const collisionDir = mkdtempSync(join(tmpdir(), "bb-room-collision-"));
     try {
-      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name !== "017_sheets_live_sync.sql")) {
+      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name < "017_sheets_live_sync.sql")) {
         cpSync(join(MIGRATIONS_DIR, file), join(collisionDir, file));
       }
       await migrate(collisionDb.pool, collisionDir);

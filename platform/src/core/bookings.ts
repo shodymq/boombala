@@ -293,7 +293,7 @@ export async function releaseReservation(pool: Pool, actor: Actor, reservationId
   if (why && why.length > 300) throw new ValidationError({ reason: "Не больше 300 символов" });
   await withTx(pool, async (tx) => {
     if (process.env.SHEETS_SYNC_ENABLED === "1") {
-      const managed = await tx.query("SELECT 1 FROM bb.sheet_sync_records WHERE reservation_id=$1", [reservationId]);
+      const managed = await tx.query("SELECT 1 FROM bb.sheet_sync_records WHERE reservation_id=$1 AND state <> 'crm_managed'", [reservationId]);
       if (managed.rows[0]) throw new ConflictError("source_managed_read_only");
     }
     const { rows } = await tx.query<{ kind: string; lead_request_id: string | null }>(
