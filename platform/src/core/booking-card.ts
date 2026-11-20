@@ -353,7 +353,7 @@ async function writeEvent(tx: Client, cardId: string, reservationId: string, act
 
 async function assertResponsible(db: Queryable, userId: string): Promise<void> {
   const { rows } = await db.query("SELECT 1 FROM bb.users WHERE id = $1 AND is_active AND role IN ('owner', 'manager')", [userId]);
-  if (!rows[0]) throw new ValidationError({ responsibleUserId: "Ответственным может быть активный менеджер или владелец" });
+  if (!rows[0]) throw new ConflictError("responsible_invalid");
 }
 
 /** Whether `value` is a canonical UUID (the database would reject anything else with a 22P02 instead of a field error). */
@@ -452,15 +452,20 @@ export async function saveCard(tx: Client, actorId: string, reservationId: strin
     if (!terms) errors.selections = "У события нет пакета, выбор программы недоступен";
     else Object.assign(errors, validateSelections(terms, next.selections, false));
   }
-  if (Object.keys(errors).length) throw new ValidationError(errors);
+  if (Object.keys(errors).length) {
+    // Business-rule refusals carry a stable code the screen can explain; malformed values stay a generic validation error.
+    if (errors.selections || Object.keys(errors).some((k) => (OPTION_KINDS as readonly string[]).includes(k))) throw new ConflictError("program_option_not_allowed");
+    if (errors.invitationStatus) throw new ConflictError("invitation_not_applicable");
+    throw new ValidationError(errors);
+  }
 
   // Program approval is checked against the package on the server. Editing the choice of an approved program reopens it.
   let programEvent: "program_approved" | "program_reopened" | null = null;
   const selectionsChanged = patch.selections !== undefined && JSON.stringify(sortSel(before.selections)) !== JSON.stringify(sortSel(next.selections));
   if (patch.programStatus === "approved" && (before.programStatus !== "approved" || selectionsChanged)) {
-    if (!terms) throw new ValidationError({ programStatus: "У события нет пакета" });
+    if (!terms) throw new ConflictError("program_needs_package");
     const approvalErrors = validateSelections(terms, next.selections, true);
-    if (Object.keys(approvalErrors).length) throw new ValidationError({ ...approvalErrors, programStatus: "Программа заполнена не полностью" });
+    if (Object.keys(approvalErrors).length) throw new ConflictError("program_incomplete");
     next.programStatus = "approved";
     programEvent = "program_approved";
   } else if (before.programStatus === "approved" && (patch.programStatus === "draft" || selectionsChanged)) {
@@ -549,11 +554,14 @@ export interface BookingCardView {
   released: boolean;
   version: number | null;
   packageId: string | null;
+  packageName: string | null;
   termsVersion: string | null;
   fields: CardFields;
   terms: PackageTerms | null;
   optionNames: OptionName[];
   pricing: PricingResult;
+  /** The agreed package amount frozen on the reservation. */
+  baseKzt: number | null;
   baseSource: string | null;
   paidKzt: number;
   remainingKzt: number | null;
@@ -564,6 +572,8 @@ export interface BookingCardView {
   history: HistoryEntry[];
   customer: { name: string | null; phone: string | null };
   eventDate: string;
+  /** Who may be named the responsible manager: active owners and managers (names only). */
+  staff: Array<{ id: string; name: string }>;
 }
 
 export async function getCardView(db: Queryable, reservationId: string): Promise<BookingCardView> {
@@ -573,7 +583,8 @@ export async function getCardView(db: Queryable, reservationId: string): Promise
   const terms = res.package_id ? await loadTerms(db, res.package_id, row?.terms_version) : null;
   const fields = row ? fieldsOf(row) : emptyFields(res, terms);
   const pricing = await price(db, res, terms, fields);
-  const [paid, names, history, people] = await Promise.all([
+  const packageName = res.package_id ? await db.query<{ name: string }>("SELECT name FROM bb.packages WHERE id = $1", [res.package_id]) : { rows: [] as { name: string }[] };
+  const [paid, names, history, people, staff] = await Promise.all([
     res.lead_request_id ? db.query<{ amount_kzt: number }>("SELECT amount_kzt FROM bb.manual_payment_facts WHERE lead_request_id = $1", [res.lead_request_id]) : Promise.resolve({ rows: [] as { amount_kzt: number }[] }),
     listOptionNames(db),
     row
@@ -583,6 +594,7 @@ export async function getCardView(db: Queryable, reservationId: string): Promise
         )
       : Promise.resolve({ rows: [] as { id: string; created_at: Date; action: string; changes: Record<string, unknown>; name: string | null }[] }),
     db.query<{ id: string; name: string }>("SELECT id, name FROM bb.users WHERE id = ANY($1::uuid[])", [[row?.created_by ?? res.created_by, fields.responsibleUserId, row?.updated_by].filter((x): x is string => typeof x === "string")]),
+    db.query<{ id: string; name: string }>("SELECT id, name FROM bb.users WHERE is_active AND role IN ('owner', 'manager') ORDER BY name, id"),
   ]);
   const name = (id: string | null | undefined) => (id ? people.rows.find((p) => p.id === id)?.name ?? null : null);
   const paidKzt = paid.rows[0]?.amount_kzt ?? 0;
@@ -593,11 +605,13 @@ export async function getCardView(db: Queryable, reservationId: string): Promise
     released: res.released_at !== null,
     version: row?.version ?? null,
     packageId: res.package_id,
+    packageName: packageName.rows[0]?.name ?? null,
     termsVersion: row?.terms_version ?? terms?.version ?? null,
     fields,
     terms,
     optionNames: names,
     pricing,
+    baseKzt: res.kind === "booking" ? res.price_kzt : null,
     baseSource: res.price_source,
     paidKzt,
     remainingKzt: remainingFor(pricing.totalKzt, paidKzt),
@@ -608,6 +622,7 @@ export async function getCardView(db: Queryable, reservationId: string): Promise
     history: history.rows.map((h) => ({ id: Number(h.id), at: h.created_at.toISOString(), action: h.action, actorName: h.name, changes: h.changes })),
     customer: { name: res.contact_name, phone: res.contact_phone },
     eventDate: res.slot_date,
+    staff: staff.rows,
   };
 }
 

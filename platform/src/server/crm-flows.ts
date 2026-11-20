@@ -27,6 +27,8 @@ export type NewBookingInput = {
   prepaymentKzt: number;
   prepaymentMethod: "cash" | "card_terminal" | "bank_transfer" | "other_manual";
   note?: string;
+  /** Booking V2 card fields recorded with the booking (all optional: the card is filled gradually). */
+  card?: Record<string, unknown>;
   idempotencyKey: string;
 };
 
@@ -38,6 +40,7 @@ export type ConfirmPaidInput = {
   startTime: string;
   packageId: string;
   agreedPriceKzt: number;
+  card?: Record<string, unknown>;
   idempotencyKey: string;
 };
 
@@ -76,6 +79,15 @@ const KNOWN_ERRORS = new Set([
   "availability_unavailable",
   "staff_not_linked",
   "paid_request_pending",
+  "card_version_conflict",
+  "program_incomplete",
+  "program_option_not_allowed",
+  "program_needs_package",
+  "invitation_not_applicable",
+  "responsible_invalid",
+  "not_sheet_managed",
+  "already_handed_over",
+  "source_managed_read_only",
 ]);
 
 /** A fixed code for the page; the page owns the Russian text. Unexpected errors are logged by name only. */
@@ -167,6 +179,7 @@ export async function createBookingFlow(client: BookingWriter, input: NewBooking
       agreedPriceKzt: input.agreedPriceKzt,
       idempotencyKey: `${input.idempotencyKey}:confirm`,
       note: input.note,
+      ...(input.card ? { card: input.card } : {}),
     });
     return settled(confirmed, requestId);
   } catch (error) {
@@ -190,6 +203,7 @@ export async function confirmPaidRequestFlow(client: BookingWriter, input: Confi
       packageId: input.packageId,
       agreedPriceKzt: input.agreedPriceKzt,
       idempotencyKey: `${input.idempotencyKey}:confirm`,
+      ...(input.card ? { card: input.card } : {}),
     });
     return settled(confirmed, input.requestId);
   } catch (error) {
@@ -226,6 +240,7 @@ export async function continueRequestFlow(client: BookingWriter, input: Continue
       agreedPriceKzt: input.agreedPriceKzt,
       idempotencyKey: `${input.idempotencyKey}:confirm`,
       note: input.note,
+      ...(input.card ? { card: input.card } : {}),
     });
     return settled(confirmed, input.requestId);
   } catch (error) {

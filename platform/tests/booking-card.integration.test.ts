@@ -127,8 +127,8 @@ describe("Birthday CRM V2: the booking card", () => {
     assert.equal(afterBoris.updatedByName, "Борис");
 
     // Program: an out-of-package show is refused; an incomplete program cannot be approved; a complete one can.
-    await assert.rejects(save(boris, booked.id, afterBoris.version, { selections: [{ kind: "show", optionId: "beauty-bar" }] }), ValidationError);
-    await assert.rejects(save(boris, booked.id, afterBoris.version, { programStatus: "approved" }), ValidationError);
+    await assert.rejects(save(boris, booked.id, afterBoris.version, { selections: [{ kind: "show", optionId: "beauty-bar" }] }), (e: unknown) => e instanceof ConflictError && e.message === "program_option_not_allowed");
+    await assert.rejects(save(boris, booked.id, afterBoris.version, { programStatus: "approved" }), (e: unknown) => e instanceof ConflictError && e.message === "program_incomplete");
     const approved = await save(boris, booked.id, afterBoris.version, {
       selections: [{ kind: "animation", optionId: "board-games" }, { kind: "show", optionId: "silver-show" }, { kind: "show", optionId: "neon-show" }, { kind: "challenge", optionId: "fortune-wheel" }],
       programStatus: "approved",
@@ -188,7 +188,7 @@ describe("Birthday CRM V2: the booking card", () => {
     assert.equal(settled.pricing.totalKzt, 79900 + 20000 + 15000, "agreed price + meal + services");
     assert.equal(settled.remainingKzt, 79900 + 20000 + 15000 - 10000);
     // Online invitation belongs to Boom Bala only.
-    await assert.rejects(save(anna, booked.id, settled.version, { invitationStatus: "sent" }), ValidationError);
+    await assert.rejects(save(anna, booked.id, settled.version, { invitationStatus: "sent" }), (e: unknown) => e instanceof ConflictError && e.message === "invitation_not_applicable");
   });
 
   it("Boom Bala: two shows, one master class, one challenge; invitation status; approval validates on the server", async () => {
@@ -198,7 +198,7 @@ describe("Birthday CRM V2: the booking card", () => {
     const c = await get(booked.id);
     assert.equal(c.fields.invitationStatus, "not_started");
     assert.equal(c.terms?.rules.find((r) => r.kind === "show")?.options.length, 6);
-    await assert.rejects(save(anna, booked.id, c.version, { selections: [{ kind: "master_class", optionId: "slime" }, { kind: "master_class", optionId: "kapitoshka" }] }), ValidationError, "one master class only");
+    await assert.rejects(save(anna, booked.id, c.version, { selections: [{ kind: "master_class", optionId: "slime" }, { kind: "master_class", optionId: "kapitoshka" }] }), ConflictError, "one master class only");
     const done = await save(anna, booked.id, c.version, {
       selections: [{ kind: "show", optionId: "beauty-bar" }, { kind: "show", optionId: "cotton-candy-show" }, { kind: "master_class", optionId: "keychain-painting" }, { kind: "challenge", optionId: "bottle-challenge" }],
       programStatus: "approved", invitationStatus: "in_progress", animationNote: "Сценарий согласован с организатором",
