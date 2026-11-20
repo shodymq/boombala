@@ -20,8 +20,9 @@ The owner of the spreadsheet performs this once; it modifies the source by addin
 2. Add `Code.gs` from `deploy/kz/google-apps-script/Code.gs`. In **Project Settings**, show `appsscript.json` and replace its contents with the checked-in manifest from the same directory.
 3. In **Project Settings → Script properties**, add `CRM_SYNC_EXPECTED_SPREADSHEET_ID` with the spreadsheet ID copied from its URL. Save the project. The ID is a locator, not a credential; the script uses it only to refuse execution against a different spreadsheet.
 4. Select `setupCrmSyncIdAutomation` and click **Run** while signed in as the spreadsheet owner. Review the OAuth scope request and approve it as the owner. The script checks the configured spreadsheet ID and owner account before changing anything.
-5. Confirm the `CRM Sync ID` column was appended to `Лист1`, existing non-empty rows received UUID values, and that column is protected from manager edits. Two installable triggers then fill IDs when rows are edited or inserted. The UUID is immutable in ordinary manager use; sorting/inserting rows does not change it.
-6. Do not copy the ID column into another sheet, clear it, or regenerate IDs. If the duplicate-ID guard fails, stop and reconcile with the owner; do not clear and rerun IDs.
+5. Confirm the `CRM Sync ID` column was appended to `Лист1`, existing non-empty rows received UUID values, and that column is protected from manager edits. The edit trigger assigns IDs when business cells are entered or pasted; an inserted blank row receives its ID when its business cells are first edited. If a paste event identifies the copied destination row, it keeps the existing row's UUID and assigns a fresh one to the copy.
+6. Sorting must keep each row's ID attached to its business fields. Use a filter view or sort the full table range including the protected `CRM Sync ID` column; do not sort only a subset of business columns. The change trigger verifies the full used range but never guesses which copy owns a duplicate ID when a structural event has no row range. That duplicate is left unchanged and requires owner review. Copy business cells rather than the protected ID column.
+7. Do not copy the ID column to another sheet, clear it, or regenerate IDs. Verify one unique UUID per non-empty business row after create/paste/insert/sort checks. If a trigger fails, stop and have the owner inspect Apps Script Executions; do not bulk-clear the column.
 
 If the spreadsheet is in a Shared Drive with no individual file owner, this owner-only script stops. Do not weaken its check: have the Drive owner perform an equivalent controlled setup and update the ownership guard in a reviewed change first.
 
@@ -31,17 +32,18 @@ If the spreadsheet is in a Shared Drive with no individual file owner, this owne
 2. Under **IAM & Admin → Service Accounts**, create a dedicated account. Do not grant project roles; the sheet-level Viewer grant is the only data access required.
 3. Under that service account, create a JSON key. Download it once and store it securely; never commit it, attach it to GitHub, or send it in chat.
 4. Copy the service account `client_email`. In the spreadsheet’s **Share** dialog, add that exact address as **Viewer**. Keep general access restricted; do not publish the sheet or enable link access.
-5. Install the JSON key on the VPS as `/etc/boombala/sheets-reader.json`, owned by `bbadmin:bbadmin` with mode `0600`. Keep the file outside every release and backup report. Do not print the file or key in shell output.
-6. Run the local/server dry-run procedure below with `SHEETS_SYNC_ENABLED=0`. A 403/404 means the Sheet was not shared with the service account or the API is not enabled; no booking writes should occur.
+5. Install the JSON key on the VPS as `/etc/boombala-sheets/sheets-reader.json`, owned by `bbadmin:bbadmin` with mode `0600`. The dedicated parent directory must allow only the service group to traverse it (`root:bbadmin 0710`). Keep the file outside every release and backup report. Do not print the file or key in shell output.
+6. Run the server dry-run procedure below with `SHEETS_SYNC_ENABLED=0`. A 403/404 means the Sheet was not shared with the service account or the API is not enabled; no booking writes should occur.
 
-1. Apply migration `017_sheets_live_sync.sql` only after staging restore/migration/concurrency checks and normal production change control. It retains existing reservation IDs and defaults current rooms to exclusive. If either shared-zone name/ID already exists under a different catalog contract, migration aborts without changing the old room; reconcile the catalog explicitly first. Run the normal DB-role provisioning after migration so `bb_admin` has access to the two new metadata tables.
-2. Share the spreadsheet read-only with the service account. Do not enable link/public sharing.
-3. Put the service-account JSON at `/etc/boombala/sheets-reader.json`, owner `bbadmin:bbadmin`, mode `0600`. It is read by the app only; never print or commit it.
-4. Add the following values to `/etc/boombala/admin.env` (the CRM process needs the flag to lock source-managed records and the read-only key/HMAC for the Owner button). Create `/etc/boombala/sheets-sync.env`, owner `root:bbadmin`, mode `0640`:
+### Migration and first dry-run
+
+1. Apply migrations `017_sheets_live_sync.sql` then `018_birthday_crm_v2.sql` only after a fresh backup and isolated restore/upgrade proof. Migration 017 retains existing reservation IDs, defaults current rooms to exclusive and adds the two shared zones; it aborts on a catalog collision. Migration 018 adds Pricing V4.2 and booking cards without rewriting reservations or payment facts; legacy packages are archived for new sales while existing references and price history remain. Run normal DB-role provisioning after both migrations, then preflight and compare protected production counts/hashes.
+2. Put the service-account JSON at `/etc/boombala-sheets/sheets-reader.json`, owner `bbadmin:bbadmin`, mode `0600`. Its dedicated parent is `root:bbadmin 0710`; do not loosen `/etc/boombala`, which contains unrelated private environment files. It is read by the app only; never print or commit it.
+3. Add the following values to `/etc/boombala/admin.env` (the CRM process needs the flag to lock source-managed records and the read-only key/HMAC for the Owner button). Create `/etc/boombala/sheets-sync.env`, owner `root:bbadmin`, mode `0640`:
 
    ```text
    SHEETS_SYNC_ENABLED=0
-   GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/etc/boombala/sheets-reader.json
+   GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/etc/boombala-sheets/sheets-reader.json
    SHEETS_SYNC_HMAC_KEY=<random value with at least 32 UTF-8 bytes>
    ```
 
@@ -49,10 +51,29 @@ If the spreadsheet is in a Shared Drive with no individual file owner, this owne
 
    Keep `SHEETS_SYNC_HMAC_KEY` unchanged once the first dry-run completes. The database stores only its SHA-256 fingerprint and refuses a later key change with `sheets_sync_key_changed`; changing the key would otherwise create a different source-ID namespace and could duplicate imports. Rekeying requires a separate reviewed reconciliation, not an env edit.
 
-5. Install the unit files from `systemd/bb-sheets-sync.service.template` and `systemd/bb-sheets-sync.timer`, then run the CLI once with `--dry-run` as `bbadmin`. Compare each source-row/status/reservation-ID digest in the report with the CRM and all 24 previously imported blocks. Dry-run writes aggregate counts and a PII-free row reconciliation (row number, keyed digest prefix, status, safe error code, CRM ID); it does not create/reschedule/release reservations.
+4. Create one random `SHEETS_SYNC_HMAC_KEY` with at least 32 UTF-8 bytes and put the same value in both env files. Keep it unchanged after the first dry-run; the DB stores its SHA-256 fingerprint and refuses key changes to prevent a new identity namespace.
+5. Install the unit files from `systemd/bb-sheets-sync.service.template` and `systemd/bb-sheets-sync.timer`, then run the CLI once with `--dry-run` as `bbadmin`. Compare each source-row/status/reservation-ID digest in the report with the CRM and all 24 previously imported blocks. Dry-run writes run metadata and a PII-free row reconciliation (row number, keyed digest prefix, status, safe error code, CRM ID); it does not create/reschedule/release reservations.
 6. Resolve manual-review and conflict rows with the manager. Only after that approval should the owner set `SHEETS_SYNC_ENABLED=1` in both `/etc/boombala/admin.env` and `/etc/boombala/sheets-sync.env`, restart only `bb-admin.service` to apply its lock, and enable the timer.
 
 The owner-only button on `/sheets-import` runs the same pass. Before the enable flag is set in the admin process environment, it runs dry-run only. Keep both copies of the flag consistent.
+
+## Final cutover: Sheets to CRM
+
+This is the final one-way handoff after managers approve the row-by-row dry-run and the temporary sync has been operating without unresolved conflicts.
+
+1. Announce a Sheets freeze. Managers finish edits and stop creating, moving, or deleting banquet rows. Record the final edit time and do not use a second copy of the spreadsheet as a writer.
+2. Run a final dry-run and reconcile every row against the active CRM calendar, including the 24 existing blocks. Resolve conflicts and missing rows with a manager; do not infer confirmation or payment from a Sheet cell.
+3. Apply the final approved delta through the sync worker. Verify row count/status totals, source IDs, interval/room, and that existing block IDs remain unchanged. Confirm no manual-review or conflict rows remain unresolved.
+4. Stop scheduled/manual sync writes and wait for any active worker to finish:
+
+   ```sh
+   systemctl disable --now bb-sheets-sync.timer
+   systemctl stop bb-sheets-sync.service
+   ```
+
+5. Set `SHEETS_SYNC_ENABLED=0` in both env files and restart only `bb-admin.service`. This unlocks normal staff reschedule/release actions for source-managed blocks; it does not delete blocks or sync history. Verify `/sheets-import` is disabled and the CRM calendar still shows every reconciled event.
+6. Make the old Sheet read-only for managers or archive it. Tell staff the handoff time: from then on, CRM is the only booking writer. Do not re-enable the sync after CRM edits begin; a later Sheet import requires a separately reviewed reconciliation.
+7. After cutover, verify an Owner/Manager can update and release an imported event through CRM, that audit records the action, and that no sync timer or process is active. Do not create a test payment or a test production event for this check.
 
 ## Install, enable, disable
 
