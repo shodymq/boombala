@@ -13,7 +13,8 @@
     "test:fastapi": "node --no-warnings --test scripts/fastapi-core.test.ts",
     "test:lead-api": "node --no-warnings scripts/test-lead-api.mjs",
     "test:lead-form": "node --no-warnings scripts/test-lead-form-mobile.mjs",
-    "test:consent-form": "node --no-warnings scripts/test-consent-form-mobile.mjs"
+    "test:consent-form": "node --no-warnings scripts/test-consent-form-mobile.mjs",
+    "test:legal-pages": "node --no-warnings scripts/test-legal-pages.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
@@ -21,7 +22,8 @@
     "framer-motion": "^14.0.0",
     "next": "16.3.8",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
