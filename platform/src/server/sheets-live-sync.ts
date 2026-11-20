@@ -295,6 +295,7 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
 
     const today = almatyToday(options.now ?? new Date());
     const eligible: EventRow[] = [];
+    const dryRunMoves: Array<{ event: EventRow; reservationId: string; item: Item }> = [];
     const written: Array<{ event: EventRow; id: string }> = [];
     for (const event of events) {
       seen.add(event.sourceKey);
@@ -329,7 +330,12 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
           continue;
         }
         if (!sameInterval) {
-          if (!apply) { items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: existing.id, status: "updated" }); continue; }
+          if (!apply) {
+            const item: Item = { rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: existing.id, status: "updated" };
+            items.push(item);
+            dryRunMoves.push({ event, reservationId: existing.id, item });
+            continue;
+          }
           try {
             const response = await bridgeRescheduleFromSheetSync(pool, worker!, {
               reservationId: existing.id, bookingDate: event.date, startTime: event.time, roomId: event.roomId,
@@ -366,6 +372,43 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
       eligible.push(event);
     }
 
+    // A dry-run must simulate the final schedule, including existing reservations that are moving. Otherwise it
+    // reports an unsafe move as "updated" and can miss move-vs-move or move-vs-create collisions.
+    const dryRunMovingIds = new Set(dryRunMoves.map((move) => move.reservationId));
+    const dryRunConflicts = new Map<string, { code: "room_interval_occupied" | "source_interval_overlap"; reservationId?: string }>();
+    if (!apply) {
+      const candidates = [
+        ...dryRunMoves.map((move) => ({ event: move.event, item: move.item })),
+        ...eligible.map((event) => ({ event, item: undefined })),
+      ];
+      for (const candidate of candidates) {
+        const { event } = candidate;
+        if (event.roomMode === "shared") continue;
+        const start = isoStart(event.date, event.time);
+        const blocking = byDate.get(event.date)!.reservations.find((reservation) =>
+          reservation.roomId === event.roomId && !dryRunMovingIds.has(reservation.id) && hasOverlap(start, start + DURATION_MS, reservation),
+        );
+        if (blocking) dryRunConflicts.set(event.sourceKey, { code: "room_interval_occupied", reservationId: blocking.id });
+      }
+      for (let i = 0; i < candidates.length; i++) for (let j = i + 1; j < candidates.length; j++) {
+        const a = candidates[i].event, b = candidates[j].event;
+        if (a.sourceKey === b.sourceKey || a.roomMode === "shared" || b.roomMode === "shared" || a.date !== b.date || a.roomId !== b.roomId) continue;
+        const aStart = isoStart(a.date, a.time), bStart = isoStart(b.date, b.time);
+        if (aStart < bStart + DURATION_MS && bStart < aStart + DURATION_MS) {
+          dryRunConflicts.set(a.sourceKey, { code: "source_interval_overlap" });
+          dryRunConflicts.set(b.sourceKey, { code: "source_interval_overlap" });
+        }
+      }
+      for (const move of dryRunMoves) {
+        const conflict = dryRunConflicts.get(move.event.sourceKey);
+        if (conflict) {
+          move.item.status = "conflict";
+          move.item.safeCode = conflict.code;
+          if (conflict.reservationId) move.item.reservationId = conflict.reservationId;
+        }
+      }
+    }
+
     // Refuse every overlapping exclusive source pair as a set; shared zones intentionally permit concurrent events.
     const conflicted = new Set<string>();
     for (let i = 0; i < eligible.length; i++) for (let j = i + 1; j < eligible.length; j++) {
@@ -375,14 +418,19 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
       if (aStart < bStart + DURATION_MS && bStart < aStart + DURATION_MS) { conflicted.add(a.sourceKey); conflicted.add(b.sourceKey); }
     }
     for (const event of eligible) {
+      const plannedConflict = dryRunConflicts.get(event.sourceKey);
+      if (plannedConflict) {
+        items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: plannedConflict.reservationId ?? null, status: "conflict", safeCode: plannedConflict.code });
+        continue;
+      }
       if (conflicted.has(event.sourceKey)) {
         if (apply) await persistReview(pool, event, null, "source_interval_overlap");
         items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, status: "conflict", safeCode: "source_interval_overlap" }); continue;
       }
       const timeline = byDate.get(event.date)!;
       const start = isoStart(event.date, event.time);
-      if (event.roomMode !== "shared" && timeline.reservations.some((r) => r.roomId === event.roomId && hasOverlap(start, start + DURATION_MS, r))) {
-        const blocking = timeline.reservations.find((r) => r.roomId === event.roomId && hasOverlap(start, start + DURATION_MS, r));
+      if (event.roomMode !== "shared" && timeline.reservations.some((r) => r.roomId === event.roomId && !dryRunMovingIds.has(r.id) && hasOverlap(start, start + DURATION_MS, r))) {
+        const blocking = timeline.reservations.find((r) => r.roomId === event.roomId && !dryRunMovingIds.has(r.id) && hasOverlap(start, start + DURATION_MS, r));
         if (apply) await persistReview(pool, event, null, "room_interval_occupied");
         items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: blocking?.id ?? null, status: "conflict", safeCode: "room_interval_occupied" }); continue;
       }

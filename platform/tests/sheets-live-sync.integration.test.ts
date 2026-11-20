@@ -112,6 +112,64 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE room_id='sync-test-exclusive' AND released_at IS NULL")).rows[0].n, 1);
   });
 
+  it("dry-run reports an existing reservation move into an occupied interval without changing either block", async () => {
+    process.env.SHEETS_SYNC_ENABLED = "1";
+    const date = "2099-02-25";
+    const id = "event-qa-dry-move-blocked";
+    const initial = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event(id, date, "10:00", "Синтетическая exclusive комната")]) });
+    assert.equal(initial.counts.created, 1);
+    const actor = await db.pool.query<{ id: string }>("SELECT id FROM bb.users WHERE email='sheets-sync@system.invalid'");
+    await db.pool.query(
+      `INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at)
+       VALUES ('block',$1,NULL,'sync-test-exclusive','Синтетическая независимая блокировка',$2,$3::timestamptz,$4::timestamptz)`,
+      [date, actor.rows[0].id, `${date}T17:00:00+05:00`, `${date}T21:00:00+05:00`],
+    );
+    const before = await db.pool.query<{ id: string; starts_at: Date; released_at: Date | null }>("SELECT id,starts_at,released_at FROM bb.slot_reservations WHERE slot_date=$1 ORDER BY id", [date]);
+    const moved = await runSheetsLiveSync({ mode: "dry_run", trigger: "dry_run", pool: db.pool, now: NOW, readSource: async () => sheet([event(id, date, "14:00", "Синтетическая exclusive комната")]) });
+    assert.equal(moved.counts.conflicts, 1, JSON.stringify(moved.counts));
+    assert.equal(moved.counts.updated, 0);
+    const report = await db.pool.query<{ review_items: Array<{ status: string; safeCode: string | null }> }>("SELECT review_items FROM bb.sheet_sync_runs WHERE id=$1", [moved.runId]);
+    assert.equal(report.rows[0].review_items[0].status, "conflict");
+    assert.equal(report.rows[0].review_items[0].safeCode, "room_interval_occupied");
+    const after = await db.pool.query<{ id: string; starts_at: Date; released_at: Date | null }>("SELECT id,starts_at,released_at FROM bb.slot_reservations WHERE slot_date=$1 ORDER BY id", [date]);
+    assert.deepEqual(after.rows, before.rows);
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.manual_payment_facts")).rows[0].n, 0);
+  });
+
+  it("dry-run detects overlapping moves as a set and keeps both original reservations untouched", async () => {
+    process.env.SHEETS_SYNC_ENABLED = "1";
+    const date = "2099-05-26";
+    const firstId = "event-qa-dry-move-pair-1";
+    const secondId = "event-qa-dry-move-pair-2";
+    const newId = "event-qa-dry-move-pair-new";
+    const initial = await runSheetsLiveSync({
+      mode: "apply", trigger: "manual", pool: db.pool, now: NOW,
+      readSource: async () => sheet([
+        event(firstId, date, "10:00", "Синтетическая exclusive комната"),
+        event(secondId, date, "18:00", "Синтетическая exclusive комната"),
+      ]),
+    });
+    assert.equal(initial.counts.created, 2);
+    const before = await db.pool.query<{ id: string; starts_at: Date; released_at: Date | null }>("SELECT id,starts_at,released_at FROM bb.slot_reservations WHERE slot_date=$1 ORDER BY id", [date]);
+    const moved = await runSheetsLiveSync({
+      mode: "dry_run", trigger: "dry_run", pool: db.pool, now: NOW,
+      readSource: async () => sheet([
+        event(firstId, date, "14:00", "Синтетическая exclusive комната"),
+        event(secondId, date, "13:00", "Синтетическая exclusive комната"),
+        event(newId, date, "17:00", "Синтетическая exclusive комната"),
+      ]),
+    });
+    assert.equal(moved.counts.conflicts, 3, JSON.stringify(moved.counts));
+    assert.equal(moved.counts.updated, 0);
+    assert.equal(moved.counts.created, 0);
+    const report = await db.pool.query<{ review_items: Array<{ status: string; safeCode: string | null }> }>("SELECT review_items FROM bb.sheet_sync_runs WHERE id=$1", [moved.runId]);
+    assert.equal(report.rows[0].review_items.length, 3);
+    assert.ok(report.rows[0].review_items.every((item) => item.status === "conflict" && item.safeCode === "source_interval_overlap"));
+    const after = await db.pool.query<{ id: string; starts_at: Date; released_at: Date | null }>("SELECT id,starts_at,released_at FROM bb.slot_reservations WHERE slot_date=$1 ORDER BY id", [date]);
+    assert.deepEqual(after.rows, before.rows);
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.manual_payment_facts")).rows[0].n, 0);
+  });
+
   it("refuses identity-key rotation after a successful dry-run instead of creating a new identity namespace", async () => {
     const original = process.env.SHEETS_SYNC_HMAC_KEY;
     process.env.SHEETS_SYNC_ENABLED = "0";
