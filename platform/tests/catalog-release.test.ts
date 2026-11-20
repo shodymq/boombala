@@ -13,7 +13,7 @@ import { ValidationError } from "../src/core/errors.ts";
 import { makeUser, MIGRATIONS_DIR, seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
 
 /**
- * Release rehearsal on a database that looks like production BEFORE the release: migrations 001..013, the legacy packages on sale with
+ * Release rehearsal on a database that looks like production BEFORE the release: migrations 001..016 (production is at 016), the legacy packages on sale with
  * their real prices, and a legacy booking. The steps are the ones of the runbook: snapshot -> migrate -> seed -> ready check -> the site
  * switch (new enquiries and bookings for V3) -> retire the legacy packages -> final check -> rollback to the snapshot. Nothing that already
  * exists may change along the way: prices of existing bookings, their packages, the price history and the bookings made under V3.
@@ -36,7 +36,7 @@ describe("catalogue release: rehearsal of the switch, the retirement and the rol
   before(async () => {
     db = await startTestDb({ migrate: false });
     legacyDir = mkdtempSync(join(tmpdir(), "bb-prerelease-"));
-    for (const f of readdirSync(MIGRATIONS_DIR)) if (Number(f.slice(0, 3)) <= 13) copyFileSync(join(MIGRATIONS_DIR, f), join(legacyDir, f));
+    for (const f of readdirSync(MIGRATIONS_DIR)) if (Number(f.slice(0, 3)) <= 16) copyFileSync(join(MIGRATIONS_DIR, f), join(legacyDir, f));
     await migrate(db.pool, legacyDir);
     owner = await makeUser(db.pool, "owner", "release.owner@example.test");
 
