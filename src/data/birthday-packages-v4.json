@@ -117,9 +117,12 @@
             "minutes": 15,
             "detail": null,
             "pick": 1,
-            "options": [],
-            "finale": false,
-            "options_note": "Перечень шоу для Happy уточняет менеджер"
+            "options": [
+              "Серебряное шоу",
+              "«Что в коробке?»",
+              "Дино-шоу"
+            ],
+            "finale": false
           },
           {
             "title": "Фигурки из шариков",
@@ -349,9 +352,12 @@
             "minutes": 15,
             "detail": null,
             "pick": 1,
-            "options": [],
-            "finale": false,
-            "options_note": "Happy үшін шоу тізімін менеджер нақтылайды"
+            "options": [
+              "Күміс шоу",
+              "«Қорапта не бар?»",
+              "Дино-шоу"
+            ],
+            "finale": false
           },
           {
             "title": "Шардан жасалған мүсіншелер",

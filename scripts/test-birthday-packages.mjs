@@ -100,8 +100,10 @@ describe("Pricing V4: the programme, minute by minute", () => {
     // HAPPY: the show list is not confirmed, so the card says so instead of copying Star's or Boom's shows
     const happyShow = pick("happy-party", "Одно шоу");
     assert.equal(happyShow.pick, 1);
-    assert.deepEqual(happyShow.options, []);
-    assert.ok(happyShow.optionsNote, "HAPPY shows: the note says the manager confirms the list");
+    assert.equal(happyShow.minutes, 15);
+    assert.deepEqual(happyShow.options, ["Серебряное шоу", "«Что в коробке?»", "Дино-шоу"]);
+    assert.equal(happyShow.optionsNote, undefined, "HAPPY shows: the list is approved, no manager-confirmation note");
+    assert.ok(!/менеджер|уточн/i.test(JSON.stringify(byId["happy-party"].copy)), "HAPPY copy does not send the list back to the manager");
     for (const p of birthdayPackages) {
       for (const item of p.copy.ru.program) {
         if (item.pick === 0) assert.deepEqual(item.options, [], `${p.id} ${item.title}: a fixed item has no options`);
