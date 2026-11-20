@@ -48,11 +48,11 @@ function handleCrmSyncIdEdit(event) {
   }
 }
 
-/** Installable change trigger: catches structural row insertion; onEdit fills IDs after managers enter data. */
+/** Installable change trigger: catches row insertion and sort/other structural edits. */
 function handleCrmSyncIdChange(event) {
   if (!event || !event.source) throw new Error("crm_sync_invalid_change_event");
   assertExpectedSpreadsheet_(event.source);
-  if (event.changeType !== "INSERT_ROW" && event.changeType !== "INSERT_GRID") return;
+  if (!["INSERT_ROW", "INSERT_GRID", "OTHER"].includes(event.changeType)) return;
 
   const sheet = event.source.getSheetByName(CRM_SYNC_ID_CONFIG.sheetName);
   if (!sheet) throw new Error("crm_sync_sheet_not_found");
@@ -153,25 +153,53 @@ function assignIds_(sheet, header, startRow, rowCount) {
   const values = sheet.getRange(startRow, 1, rowCount, lastColumn).getDisplayValues();
   const idsRange = sheet.getRange(startRow, header.idColumn, rowCount, 1);
   const ids = idsRange.getDisplayValues().map((row) => String(row[0] || "").trim());
-  const existing = new Set();
-  for (const id of ids) {
+  const firstDataRow = header.headerRow + 1;
+  const lastDataRow = Math.max(sheet.getLastRow(), header.headerRow);
+  const allIds = lastDataRow >= firstDataRow
+    ? sheet.getRange(firstDataRow, header.idColumn, lastDataRow - header.headerRow, 1).getDisplayValues().map((row) => String(row[0] || "").trim())
+    : [];
+  const idRows = new Map();
+  for (let index = 0; index < allIds.length; index += 1) {
+    const id = allIds[index];
     if (!id) continue;
-    if (existing.has(id)) throw new Error("crm_sync_duplicate_existing_id");
-    existing.add(id);
+    const rows = idRows.get(id) || [];
+    rows.push(firstDataRow + index);
+    idRows.set(id, rows);
   }
 
   let changed = false;
+  const endRow = startRow + rowCount - 1;
+  const existing = new Set(allIds.filter(Boolean));
+
+  // If someone copied a full row (including its protected ID), keep the pre-existing row's
+  // UUID and repair only duplicate IDs inside the changed range. The key never belongs to a row number.
+  for (const [duplicateId, rows] of idRows) {
+    if (rows.length < 2) continue;
+    const keeper = rows.find((row) => row < startRow || row > endRow) || rows[0];
+    for (const row of rows) {
+      if (row === keeper || row < startRow || row > endRow) continue;
+      const index = row - startRow;
+      ids[index] = hasBusinessContent_(values[index], header.businessColumns) ? newUniqueId_(existing) : "";
+      changed = true;
+    }
+    existing.add(duplicateId);
+  }
+
   for (let index = 0; index < values.length; index += 1) {
     if (ids[index] || !hasBusinessContent_(values[index], header.businessColumns)) continue;
-    let id;
-    do { id = Utilities.getUuid(); } while (existing.has(id));
-    ids[index] = id;
-    existing.add(id);
+    ids[index] = newUniqueId_(existing);
     changed = true;
   }
   if (!changed) return;
   idsRange.setNumberFormat("@");
   idsRange.setValues(ids.map((id) => [id]));
+}
+
+function newUniqueId_(existing) {
+  let id;
+  do { id = Utilities.getUuid(); } while (existing.has(id));
+  existing.add(id);
+  return id;
 }
 
 function hasBusinessContent_(row, businessColumns) {
