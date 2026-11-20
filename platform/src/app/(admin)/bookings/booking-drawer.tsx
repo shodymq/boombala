@@ -17,11 +17,11 @@ const METHOD_LABEL = { cash: "Наличные", card_terminal: "Термина�
 const DEFAULT_PREPAYMENT_KZT = 10_000;
 
 /** Right-hand panel (full screen on a phone). Server-rendered and driven by the address, so it works without client scripts. */
-export function Drawer({ title, closeHref, children }: { title: string; closeHref: string; children: React.ReactNode }) {
+export function Drawer({ title, closeHref, children, wide = false }: { title: string; closeHref: string; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={title} data-drawer>
       <Link href={closeHref} scroll={false} aria-label="Закрыть" className="hidden flex-1 bg-ink/40 md:block" />
-      <aside className="flex w-full flex-col overflow-y-auto bg-white p-4 shadow-2xl md:max-w-md">
+      <aside className={`flex w-full flex-col overflow-y-auto bg-white p-4 shadow-2xl ${wide ? "md:max-w-2xl" : "md:max-w-md"}`}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h2 className="text-xl font-black text-grape-800">{title}</h2>
           <Link href={closeHref} scroll={false} className={ghost + " h-9 px-3"}>Закрыть</Link>
@@ -63,6 +63,7 @@ export function ReservationDetails({
   rescheduling,
   rescheduleHref,
   detailHref,
+  cardHref,
 }: {
   r: BookingTimelineReservation;
   roomName: string;
@@ -75,6 +76,7 @@ export function ReservationDetails({
   rescheduling: boolean;
   rescheduleHref: string;
   detailHref: string;
+  cardHref: string;
 }) {
   const isBlock = r.kind === "block";
   const released = r.status === "released";
@@ -84,31 +86,52 @@ export function ReservationDetails({
   return (
     <Drawer title={isBlock ? "Блокировка комнаты" : "Бронь праздника"} closeHref={closeHref}>
       <dl data-reservation-card={r.id}>
-        <Row term="Статус">{released ? "Снята (история)" : isBlock ? "Блокировка" : "Подтверждена"}</Row>
-        {isBlock ? null : <Row term="Клиент">{r.customerName ?? "Скрыто для вашей роли"}</Row>}
-        {isBlock || !r.customerPhone ? null : <Row term="Телефон">{r.customerPhone}</Row>}
-        <Row term="Пакет">{isBlock ? "—" : r.packageName ?? "не указан"}</Row>
+        <Row term="Статус">{released ? "Снята (история)" : r.sourceHandedOver ? "Передано из таблицы в CRM" : r.sourceManaged ? r.sourceState === "source_missing" ? "Импортировано · строка отсутствует · сверка" : r.sourceState === "manual_review" ? "Импортировано · требуется сверка" : "Импортировано из Google Sheets · только чтение" : isBlock ? "Блокировка" : "Подтверждена"}</Row>
+        {!isBlock || r.sourceManaged ? <Row term="Клиент">{r.customerName ?? "Скрыто для вашей роли"}</Row> : null}
+        {(!isBlock || r.sourceManaged) && r.customerPhone ? <Row term="Телефон">{r.customerPhone}</Row> : null}
+        <Row term="Пакет">{isBlock && !r.sourceManaged ? "—" : r.packageName ?? "не указан"}</Row>
         <Row term="Комната">{roomName}</Row>
         <Row term="Дата">{dayLabel}</Row>
         <Row term="Время">{clock(r.startsAt)}–{clock(r.endsAt)} (4 часа)</Row>
         {r.occupiedEndsAt !== r.endsAt ? <Row term="Занято до">{clock(r.occupiedEndsAt)} (с подготовкой)</Row> : null}
+        {r.sourceManaged && r.sourceDetails ? (
+          <>
+            {r.sourceDetails.childName ? <Row term="Именинник">{r.sourceDetails.childName}</Row> : null}
+            {r.sourceDetails.childAge ? <Row term="Возраст">{r.sourceDetails.childAge}</Row> : null}
+            {r.sourceDetails.children ? <Row term="Детей">{r.sourceDetails.children}</Row> : null}
+            {r.sourceDetails.adults ? <Row term="Взрослых">{r.sourceDetails.adults}</Row> : null}
+            {r.sourceDetails.animator ? <Row term="Аниматор">{r.sourceDetails.animator}</Row> : null}
+            {r.sourceDetails.prepaymentRaw ? <Row term="Предоплата из таблицы">{r.sourceDetails.prepaymentRaw} · не подтверждена</Row> : null}
+            {r.sourceDetails.comment ? <Row term="Комментарий">{r.sourceDetails.comment}</Row> : null}
+          </>
+        ) : null}
         {isBlock ? null : (
           <>
             <Row term="Сумма">{r.priceKzt != null ? `${kzt.format(r.priceKzt)} ₸${r.priceSource === "manager_agreed" ? "" : " (ориентир каталога)"}` : "не указана"}</Row>
             <Row term="Предоплата">{pay.tone === "prepaid" ? `${kzt.format(r.paidKzt)} ₸ записана вручную (не онлайн-оплата)` : "не записана"}</Row>
             <Row term="Остаток">{remaining !== null ? `${kzt.format(remaining)} ₸` : "неизвестен: нет согласованной цены"}</Row>
-            <Row term="Ответственный">{r.createdByName ?? "не указан"}</Row>
+            <Row term="Создал">{r.createdByName ?? "не указан"}</Row>
+            <Row term="Ответственный">{r.card?.responsibleName ?? "не назначен"}</Row>
           </>
         )}
+        {r.card ? (
+          <>
+            {r.card.childName ? <Row term="Именинник">{r.card.childName}</Row> : null}
+            <Row term="Гости">{r.card.headcountMode === "by_fact" ? "по факту" : `детей ${r.card.childrenTotal ?? "—"}, взрослых ${r.card.adultsTotal ?? "—"}`}</Row>
+            <Row term="Программа">{r.card.programStatus === "approved" ? "согласована" : "не согласована"}</Row>
+            <Row term="Итого">{r.card.totalKzt !== null ? `${kzt.format(r.card.totalKzt)} ₸` : "не рассчитано (расчёт неполный)"}</Row>
+          </>
+        ) : null}
         <Row term={isBlock ? "Причина" : "Комментарий"}>{r.note ?? "—"}</Row>
         {r.requestId ? <Row term="Заявка №">{r.requestId}</Row> : null}
         {released ? <Row term="Снята">{r.releasedAt ? clock(r.releasedAt) : "—"}</Row> : null}
       </dl>
-      <p className="mt-3 rounded-xl bg-paper p-2 text-xs text-muted">
-        Имя и возраст ребёнка, число детей и взрослых, аниматор и история изменений пока не отдаются API бронирования, поэтому здесь их нет. Ребёнок, указанный при создании, сохраняется в комментарии.
-      </p>
+      {r.sourceManaged ? (
+        <p className="mt-3 rounded-xl bg-paper p-2 text-xs text-muted">Эта запись управляется таблицей «Банкеты». Перенос и отмена в CRM отключены, пока работает синхронизация. Сумма предоплаты из таблицы не считается подтверждением поступления денег.</p>
+      ) : null}
+      <Link href={cardHref} scroll={false} className={ghost + " mt-3"} data-open-card>Открыть карточку{released ? " (история)" : ""}</Link>
 
-      {released ? null : (
+      {released || r.sourceManaged ? null : (
         <div className="mt-4 grid gap-3">
           {isBlock ? null : rescheduling ? (
             <form action={rescheduleAction} className="grid gap-2 rounded-2xl border border-line p-3" aria-label="Перенос брони">
@@ -180,7 +203,17 @@ export function NewBookingForm({
           <StartTimeField defaultValue={defaultStart} quick={quick} />
           <input name="customerName" required maxLength={120} placeholder="Клиент (имя)" aria-label="Имя клиента" className={field} />
           <input name="phone" type="tel" required maxLength={20} placeholder="+7 707 123 45 67" aria-label="Телефон" className={field} />
-          <input name="childName" maxLength={80} placeholder="Ребёнок (имя, возраст) — уйдёт в комментарий" aria-label="Ребёнок" className={field} />
+          <div className="grid grid-cols-[1fr_6rem] gap-2">
+            <input name="childName" maxLength={80} placeholder="Именинник (имя)" aria-label="Имя именинника" className={field} />
+            <input name="childAge" type="number" min={0} max={99} placeholder="Возраст" aria-label="Возраст именинника" className={field} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input name="childrenTotal" type="number" min={0} max={200} placeholder="Детей" aria-label="Детей с именинником" className={field} />
+            <input name="adultsTotal" type="number" min={0} max={200} placeholder="Взрослых" aria-label="Взрослых" className={field} />
+          </div>
+          <select name="preferredLanguage" aria-label="Язык общения" defaultValue="" className={field}>
+            <option value="">Язык общения не указан</option><option value="ru">Русский</option><option value="kk">Қазақша</option>
+          </select>
           <label className={label}>Пакет
             <select name="packageId" required className={field}>{packages.map((p) => <option key={p.id} value={p.id}>{p.name} (от {kzt.format(p.priceFrom)} ₸)</option>)}</select>
           </label>
@@ -225,6 +258,17 @@ export function ContinueRequestForm({ request, rooms, packages, quick, branchId,
           <div className="flex justify-between gap-3"><dt className="text-muted">Телефон</dt><dd className="font-bold">{request.phone}</dd></div>
           {request.children !== null ? <div className="flex justify-between gap-3"><dt className="text-muted">Детей</dt><dd className="font-bold">{request.children}</dd></div> : null}
         </dl>
+        <div className="grid grid-cols-[1fr_6rem] gap-2">
+        <input name="childName" maxLength={80} placeholder="Именинник (имя)" aria-label="Имя именинника" className={field} />
+        <input name="childAge" type="number" min={0} max={99} placeholder="Возраст" aria-label="Возраст именинника" className={field} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+        <input name="childrenTotal" type="number" min={0} max={200} placeholder="Детей" aria-label="Детей с именинником" className={field} />
+        <input name="adultsTotal" type="number" min={0} max={200} placeholder="Взрослых" aria-label="Взрослых" className={field} />
+        </div>
+        <select name="preferredLanguage" aria-label="Язык общения" defaultValue="" className={field}>
+        <option value="">Язык общения не указан</option><option value="ru">Русский</option><option value="kk">Қазақша</option>
+        </select>
         <label className={label}>Дата<input type="date" name="date" required defaultValue={date} className={field} /></label>
         <label className={label}>Комната<select name="roomId" required defaultValue={defaultRoomId} className={field}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
         <StartTimeField defaultValue={defaultStart} quick={quick} />

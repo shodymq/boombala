@@ -4,6 +4,7 @@ import type { Client, Pool } from "./db.ts";
 import { withTx } from "./db.ts";
 import { almatyToday, isValidDate } from "./dates.ts";
 import { ConsentUnavailableError, DocumentsChangedError, ValidationError } from "./errors.ts";
+import { LEGACY_PUBLIC_PACKAGE_IDS } from "./catalog.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
 
 export interface IntakeMeta {
@@ -112,7 +113,10 @@ export async function submitLead(pool: Pool, raw: LeadInput, meta: IntakeMeta = 
 
     const consentDoc = await publishedDoc(tx, "personal_data_consent");
     if (!consentDoc) throw new ConsentUnavailableError();
-    if (packageId && !(await tx.query("SELECT 1 FROM bb.packages WHERE id = $1 AND is_active", [packageId])).rowCount) throw new ValidationError({ packageId: "Неизвестный пакет" });
+    if (packageId && !(await tx.query(
+      "SELECT 1 FROM bb.packages WHERE id = $1 AND (is_active OR id = ANY($2::text[]))",
+      [packageId, [...LEGACY_PUBLIC_PACKAGE_IDS]],
+    )).rowCount) throw new ValidationError({ packageId: "Неизвестный пакет" });
     if (roomId && !(await tx.query("SELECT 1 FROM bb.rooms WHERE id = $1 AND is_active", [roomId])).rowCount) throw new ValidationError({ roomId: "Неизвестная комната" });
 
     const contactId = await upsertContact(tx, name, phone, "birthday_form");

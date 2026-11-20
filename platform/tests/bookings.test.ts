@@ -46,19 +46,39 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     const d = await createDraft(db.pool, owner, { kind: "personal_data_consent", title: "c", body: "text" });
     await approveDocument(db.pool, owner, d.id);
     await publishDocument(db.pool, owner, d.id);
-    roomIds = (await db.pool.query("SELECT id FROM bb.rooms WHERE is_active ORDER BY sort_order")).rows.map((r) => r.id);
+    roomIds = (await db.pool.query("SELECT id FROM bb.rooms WHERE is_active AND occupancy_mode='exclusive' ORDER BY sort_order")).rows.map((r) => r.id);
     pkg = (await db.pool.query("SELECT id FROM bb.packages ORDER BY sort_order LIMIT 1")).rows[0].id;
   });
   after(async () => {
     await db.stop();
   });
 
-  it("the catalog has the four rooms and the three back-to-back slots", async () => {
+  it("the catalog has four exclusive rooms and two CRM-only shared zones, plus the hourly slots", async () => {
     assert.equal(roomIds.length, 4);
-    const names = (await db.pool.query("SELECT name FROM bb.rooms ORDER BY sort_order")).rows.map((r) => r.name);
-    assert.deepEqual(names.map((n: string) => n.split(" ")[0]), ["Roblox", "Ice", "Magic", "Rapunzel"]);
+    const names = (await db.pool.query("SELECT id,name,occupancy_mode FROM bb.rooms WHERE is_active ORDER BY sort_order")).rows;
+    assert.deepEqual(names.slice(0, 4).map((r: { id: string; name: string; occupancy_mode: string }) => [r.id, r.name, r.occupancy_mode]), [
+      ["roblox-room", "Roblox Room", "exclusive"], ["ice-room", "Ice Room", "exclusive"], ["magic-room", "Magic Room", "exclusive"], ["rapunzel-room", "Rapunzel Room", "exclusive"],
+    ]);
+    assert.deepEqual(names.slice(4).map((r: { id: string; name: string; occupancy_mode: string }) => [r.id, r.name, r.occupancy_mode]), [
+      ["general-hall", "Общий зал", "shared"], ["general-hall-2f", "Общий зал 2 этаж", "shared"],
+    ]);
     const slots = (await db.pool.query("SELECT to_char(starts_at,'HH24:MI') s, to_char(ends_at,'HH24:MI') e FROM bb.time_slots ORDER BY starts_at, id")).rows;
     assert.deepEqual(slots.map((x) => `${x.s}-${x.e}`), ["10:00-14:00", "11:00-15:00", "12:00-16:00", "13:00-17:00", "14:00-18:00", "15:00-19:00", "16:00-20:00", "17:00-21:00", "18:00-22:00"]);
+  });
+
+  it("keeps the current public form's archived package IDs working without reopening them for CRM sales", async () => {
+    const legacyIds = ["wow-party", "magic-party", "boom-party"];
+    const activeIds = (await db.pool.query("SELECT id FROM bb.packages WHERE is_active ORDER BY sort_order, id")).rows.map((r) => r.id);
+    assert.deepEqual(activeIds, ["happy-party", "star-party", "boom-bala-party"]);
+
+    const date = nextDay();
+    const availability = await dayAvailability(db.pool, date);
+    for (const id of legacyIds) {
+      assert.ok(availability.prices[id], `the public form receives a price for ${id}`);
+      assert.equal((await db.pool.query("SELECT is_active FROM bb.packages WHERE id=$1", [id])).rows[0].is_active, false);
+      const leadId = await lead({ date, packageId: id });
+      assert.equal((await db.pool.query("SELECT package_id FROM bb.lead_requests WHERE id=$1", [leadId])).rows[0].package_id, id);
+    }
   });
 
   it("an enquiry does NOT occupy a slot; confirmation does", async () => {
@@ -173,7 +193,7 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     const date = nextDay();
     const sql = `INSERT INTO bb.slot_reservations (kind, slot_date, slot_id, room_id, created_by) VALUES ('block', $1, 1, $2, $3)`;
     await db.pool.query(sql, [date, roomIds[0], owner.id]);
-    await assert.rejects(() => db.pool.query(sql, [date, roomIds[0], owner.id]), (e: { code?: string; constraint?: string }) => e.code === "23P01" && e.constraint === "slot_reservations_active_room_interval_excl");
+    await assert.rejects(() => db.pool.query(sql, [date, roomIds[0], owner.id]), (e: { code?: string; constraint?: string }) => e.code === "23P01" && e.constraint === "slot_reservations_active_occupancy_interval_excl");
   });
 
   it("cancelling frees the cell; the cancelled row stays as history and can be booked again", async () => {

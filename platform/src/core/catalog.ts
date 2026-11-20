@@ -7,11 +7,19 @@ import type { RequestMeta } from "./users.ts";
 
 export const BUSINESS_TIME_ZONE = "Asia/Almaty";
 
+/**
+ * IDs still sent by the currently deployed public birthday form. Migration 018 archives these packages from CRM sales,
+ * but the public site has its own release cycle. Keep accepting enquiries and serving their historical price labels until
+ * that site is updated; booking confirmation still requires an active package in `priceOrFail`.
+ */
+export const LEGACY_PUBLIC_PACKAGE_IDS = ["wow-party", "magic-party", "boom-party"] as const;
+
 export interface CatalogItem {
   id: string;
   name: string;
   sortOrder: number;
   isActive: boolean;
+  occupancyMode?: "exclusive" | "shared";
 }
 
 export interface TimeSlot {
@@ -26,8 +34,8 @@ export async function listPackages(db: Queryable): Promise<CatalogItem[]> {
 }
 
 export async function listRooms(db: Queryable): Promise<CatalogItem[]> {
-  const { rows } = await db.query("SELECT id, name, sort_order, is_active FROM bb.rooms ORDER BY sort_order, id");
-  return rows.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, isActive: r.is_active }));
+  const { rows } = await db.query("SELECT id, name, sort_order, is_active, occupancy_mode FROM bb.rooms ORDER BY sort_order, id");
+  return rows.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, isActive: r.is_active, occupancyMode: r.occupancy_mode === "shared" ? "shared" : "exclusive" }));
 }
 
 export async function listSlots(db: Queryable): Promise<TimeSlot[]> {

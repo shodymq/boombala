@@ -21,10 +21,17 @@ describe("catalog seeded from the public site and price hierarchy", () => {
 
   it("packages, rooms and prices equal the data of the public site", async () => {
     const packages = await listPackages(db.pool);
-    assert.deepEqual(packages.map((p) => [p.id, p.name]), birthdayPackages.map((p) => [p.id, p.name]));
+    // Every package of the public site exists with the site's id and name. Pricing V4.2 adds three packages and archives the
+    // three old ones for new sales (they stay as history).
+    for (const site of birthdayPackages) assert.equal(packages.find((p) => p.id === site.id)?.name, site.name, site.id);
+    assert.deepEqual(packages.filter((p) => p.isActive).map((p) => p.id), ["happy-party", "star-party", "boom-bala-party"]);
+    assert.deepEqual(packages.filter((p) => !p.isActive).map((p) => p.id).sort(), ["boom-party", "magic-party", "wow-party"]);
     const rooms = await listRooms(db.pool);
-    assert.deepEqual(rooms.map((r) => [r.id, r.name]), birthdayRooms.map((r) => [r.id, r.name]));
-    assert.deepEqual(rooms.map((r) => r.id), ["roblox-room", "ice-room", "magic-room", "rapunzel-room"]);
+    assert.deepEqual(rooms.slice(0, birthdayRooms.length).map((r) => [r.id, r.name]), birthdayRooms.map((r) => [r.id, r.name]));
+    assert.deepEqual(rooms.slice(-2).map((r) => [r.id, r.name, r.occupancyMode]), [
+      ["general-hall", "Общий зал", "shared"], ["general-hall-2f", "Общий зал 2 этаж", "shared"],
+    ]);
+    assert.deepEqual(rooms.slice(0, 4).map((r) => r.id), ["roblox-room", "ice-room", "magic-room", "rapunzel-room"]);
     const summary = await catalogSummary(db.pool);
     for (const site of birthdayPackages) {
       const row = summary.packages.find((p) => p.id === site.id)!;
