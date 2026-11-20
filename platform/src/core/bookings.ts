@@ -5,7 +5,7 @@ import { almatyToday, isValidDate } from "./dates.ts";
 import { ConflictError, ValidationError } from "./errors.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
 import { assertCan, type Actor } from "./rbac.ts";
-import { resolvePrice, type PriceSource } from "./catalog.ts";
+import { LEGACY_PUBLIC_PACKAGE_IDS, resolvePrice, type PriceSource } from "./catalog.ts";
 import { almatyWindow } from "./booking-calendar.ts";
 import type { RequestMeta } from "./users.ts";
 
@@ -384,7 +384,10 @@ export async function dayAvailability(db: Queryable, date: string): Promise<DayA
       "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY starts_at, id",
     ),
     db.query<{ room_id: string; starts_at: string | Date; ends_at: string | Date }>("SELECT room_id, starts_at, ends_at FROM bb.slot_reservations WHERE slot_date = $1 AND released_at IS NULL", [date]),
-    db.query<{ id: string }>("SELECT id FROM bb.packages WHERE is_active ORDER BY sort_order, id"),
+    db.query<{ id: string }>(
+      "SELECT id FROM bb.packages WHERE is_active OR id = ANY($1::text[]) ORDER BY sort_order, id",
+      [[...LEGACY_PUBLIC_PACKAGE_IDS]],
+    ),
   ]);
   const prices: DayAvailability["prices"] = {};
   for (const p of packages.rows) prices[p.id] = await resolvePrice(db, p.id, date);

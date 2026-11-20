@@ -7,6 +7,13 @@ import type { RequestMeta } from "./users.ts";
 
 export const BUSINESS_TIME_ZONE = "Asia/Almaty";
 
+/**
+ * IDs still sent by the currently deployed public birthday form. Migration 018 archives these packages from CRM sales,
+ * but the public site has its own release cycle. Keep accepting enquiries and serving their historical price labels until
+ * that site is updated; booking confirmation still requires an active package in `priceOrFail`.
+ */
+export const LEGACY_PUBLIC_PACKAGE_IDS = ["wow-party", "magic-party", "boom-party"] as const;
+
 export interface CatalogItem {
   id: string;
   name: string;

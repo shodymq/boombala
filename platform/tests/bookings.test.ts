@@ -66,6 +66,21 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     assert.deepEqual(slots.map((x) => `${x.s}-${x.e}`), ["10:00-14:00", "11:00-15:00", "12:00-16:00", "13:00-17:00", "14:00-18:00", "15:00-19:00", "16:00-20:00", "17:00-21:00", "18:00-22:00"]);
   });
 
+  it("keeps the current public form's archived package IDs working without reopening them for CRM sales", async () => {
+    const legacyIds = ["wow-party", "magic-party", "boom-party"];
+    const activeIds = (await db.pool.query("SELECT id FROM bb.packages WHERE is_active ORDER BY sort_order, id")).rows.map((r) => r.id);
+    assert.deepEqual(activeIds, ["happy-party", "star-party", "boom-bala-party"]);
+
+    const date = nextDay();
+    const availability = await dayAvailability(db.pool, date);
+    for (const id of legacyIds) {
+      assert.ok(availability.prices[id], `the public form receives a price for ${id}`);
+      assert.equal((await db.pool.query("SELECT is_active FROM bb.packages WHERE id=$1", [id])).rows[0].is_active, false);
+      const leadId = await lead({ date, packageId: id });
+      assert.equal((await db.pool.query("SELECT package_id FROM bb.lead_requests WHERE id=$1", [leadId])).rows[0].package_id, id);
+    }
+  });
+
   it("an enquiry does NOT occupy a slot; confirmation does", async () => {
     const date = nextDay();
     const id = await lead({ date, roomId: roomIds[0], slotId: 1 });
