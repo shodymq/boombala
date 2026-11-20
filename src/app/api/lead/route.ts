@@ -155,6 +155,10 @@ export async function POST(request: Request) {
       } catch (error) {
         const kind = error instanceof PlatformError ? error.kind : "unavailable";
         console.warn(`[lead] platform path failed (${kind}); pipeline=${pipeline}`);
+        // The platform no longer sells this package: say so to the visitor, never silently pick another package.
+        if (error instanceof PlatformError && error.kind === "package_unavailable") {
+          return json({ ok: false, error: "validation", fieldErrors: { package: "Этот пакет больше не продаётся. Выберите один из актуальных пакетов." } }, 400);
+        }
         if (pipeline === "strict") return json({ ok: false, error: "delivery_failed" }, 502);
         // dual: continue with the direct Telegram path, and say so in the message (the lead is NOT in the CRM)
         crmNote = "⚠️ ТОЛЬКО В TELEGRAM: в CRM не сохранена (платформа была недоступна). Проверьте CRM по номеру, при отсутствии внесите вручную.";

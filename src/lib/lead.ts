@@ -8,7 +8,7 @@ export const PACKAGE_OPTIONS: readonly { value: string; label: string }[] = [
   { value: "undecided", label: "Ещё не определились" },
 ];
 
-export type LeadPackage = (typeof birthdayPackages)[number]["id"] | "undecided";
+export type LeadPackage = (typeof birthdayPackages)[number]["id"] | (typeof RETIRED_PACKAGE_IDS)[number] | "undecided";
 
 export interface LeadFields {
   name: string;
@@ -125,12 +125,13 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
   const slotWrongType = input.slot !== undefined && input.slot !== null && typeof input.slot !== "string";
   if (slotWrongType || (slotRaw && !BOOKING_SLOTS.some((x) => x.id === slotRaw))) errors.slot = "Выберите время из списка";
 
-  // A retired package (WOW / MAGIC / old BOOM) from an old cached page is refused with a clear message: it never becomes another package.
+  // A package id is passed through unchanged: the platform decides what is on sale (it refuses an inactive id, and the
+  // site turns that refusal into the message "this package is no longer sold"). Old cached pages therefore keep working
+  // until the legacy packages are retired, and nothing is ever silently replaced by another package.
   const pkgRaw = str(input.package);
-  const retired = (RETIRED_PACKAGE_IDS as readonly string[]).includes(pkgRaw);
-  const pkg = pkgRaw === "undecided" || isPackageId(pkgRaw) ? (pkgRaw as LeadPackage) : null;
-  if (retired) errors.package = "Этот пакет больше не продаётся. Выберите один из актуальных пакетов.";
-  else if (!pkg) errors.package = "Выберите пакет";
+  const known = pkgRaw === "undecided" || isPackageId(pkgRaw) || (RETIRED_PACKAGE_IDS as readonly string[]).includes(pkgRaw);
+  const pkg = known ? (pkgRaw as LeadPackage) : null;
+  if (!pkg) errors.package = "Выберите пакет";
 
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg!, room: roomRaw || null, slot: slotRaw || null } };

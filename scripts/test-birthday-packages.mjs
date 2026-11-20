@@ -148,11 +148,11 @@ describe("interface and lead form", () => {
     assert.deepEqual(PACKAGE_OPTIONS.map((o) => o.value), ["happy-party", "star-party", "boom-bala-party", "undecided"]);
   });
 
-  it("a retired package is refused with a clear message, never silently replaced", () => {
+  it("a retired id is passed through unchanged (the platform decides what is on sale, never a silent replacement)", () => {
     for (const retired of RETIRED_PACKAGE_IDS) {
       const r = validateLead({ name: "Айгуль", phone: "+77071234567", date: "2099-05-10", consent: true, package: retired });
-      assert.equal(r.ok, false, retired);
-      assert.match(r.errors.package, /больше не продаётся/, retired);
+      assert.equal(r.ok, true, retired);
+      assert.equal(r.data.package, retired, retired);
     }
     const ok = validateLead({ name: "Айгуль", phone: "+77071234567", date: "2099-05-10", consent: true, package: "boom-bala-party" });
     assert.equal(ok.ok, true);

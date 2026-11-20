@@ -16,7 +16,8 @@ export function leadPipeline(env: Record<string, string | undefined> = process.e
   return v === "dual" || v === "strict" ? v : "telegram-only";
 }
 
-export type PlatformFailure = "not_configured" | "unavailable" | "disabled" | "consent_unavailable" | "rejected" | "documents_changed";
+/** `package_unavailable`: the platform no longer sells this package (an old cached page or a retired id). */
+export type PlatformFailure = "not_configured" | "unavailable" | "disabled" | "consent_unavailable" | "rejected" | "documents_changed" | "package_unavailable";
 
 export class PlatformError extends Error {
   constructor(readonly kind: PlatformFailure) {
@@ -63,6 +64,7 @@ function fail(status: number, data: Record<string, unknown>): never {
   if (status === 503 && data.error === "intake_disabled") throw new PlatformError("disabled");
   if (status === 503 && data.error === "consent_unavailable") throw new PlatformError("consent_unavailable");
   if (status === 409 && data.error === "documents_changed") throw new PlatformError("documents_changed");
+  if (status === 422 && data.error === "validation" && (data.fields as Record<string, unknown> | undefined)?.packageId) throw new PlatformError("package_unavailable");
   if (status >= 500 || status === 401) throw new PlatformError("unavailable");
   throw new PlatformError("rejected");
 }
