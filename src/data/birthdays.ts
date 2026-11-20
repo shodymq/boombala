@@ -61,9 +61,10 @@ function build(id: PackageId, sortOrder: number): BirthdayPackage {
   if (kz.program.length !== ru.program.length || kz.program.some((i, n) => i.minutes !== ru.program[n].minutes || i.pick !== ru.program[n].pick)) {
     throw new Error(`birthday package ${id}: the Kazakh programme does not match the Russian one (items, minutes, choices)`);
   }
+  // The workshop tier comes from the data flag. The public title is "1 мастер-класс на выбор" (no tier word), so the check is presence only.
   const workshopItem = ru.program.find((i) => /мастер-класс/i.test(i.title));
-  const workshop = workshopItem ? (/премиальн/i.test(workshopItem.title) ? "premium" : "standard") : null;
-  if ((raw.workshop ?? null) !== workshop) throw new Error(`birthday package ${id}: workshop flag and programme disagree`);
+  const workshop = (raw.workshop ?? null) as "standard" | "premium" | null;
+  if (Boolean(workshopItem) !== Boolean(workshop)) throw new Error(`birthday package ${id}: workshop flag and programme disagree`);
 
   return {
     id,

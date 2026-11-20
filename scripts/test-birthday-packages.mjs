@@ -90,8 +90,11 @@ describe("Pricing V4: the programme, minute by minute", () => {
     assert.equal(pick("star-party", "WOW").pick, 2);
     assert.equal(pick("star-party", "WOW").options.length, 4);
     assert.equal(pick("boom-bala-party", "Два шоу").pick, 2);
-    assert.equal(pick("boom-bala-party", "Два шоу").options.length, 4);
-    assert.equal(pick("boom-bala-party", "премиальный").options.length, 4);
+    assert.equal(pick("boom-bala-party", "Два шоу").options.length, 6);
+    assert.equal(pick("boom-bala-party", "Два шоу").minutes, 35);
+    assert.equal(pick("boom-bala-party", "мастер-класс").pick, 1);
+    assert.equal(pick("boom-bala-party", "мастер-класс").options.length, 6);
+    assert.equal(pick("boom-bala-party", "мастер-класс").minutes, 30);
     assert.equal(pick("star-party", "челлендж").options.length, 4);
     assert.equal(pick("boom-bala-party", "челлендж").options.length, 4);
     // HAPPY: the show list is not confirmed, so the card says so instead of copying Star's or Boom's shows

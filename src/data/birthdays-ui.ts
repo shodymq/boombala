@@ -178,7 +178,7 @@ export const BIRTHDAYS_UI: Record<Locale, BirthdaysUi> = {
     animatorsFixed: (n) => String(n),
     adultsValue: (n) => (n === 0 ? "—" : String(n)),
     roomValue: (h) => `${h} часа`,
-    workshopValue: (k) => (k === "premium" ? "премиальный" : "стандартный"),
+    workshopValue: () => "1 на выбор",
     figuresNotStated: "Не заявлено",
     included: "Входит",
     notIncluded: "Не входит",
@@ -220,7 +220,7 @@ export const BIRTHDAYS_UI: Record<Locale, BirthdaysUi> = {
       },
       {
         title: "Шоу, мастер-класс и челлендж",
-        text: "В STAR выбираются два WOW-шоу и один челлендж. В BOOM BALA PARTY выбираются два шоу или интерактива, один премиальный мастер-класс и один челлендж. Все варианты показаны в карточке пакета. Перечень шоу для HAPPY уточняет менеджер.",
+        text: "В STAR выбираются два WOW-шоу и один челлендж. В BOOM BALA PARTY выбираются два шоу из шести, один мастер-класс из шести и один челлендж. Все варианты показаны в карточке пакета. Перечень шоу для HAPPY уточняет менеджер.",
       },
       {
         title: "Торт",
@@ -316,7 +316,7 @@ export const BIRTHDAYS_UI: Record<Locale, BirthdaysUi> = {
     animatorsFixed: (n) => String(n),
     adultsValue: (n) => (n === 0 ? "—" : String(n)),
     roomValue: (h) => `${h} сағат`,
-    workshopValue: (k) => (k === "premium" ? "премиум" : "стандарт"),
+    workshopValue: () => "1 таңдау бойынша",
     figuresNotStated: "Көрсетілмеген",
     included: "Кіреді",
     notIncluded: "Кірмейді",
@@ -358,7 +358,7 @@ export const BIRTHDAYS_UI: Record<Locale, BirthdaysUi> = {
       },
       {
         title: "Шоу, шеберлік сабағы және челлендж",
-        text: "STAR-да екі WOW-шоу және бір челлендж таңдалады. BOOM BALA PARTY-де екі шоу немесе интерактив, бір премиум шеберлік сабағы және бір челлендж таңдалады. Барлық нұсқа пакет карточкасында көрсетілген. HAPPY үшін шоу тізімін менеджер нақтылайды.",
+        text: "STAR-да екі WOW-шоу және бір челлендж таңдалады. BOOM BALA PARTY-де алты шоудан екеуі, алты шеберлік сабағынан бірі және бір челлендж таңдалады. Барлық нұсқа пакет карточкасында көрсетілген. HAPPY үшін шоу тізімін менеджер нақтылайды.",
       },
       {
         title: "Торт",
