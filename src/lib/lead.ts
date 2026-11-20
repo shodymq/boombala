@@ -1,14 +1,14 @@
 import { siteConfig } from "@/services/config";
 import { ROOM_IDS } from "@/data/birthdayRooms";
+import { birthdayPackages, isPackageId, RETIRED_PACKAGE_IDS } from "@/data/birthdays";
 
-export const PACKAGE_OPTIONS = [
-  { value: "wow-party", label: "WOW PARTY" },
-  { value: "magic-party", label: "MAGIC PARTY" },
-  { value: "boom-party", label: "BOOM PARTY" },
+/** The active packages (Pricing V3) plus "not decided yet". Built from the same config as the page. */
+export const PACKAGE_OPTIONS: readonly { value: string; label: string }[] = [
+  ...birthdayPackages.map((p) => ({ value: p.id, label: p.copy.ru.name })),
   { value: "undecided", label: "Ещё не определились" },
-] as const;
+];
 
-export type LeadPackage = (typeof PACKAGE_OPTIONS)[number]["value"];
+export type LeadPackage = (typeof birthdayPackages)[number]["id"] | "undecided";
 
 export interface LeadFields {
   name: string;
@@ -125,9 +125,12 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
   const slotWrongType = input.slot !== undefined && input.slot !== null && typeof input.slot !== "string";
   if (slotWrongType || (slotRaw && !BOOKING_SLOTS.some((x) => x.id === slotRaw))) errors.slot = "Выберите время из списка";
 
+  // A retired package (WOW / MAGIC / old BOOM) from an old cached page is refused with a clear message: it never becomes another package.
   const pkgRaw = str(input.package);
-  const pkg = PACKAGE_OPTIONS.find((o) => o.value === pkgRaw)?.value;
-  if (!pkg) errors.package = "Выберите пакет";
+  const retired = (RETIRED_PACKAGE_IDS as readonly string[]).includes(pkgRaw);
+  const pkg = pkgRaw === "undecided" || isPackageId(pkgRaw) ? (pkgRaw as LeadPackage) : null;
+  if (retired) errors.package = "Этот пакет больше не продаётся. Выберите один из актуальных пакетов.";
+  else if (!pkg) errors.package = "Выберите пакет";
 
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg!, room: roomRaw || null, slot: slotRaw || null } };

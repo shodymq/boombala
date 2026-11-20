@@ -7,6 +7,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base: MetadataRoute.Sitemap = [
     { url: `${site}/`, changeFrequency: "weekly", priority: 1 },
     { url: `${site}/birthdays`, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${site}/kk/birthdays`, changeFrequency: "weekly", priority: 0.7 },
     { url: `${site}/attractions`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${site}/menu`, changeFrequency: "weekly", priority: 0.7 },
     { url: `${site}/rules`, changeFrequency: "monthly", priority: 0.3 },

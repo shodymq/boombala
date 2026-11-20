@@ -101,7 +101,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
               </select>
               <select name="packageId" defaultValue={lead.packageId ?? ""} required className={input} aria-label="Пакет">
                 <option value="" disabled>Пакет</option>
-                {cat.packages.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {cat.packages.filter((p) => p.isActive || p.id === lead.packageId).map((p) => <option key={p.id} value={p.id}>{p.isActive ? p.name : `${p.name} (снят с продажи)`}</option>)}
               </select>
               <button type="submit" className={btn}>Подтвердить бронь</button>
             </form>

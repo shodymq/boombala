@@ -177,7 +177,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       const phone = "+77019998877";
       const c = await contactOf((await register(name, phone)).registrationId);
       const l = await submitLead(db.pool, lead(name, phone));
-      const { reservationId } = await confirmLead(db.pool, owner, { leadId: l.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party" });
+      const { reservationId } = await confirmLead(db.pool, owner, { leadId: l.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "star-party" });
       await revokeConsent(db.pool, owner, c);
 
       assert.deepEqual((await assessContact(db.pool, owner, c))!.blockers, ["active_booking", "open_enquiry", "booking_record", "enquiry_record"], "a confirmed enquiry is still open");
@@ -191,7 +191,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
 
       // the cell stays protected against a second active reservation
       await assert.rejects(
-        () => createManualBooking(db.pool, owner, { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party", name: "Другой Гость", phone: "+77010000123" }),
+        () => createManualBooking(db.pool, owner, { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "star-party", name: "Другой Гость", phone: "+77010000123" }),
         (e: unknown) => e instanceof ConflictError,
       );
 
@@ -201,11 +201,11 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       const r = (await q("SELECT price_kzt, contact_id, released_at FROM bb.slot_reservations WHERE id = $1", [reservationId])).rows[0];
       assert.ok(r.price_kzt > 0 && String(r.contact_id) === c && r.released_at, "the booking row and its price snapshot are untouched");
       // the freed cell can be booked again (protection intact in both directions)
-      await createManualBooking(db.pool, owner, { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party", name: "Следующий Гость", phone: "+77010000124" });
+      await createManualBooking(db.pool, owner, { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "star-party", name: "Следующий Гость", phone: "+77010000124" });
     });
 
     it("a contact created from a manual booking (not QR) is never anonymised by this mechanism while the booking exists", async () => {
-      await createManualBooking(db.pool, owner, { date: FUTURE, slotId: 2, roomId: "ice-room", packageId: "wow-party", name: "Ручной Клиент", phone: "+77010000555" });
+      await createManualBooking(db.pool, owner, { date: FUTURE, slotId: 2, roomId: "ice-room", packageId: "star-party", name: "Ручной Клиент", phone: "+77010000555" });
       const c = String(await scalar("SELECT id v FROM bb.contacts WHERE phone_e164 = '+77010000555'"));
       await revokeConsent(db.pool, owner, c);
       await assert.rejects(() => anonymizeContact(db.pool, owner, c), ConflictError);

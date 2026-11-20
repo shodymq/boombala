@@ -52,17 +52,17 @@ console.log("## public calendar and enquiry (390x844)");
   await page.getByLabel(/Телефон/).fill("7071230099");
   await page.getByLabel("Желаемая дата").fill(D1);
   // The package is a native <select> on this branch and a branded combobox once the mobile-form hotfix (PR #5) is merged: handle both.
-  if (await page.locator("dialog select[name=package]").count()) await page.locator("dialog select[name=package]").selectOption("wow-party");
+  if (await page.locator("dialog select[name=package]").count()) await page.locator("dialog select[name=package]").selectOption("star-party");
   else {
     await page.locator("dialog button[aria-haspopup=listbox]").first().click();
-    await page.locator('dialog [role=option][data-value="wow-party"]').click();
+    await page.locator('dialog [role=option][data-value="star-party"]').click();
   }
   await page.locator('[data-testid=availability]').waitFor();
   await page.locator('[data-slot="2"]').waitFor({ timeout: 8000 });
   const before = await avail(D1);
   ok(before.ok && before.slots.every((s) => s.freeRoomIds.length === 4), "a fresh date: every slot shows 4 free rooms");
   const priceText = (await page.locator("[data-testid=price]").innerText()).replace(/\s+/g, " ");
-  const expected = before.prices["wow-party"];
+  const expected = before.prices["star-party"];
   ok(expected && priceText.includes(String(expected.amountKzt).replace(/\B(?=(\d{3})+(?!\d))/g, " ")) || priceText.replace(/\D/g, "").includes(String(expected.amountKzt)), `price for the chosen date is shown (${priceText})`);
   await page.locator('[data-slot="2"]').click();
   await page.getByText("Посмотреть свободные даты").click();
@@ -132,7 +132,7 @@ let leadId;
   ok((await cell.getAttribute("data-state")) === "booked", "the grid shows the cell as booked");
   ok((await cell.innerText()).includes("ТЕСТ Календарь"), "the booked cell names the customer");
   const priceSnap = await scalar("SELECT price_kzt AS v FROM bb.slot_reservations WHERE lead_request_id = $1", [leadId]);
-  ok(Number(priceSnap) === (await avail(D1)).prices["wow-party"].amountKzt, "the price is frozen at the price valid for that date");
+  ok(Number(priceSnap) === (await avail(D1)).prices["star-party"].amountKzt, "the price is frozen at the price valid for that date");
   const a = await avail(D1);
   ok(a.slots[1].freeRoomIds.length === 3 && a.slots[0].freeRoomIds.length === 4 && a.slots[2].freeRoomIds.length === 4, "public availability now shows exactly that cell as taken (slots touch, no pause)");
   ok((await page.locator("[data-cell]").count()) === 12, "the grid is 4 rooms x 3 slots");
@@ -163,7 +163,7 @@ console.log("## two managers confirm the same room at the same moment (real brow
     const r = await fetch(`${ADMIN}/api/intake/lead`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${process.env.PLATFORM_INTAKE_TOKEN}` },
-      body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), name: `ТЕСТ Гонка ${runTag} ${n}`, phone: `+7707000${n}${n}${n}${n}`, date: d, consent: true, packageId: "wow-party", slotId: 3, roomId: "ice-room" }),
+      body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), name: `ТЕСТ Гонка ${runTag} ${n}`, phone: `+7707000${n}${n}${n}${n}`, date: d, consent: true, packageId: "star-party", slotId: 3, roomId: "ice-room" }),
     });
     return (await r.json()).leadId;
   };

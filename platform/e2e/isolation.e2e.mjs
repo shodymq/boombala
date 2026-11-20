@@ -273,7 +273,7 @@ try {
   console.log("## 4b. site production profile: fail closed");
   {
     const LEAD_NAME = `ТЕСТ Профиль ${run}`;
-    const body = (phone) => JSON.stringify({ name: LEAD_NAME, phone, date: "2099-06-01", package: "wow-party", consent: true, idempotencyKey: crypto.randomUUID() });
+    const body = (phone) => JSON.stringify({ name: LEAD_NAME, phone, date: "2099-06-01", package: "star-party", consent: true, idempotencyKey: crypto.randomUUID() });
     const post = (site, path, payload) => raw(site.port, path, { method: "POST", host: site.host, headers: { "content-type": "application/json", origin: `http://${site.host}` }, body: payload });
     const leads = async () => Number((await owner.query("SELECT count(*)::int n FROM bb.contacts WHERE name = $1", [LEAD_NAME])).rows[0].n);
     const beforeHits = telegramHits;
