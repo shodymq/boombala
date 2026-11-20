@@ -12,6 +12,7 @@ export interface CatalogItem {
   name: string;
   sortOrder: number;
   isActive: boolean;
+  occupancyMode?: "exclusive" | "shared";
 }
 
 export interface TimeSlot {
@@ -26,8 +27,8 @@ export async function listPackages(db: Queryable): Promise<CatalogItem[]> {
 }
 
 export async function listRooms(db: Queryable): Promise<CatalogItem[]> {
-  const { rows } = await db.query("SELECT id, name, sort_order, is_active FROM bb.rooms ORDER BY sort_order, id");
-  return rows.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, isActive: r.is_active }));
+  const { rows } = await db.query("SELECT id, name, sort_order, is_active, occupancy_mode FROM bb.rooms ORDER BY sort_order, id");
+  return rows.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, isActive: r.is_active, occupancyMode: r.occupancy_mode === "shared" ? "shared" : "exclusive" }));
 }
 
 export async function listSlots(db: Queryable): Promise<TimeSlot[]> {

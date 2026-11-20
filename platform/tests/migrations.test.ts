@@ -64,6 +64,56 @@ describe("migrations and DB-level guarantees", () => {
     await assert.rejects(() => db.pool.query("DELETE FROM time_slots WHERE id = 1"), /cannot be deleted/);
   });
 
+  it("017 preserves existing reservation IDs and makes only the named general halls non-exclusive", async () => {
+    const oldDir = mkdtempSync(join(tmpdir(), "bb-before-017-"));
+    const pre017 = await startTestDb({ migrate: false });
+    try {
+      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name !== "017_sheets_live_sync.sql")) {
+        cpSync(join(MIGRATIONS_DIR, file), join(oldDir, file));
+      }
+      await migrate(pre017.pool, oldDir);
+      const user = await pre017.pool.query<{ id: string }>("INSERT INTO users (email,name,password_hash,role) VALUES ('migration-017@example.test','Migration test','x','manager') RETURNING id");
+      await pre017.pool.query("INSERT INTO rooms (id,name) VALUES ('legacy-room-preserve','Legacy room')");
+      const before = await pre017.pool.query<{ id: string }>(
+        "INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-01-20',NULL,'legacy-room-preserve','kept', $1,'2099-01-20 10:00:00+05','2099-01-20 14:00:00+05') RETURNING id", [user.rows[0].id]);
+      await migrate(pre017.pool, MIGRATIONS_DIR);
+      const after = await pre017.pool.query<{ id: string; occupancy_key: string }>("SELECT id,occupancy_key FROM slot_reservations WHERE id=$1", [before.rows[0].id]);
+      assert.deepEqual(after.rows, [{ id: before.rows[0].id, occupancy_key: "legacy-room-preserve" }]);
+      assert.equal((await pre017.pool.query("SELECT 1 FROM rooms WHERE id='general-hall' AND occupancy_mode='shared'")).rowCount, 1);
+      assert.equal((await pre017.pool.query("SELECT 1 FROM rooms WHERE id='general-hall-2f' AND occupancy_mode='shared'")).rowCount, 1);
+    } finally {
+      await pre017.stop();
+      rmSync(oldDir, { recursive: true, force: true });
+    }
+
+    const collisionDb = await startTestDb({ migrate: false });
+    const collisionDir = mkdtempSync(join(tmpdir(), "bb-room-collision-"));
+    try {
+      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name !== "017_sheets_live_sync.sql")) {
+        cpSync(join(MIGRATIONS_DIR, file), join(collisionDir, file));
+      }
+      await migrate(collisionDb.pool, collisionDir);
+      await collisionDb.pool.query("INSERT INTO rooms (id,name) VALUES ('general-hall','Occupied legacy catalog name')");
+      await assert.rejects(() => migrate(collisionDb.pool, MIGRATIONS_DIR), /017_sheets_live_sync\.sql failed: general-hall catalog collision/);
+      const unchanged = await collisionDb.pool.query("SELECT name FROM rooms WHERE id='general-hall'");
+      assert.equal(unchanged.rows[0].name, "Occupied legacy catalog name");
+      assert.equal((await collisionDb.pool.query("SELECT to_regclass('bb.sheet_sync_runs') t")).rows[0].t, null);
+    } finally {
+      await collisionDb.stop();
+      rmSync(collisionDir, { recursive: true, force: true });
+    }
+
+    const actor = await db.pool.query<{ id: string }>("INSERT INTO users (email,name,password_hash,role) VALUES ('shared-zone@example.test','Shared zone test','x','manager') RETURNING id");
+    const sharedOne = await db.pool.query<{ id: string }>(
+      "INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-02-20',NULL,'general-hall','one',$1,'2099-02-20 10:00:00+05','2099-02-20 14:00:00+05') RETURNING id", [actor.rows[0].id]);
+    const sharedTwo = await db.pool.query<{ id: string }>(
+      "INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-02-20',NULL,'general-hall','two',$1,'2099-02-20 11:00:00+05','2099-02-20 15:00:00+05') RETURNING id", [actor.rows[0].id]);
+    assert.notEqual(sharedOne.rows[0].id, sharedTwo.rows[0].id);
+    await db.pool.query("INSERT INTO rooms (id,name) VALUES ('exclusive-zone-test','Exclusive test')");
+    await db.pool.query("INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-02-20',NULL,'exclusive-zone-test','one',$1,'2099-02-20 10:00:00+05','2099-02-20 14:00:00+05')", [actor.rows[0].id]);
+    await assert.rejects(() => db.pool.query("INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-02-20',NULL,'exclusive-zone-test','two',$1,'2099-02-20 11:00:00+05','2099-02-20 15:00:00+05')", [actor.rows[0].id]), (error: { code?: string }) => error.code === "23P01");
+  });
+
   it("audit_log and price_rules are append-only", async () => {
     await db.pool.query("INSERT INTO audit_log (action) VALUES ('test.created')");
     await assert.rejects(() => db.pool.query("UPDATE audit_log SET action = 'test.changed'"), /append-only/);

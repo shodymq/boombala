@@ -106,6 +106,7 @@ function reservationIdOf(value: unknown): string | null {
  */
 export async function precheckRoom(client: BookingWriter, branchId: string, date: string, roomId: string, startTime: string): Promise<void> {
   const timeline = await client.getBookingTimeline(branchId, date);
+  if (timeline.rooms?.find((room) => room.id === roomId)?.occupancyMode === "shared") return;
   const { startIso, endIso } = almatyWindow(date, startTime);
   const newOccupiedEnd = new Date(Date.parse(endIso) + timeline.bufferMinutes * 60_000).toISOString();
   const occupied = timeline.reservations.map((r) => ({ roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt, status: r.status }));

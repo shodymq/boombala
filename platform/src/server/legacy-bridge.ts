@@ -30,8 +30,39 @@ import { mfaRequired, mfaKey } from "./env.ts";
 import { getPool } from "./db.ts";
 import { requestMeta } from "./request.ts";
 import { runWithPerf } from "../core/perf.ts";
+import type { RawRow } from "../core/sheets-import/types.ts";
 
 const MAX_BODY_BYTES = 128 * 1024;
+
+type SheetSyncRecordInput = {
+  sourceKey: string;
+  fingerprint: string;
+  legacyKeyPrefix: string;
+  sourceRowNumber: number;
+  sourcePayload: RawRow;
+};
+
+function validateSheetSyncRecord(value: SheetSyncRecordInput): SheetSyncRecordInput {
+  const allowedPayloadFields = new Set(["date", "time", "package", "animator", "room", "client", "phone", "child", "age", "prepayment", "children", "adults", "comment"]);
+  if (!/^[0-9a-f]{64}$/.test(value.sourceKey) || !/^[0-9a-f]{64}$/.test(value.fingerprint) ||
+      !/^[0-9a-f]{20}$/.test(value.legacyKeyPrefix) || !Number.isSafeInteger(value.sourceRowNumber) || value.sourceRowNumber < 3 ||
+      !value.sourcePayload || typeof value.sourcePayload !== "object" || Array.isArray(value.sourcePayload) ||
+      Object.entries(value.sourcePayload).some(([key, cell]) => !allowedPayloadFields.has(key) || typeof cell !== "string" || cell.length > 1000)) {
+    throw new ValidationError({ source: "invalid_sheet_sync_record" });
+  }
+  return value;
+}
+
+async function persistSheetSyncRecord(tx: import("../core/db.ts").Client, record: SheetSyncRecordInput, reservationId: string): Promise<void> {
+  await tx.query(
+    `INSERT INTO bb.sheet_sync_records (source_key,fingerprint,legacy_key_prefix,reservation_id,state,source_row_number,source_payload,last_seen_at,missing_since,updated_at)
+     VALUES ($1,$2,$3,$4,'active',$5,$6::jsonb,now(),NULL,now())
+     ON CONFLICT (source_key) DO UPDATE SET fingerprint=EXCLUDED.fingerprint,legacy_key_prefix=EXCLUDED.legacy_key_prefix,
+       reservation_id=EXCLUDED.reservation_id,state='active',safe_review_code=NULL,source_row_number=EXCLUDED.source_row_number,
+       source_payload=EXCLUDED.source_payload,last_seen_at=now(),missing_since=NULL,updated_at=now()`,
+    [record.sourceKey, record.fingerprint, record.legacyKeyPrefix, reservationId, record.sourceRowNumber, JSON.stringify(record.sourcePayload)],
+  );
+}
 
 function serviceToken(): string {
   const value = (process.env.CRM_SERVICE_TOKEN ?? "").trim();
@@ -326,18 +357,24 @@ async function bookingCatalog(pool: Pool) {
   const summary = await catalogSummary(pool);
   const [packages, rooms] = [summary.packages, summary.rooms];
   const branch = { id: "almaty", slug: "almaty", name: "Boom Bala Алматы", city: "Алматы", workingHours: "10:00-22:00", bufferMinutes: 0 };
-  return { branches: [branch], rooms: rooms.filter((r) => r.isActive).map((r) => ({ id: r.id, branchId: "almaty", name: r.name })), packages: packages.filter((p) => p.isActive).map((p) => ({ id: p.id, branchId: "almaty", name: p.name, priceFrom: p.basePrice ?? 0, priceLabel: p.basePrice == null ? "" : `${p.basePrice} ₸`, guestCapacityLabel: "" })) };
+  return { branches: [branch], rooms: rooms.filter((r) => r.isActive).map((r) => ({ id: r.id, branchId: "almaty", name: r.name, occupancyMode: r.occupancyMode ?? "exclusive" })), packages: packages.filter((p) => p.isActive).map((p) => ({ id: p.id, branchId: "almaty", name: p.name, priceFrom: p.basePrice ?? 0, priceLabel: p.basePrice == null ? "" : `${p.basePrice} ₸`, guestCapacityLabel: "" })) };
 }
 
-async function bookingTimeline(pool: Pool, date: string) {
-  const rooms = await pool.query<{ id: string; name: string }>("SELECT id, name FROM bb.rooms WHERE is_active ORDER BY sort_order, id");
-  const rows = await pool.query<{ id: string; kind: "booking" | "block"; room_id: string; starts_at: string; ends_at: string; slot_id: number | null; package_name: string | null; price_kzt: number | null; price_source: string | null; note: string | null; lead_request_id: string | null; customer_name: string | null; customer_phone: string | null; created_by: string | null; created_by_name: string | null; released_at: string | null; paid_kzt: number | null }>(
+async function bookingTimeline(pool: Pool, session: ValidSession, date: string) {
+  if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  const rooms = await pool.query<{ id: string; name: string; occupancy_mode: string }>("SELECT id, name, occupancy_mode FROM bb.rooms WHERE is_active ORDER BY sort_order, id");
+  const rows = await pool.query<{ id: string; kind: "booking" | "block"; room_id: string; starts_at: string; ends_at: string; slot_id: number | null; package_name: string | null; price_kzt: number | null; price_source: string | null; note: string | null; lead_request_id: string | null; customer_name: string | null; customer_phone: string | null; created_by: string | null; created_by_name: string | null; released_at: string | null; paid_kzt: number | null; sync_key: string | null; sync_state: "active" | "manual_review" | "source_missing" | null; sync_client: string | null; sync_phone: string | null; sync_package: string | null; sync_details: Record<string, string> | null }>(
     `SELECT r.id, r.kind, r.room_id, r.starts_at, r.ends_at, r.slot_id, p.name package_name, r.price_kzt, r.price_source, r.note,
             r.lead_request_id, c.name customer_name, c.phone_e164 customer_phone, r.created_by, u.name created_by_name, r.released_at,
+            ss.source_key sync_key, ss.state sync_state, ss.source_payload->>'client' sync_client, ss.source_payload->>'phone' sync_phone,
+            ss.source_payload->>'package' sync_package, CASE WHEN ss.source_key IS NULL THEN NULL ELSE jsonb_build_object(
+              'childName',ss.source_payload->>'child','childAge',ss.source_payload->>'age','animator',ss.source_payload->>'animator',
+              'children',ss.source_payload->>'children','adults',ss.source_payload->>'adults','prepaymentRaw',ss.source_payload->>'prepayment','comment',ss.source_payload->>'comment') END sync_details,
             (SELECT amount_kzt FROM bb.manual_payment_facts f WHERE f.lead_request_id=r.lead_request_id) paid_kzt
        FROM bb.slot_reservations r LEFT JOIN bb.packages p ON p.id=r.package_id LEFT JOIN bb.contacts c ON c.id=r.contact_id
-       LEFT JOIN bb.users u ON u.id=r.created_by WHERE r.slot_date=$1 ORDER BY r.starts_at`, [date]);
-  return { branchId: "almaty", date, timezone: "Asia/Almaty", bufferMinutes: 0, rooms: rooms.rows, reservations: rows.rows.map((r) => ({ id: r.id, kind: r.kind, status: r.released_at ? "released" : r.kind === "block" ? "blocked" : "confirmed", roomId: r.room_id, startsAt: new Date(r.starts_at).toISOString(), endsAt: new Date(r.ends_at).toISOString(), occupiedEndsAt: new Date(r.ends_at).toISOString(), slotId: r.slot_id == null ? null : String(r.slot_id), packageName: r.package_name, priceKzt: r.price_kzt, priceSource: r.price_source, paidKzt: r.paid_kzt ?? 0, paymentStatus: r.paid_kzt ? "prepaid" : "unpaid", note: r.note, requestId: r.lead_request_id, customerName: r.customer_name, customerPhone: r.customer_phone, createdByAdminId: r.created_by, createdByName: r.created_by_name, releasedAt: r.released_at ? new Date(r.released_at).toISOString() : null })) };
+       LEFT JOIN bb.users u ON u.id=r.created_by LEFT JOIN bb.sheet_sync_records ss ON ss.reservation_id=r.id
+      WHERE r.slot_date=$1 ORDER BY r.starts_at`, [date]);
+  return { branchId: "almaty", date, timezone: "Asia/Almaty", bufferMinutes: 0, rooms: rooms.rows.map((r) => ({ id: r.id, name: r.name, occupancyMode: r.occupancy_mode === "shared" ? "shared" : "exclusive" })), reservations: rows.rows.map((r) => ({ id: r.id, kind: r.kind, status: r.released_at ? "released" : r.kind === "block" ? "blocked" : "confirmed", roomId: r.room_id, startsAt: new Date(r.starts_at).toISOString(), endsAt: new Date(r.ends_at).toISOString(), occupiedEndsAt: new Date(r.ends_at).toISOString(), slotId: r.slot_id == null ? null : String(r.slot_id), packageName: r.sync_package ?? r.package_name, priceKzt: r.price_kzt, priceSource: r.price_source, paidKzt: r.paid_kzt ?? 0, paymentStatus: r.paid_kzt ? "prepaid" : "unpaid", note: r.sync_key ? "Импортировано из Google Sheets" : r.note, requestId: r.lead_request_id, customerName: r.sync_client ?? r.customer_name, customerPhone: r.sync_phone ?? r.customer_phone, createdByAdminId: r.created_by, createdByName: r.created_by_name, releasedAt: r.released_at ? new Date(r.released_at).toISOString() : null, sourceManaged: !!r.sync_key, sourceState: r.sync_state, sourceDetails: r.sync_details })) };
 }
 
 type CalendarLeadState = { id: string; status: string; bookedAt: string | null; manualPaymentFactStatus: "prepaid" | "unpaid"; manualPaymentFactAmountKzt: number; customerName: string };
@@ -382,7 +419,7 @@ export async function calendarView(pool: Pool, session: ValidSession, input: Rec
   const requestId = optionalId(input.request);
   const reservationId = optionalId(input.reservation);
   const continueId = optionalId(input.continue);
-  const timeline = bookingTimeline(pool, date);
+  const timeline = bookingTimeline(pool, session, date);
   const [catalog, tl, leads, lead, bookingLead, continued] = await Promise.all([
     bookingCatalog(pool),
     timeline,
@@ -478,15 +515,33 @@ export async function bridgePayment(pool: Pool, session: ValidSession, input: Re
 }
 
 export async function bridgeReschedule(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
-  const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError(); const key = text(input.idempotencyKey, 200); const id = text(input.reservationId, 80); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120);
+  const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  return bridgeRescheduleWithActor(pool, actor, input, false, await requestMeta());
+}
+
+/** Internal Sheets worker entry point. It shares the same transactional writer and is never routed from HTTP. */
+export async function bridgeRescheduleFromSheetSync(pool: Pool, actor: Actor, input: Record<string, unknown>, record: SheetSyncRecordInput) {
+  if (!can(actor.role, "bookings.manage")) throw new ForbiddenError();
+  return bridgeRescheduleWithActor(pool, actor, input, true, { ip: null, userAgent: "google-sheets-sync" }, validateSheetSyncRecord(record));
+}
+
+async function bridgeRescheduleWithActor(pool: Pool, actor: Actor, input: Record<string, unknown>, sourceSync: boolean, meta: { ip?: string | null; userAgent?: string | null }, syncRecord?: SheetSyncRecordInput) {
+  const key = text(input.idempotencyKey, 200); const id = text(input.reservationId, 80); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120);
   return ensureIdempotent(pool, actor, key, "reschedule", input, async (tx) => {
+    if (!sourceSync && process.env.SHEETS_SYNC_ENABLED === "1") {
+      const managed = await tx.query("SELECT 1 FROM bb.sheet_sync_records WHERE reservation_id=$1", [id]);
+      if (managed.rows[0]) throw new ConflictError("source_managed_read_only");
+    }
     const old = await tx.query<{ kind: "booking" | "block"; room_id: string; lead_request_id: string | null; contact_id: string | null; package_id: string | null; children: number | null; price_kzt: number | null; price_source: string | null; note: string | null }>("SELECT kind,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,note FROM bb.slot_reservations WHERE id=$1 AND released_at IS NULL FOR UPDATE", [id]);
     if (!old.rows[0]) throw new NotFoundError();
+    if (sourceSync && old.rows[0].kind !== "block") throw new ConflictError("source_sync_only_manages_blocks");
     const { startSql, endSql } = almatyInterval(date, start);
     await tx.query("UPDATE bb.slot_reservations SET released_at=now(),released_by=$2,release_reason='rescheduled' WHERE id=$1", [id, actor.id]);
-    const next = await tx.query<{ id: string }>("INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,note,created_by,starts_at,ends_at) VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id", [old.rows[0].kind, date, roomId, old.rows[0].lead_request_id, old.rows[0].contact_id, old.rows[0].package_id, old.rows[0].children, old.rows[0].price_kzt, old.rows[0].price_source, old.rows[0].note, actor.id, startSql, endSql]);
+    const nextNote = sourceSync ? text(input.note, 300) : old.rows[0].note;
+    const next = await tx.query<{ id: string }>("INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,note,created_by,starts_at,ends_at) VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id", [old.rows[0].kind, date, roomId, old.rows[0].lead_request_id, old.rows[0].contact_id, old.rows[0].package_id, old.rows[0].children, old.rows[0].price_kzt, old.rows[0].price_source, nextNote, actor.id, startSql, endSql]);
+    if (sourceSync && syncRecord) await persistSheetSyncRecord(tx, syncRecord, next.rows[0].id);
     if (old.rows[0].lead_request_id) await tx.query("UPDATE bb.lead_requests SET requested_date=$2,room_id=$3 WHERE id=$1", [old.rows[0].lead_request_id, date, roomId]);
-    await writeAudit(tx, { actorUserId: actor.id, action: "booking.rescheduled", entityType: "slot_reservation", entityId: next.rows[0].id, after: { previousReservationId: id, date, roomId, start }, ...(await requestMeta()) });
+    await writeAudit(tx, { actorUserId: actor.id, action: sourceSync ? "sheet_sync.rescheduled" : "booking.rescheduled", entityType: "slot_reservation", entityId: next.rows[0].id, after: { previousReservationId: id, date, roomId, start }, ...meta });
     return { id: next.rows[0].id, status: "confirmed" };
   });
 }
@@ -513,9 +568,22 @@ export async function bridgeConfirm(pool: Pool, session: ValidSession, input: Re
 }
 
 export async function bridgeBlock(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
-  const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError(); const key = text(input.idempotencyKey, 200); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120); const { startSql, endSql } = almatyInterval(date, start);
+  const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  return bridgeBlockWithActor(pool, actor, input, false, await requestMeta());
+}
+
+/** Internal Sheets worker entry point. It shares the typed block writer; it cannot create bookings or payment facts. */
+export async function bridgeBlockFromSheetSync(pool: Pool, actor: Actor, input: Record<string, unknown>, record: SheetSyncRecordInput) {
+  if (!can(actor.role, "bookings.manage")) throw new ForbiddenError();
+  return bridgeBlockWithActor(pool, actor, input, true, { ip: null, userAgent: "google-sheets-sync" }, validateSheetSyncRecord(record));
+}
+
+async function bridgeBlockWithActor(pool: Pool, actor: Actor, input: Record<string, unknown>, sourceSync: boolean, meta: { ip?: string | null; userAgent?: string | null }, syncRecord?: SheetSyncRecordInput) {
+  const key = text(input.idempotencyKey, 200); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120); const { startSql, endSql } = almatyInterval(date, start);
   return ensureIdempotent(pool, actor, key, "block", input, async (tx) => {
     const row = await tx.query<{ id: string }>("INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block',$1,NULL,$2,$3,$4,$5,$6) RETURNING id", [date, roomId, text(input.reason, 300), actor.id, startSql, endSql]);
+    if (sourceSync && syncRecord) await persistSheetSyncRecord(tx, syncRecord, row.rows[0].id);
+    if (sourceSync) await writeAudit(tx, { actorUserId: actor.id, action: "sheet_sync.block_created", entityType: "slot_reservation", entityId: row.rows[0].id, after: { date, roomId, start }, ...meta });
     return { id: row.rows[0].id, status: "blocked" };
   });
 }
@@ -523,6 +591,10 @@ export async function bridgeBlock(pool: Pool, session: ValidSession, input: Reco
 export async function bridgeRelease(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session); if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError(); const key = text(input.idempotencyKey, 200); const id = text(input.reservationId, 80);
   return ensureIdempotent(pool, actor, key, "release", input, async (tx) => {
+    if (process.env.SHEETS_SYNC_ENABLED === "1") {
+      const managed = await tx.query("SELECT 1 FROM bb.sheet_sync_records WHERE reservation_id=$1", [id]);
+      if (managed.rows[0]) throw new ConflictError("source_managed_read_only");
+    }
     const row = await tx.query<{ kind: string; lead_request_id: string | null }>("UPDATE bb.slot_reservations SET released_at=now(),released_by=$2,release_reason=$3 WHERE id=$1 AND released_at IS NULL RETURNING kind,lead_request_id", [id, actor.id, optionalText(input.reason)]);
     if (!row.rows[0]) throw new ConflictError("reservation_already_released");
     if (row.rows[0].lead_request_id) await tx.query("UPDATE bb.lead_requests SET status='cancelled' WHERE id=$1 AND status='confirmed'", [row.rows[0].lead_request_id]);
@@ -572,7 +644,7 @@ async function rpcCore(request: NextRequest, marks: { op: string; sessionMs: num
       case "requests.confirm": throw new ConflictError("use_calendar_flow");
       case "catalog": return Response.json({ packages: await listPackages(pool), rooms: await listRooms(pool), slots: await listSlots(pool) });
       case "calendar.catalog": return Response.json(await bookingCatalog(pool), { headers: { "Cache-Control": "no-store" } });
-      case "calendar.timeline": return Response.json(await bookingTimeline(pool, parseDate(input.date)), { headers: { "Cache-Control": "no-store" } });
+      case "calendar.timeline": return Response.json(await bookingTimeline(pool, session, parseDate(input.date)), { headers: { "Cache-Control": "no-store" } });
       case "calendar.leads": { const leads = await listLeads(pool, actor, {}); return Response.json({ items: leads.map((l) => ({ id: l.id, type: "birthday_request", status: l.status, phone: l.phone, customerName: l.name, createdAt: l.createdAt.toISOString(), requestedDate: l.requestedDate, branch: { id: "almaty" } })), total: leads.length }); }
       case "calendar.lead": { const state = await calendarLeadState(pool, text(input.id, 80)); if (!state) throw new NotFoundError(); return Response.json(state); }
       case "booking.request": return Response.json(await bridgeCreateRequest(pool, session, input));

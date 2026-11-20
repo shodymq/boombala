@@ -84,14 +84,25 @@ export function ReservationDetails({
   return (
     <Drawer title={isBlock ? "Блокировка комнаты" : "Бронь праздника"} closeHref={closeHref}>
       <dl data-reservation-card={r.id}>
-        <Row term="Статус">{released ? "Снята (история)" : isBlock ? "Блокировка" : "Подтверждена"}</Row>
-        {isBlock ? null : <Row term="Клиент">{r.customerName ?? "Скрыто для вашей роли"}</Row>}
-        {isBlock || !r.customerPhone ? null : <Row term="Телефон">{r.customerPhone}</Row>}
-        <Row term="Пакет">{isBlock ? "—" : r.packageName ?? "не указан"}</Row>
+        <Row term="Статус">{released ? "Снята (история)" : r.sourceManaged ? r.sourceState === "source_missing" ? "Импортировано · строка отсутствует · сверка" : r.sourceState === "manual_review" ? "Импортировано · требуется сверка" : "Импортировано из Google Sheets · только чтение" : isBlock ? "Блокировка" : "Подтверждена"}</Row>
+        {!isBlock || r.sourceManaged ? <Row term="Клиент">{r.customerName ?? "Скрыто для вашей роли"}</Row> : null}
+        {(!isBlock || r.sourceManaged) && r.customerPhone ? <Row term="Телефон">{r.customerPhone}</Row> : null}
+        <Row term="Пакет">{isBlock && !r.sourceManaged ? "—" : r.packageName ?? "не указан"}</Row>
         <Row term="Комната">{roomName}</Row>
         <Row term="Дата">{dayLabel}</Row>
         <Row term="Время">{clock(r.startsAt)}–{clock(r.endsAt)} (4 часа)</Row>
         {r.occupiedEndsAt !== r.endsAt ? <Row term="Занято до">{clock(r.occupiedEndsAt)} (с подготовкой)</Row> : null}
+        {r.sourceManaged && r.sourceDetails ? (
+          <>
+            {r.sourceDetails.childName ? <Row term="Именинник">{r.sourceDetails.childName}</Row> : null}
+            {r.sourceDetails.childAge ? <Row term="Возраст">{r.sourceDetails.childAge}</Row> : null}
+            {r.sourceDetails.children ? <Row term="Детей">{r.sourceDetails.children}</Row> : null}
+            {r.sourceDetails.adults ? <Row term="Взрослых">{r.sourceDetails.adults}</Row> : null}
+            {r.sourceDetails.animator ? <Row term="Аниматор">{r.sourceDetails.animator}</Row> : null}
+            {r.sourceDetails.prepaymentRaw ? <Row term="Предоплата из таблицы">{r.sourceDetails.prepaymentRaw} · не подтверждена</Row> : null}
+            {r.sourceDetails.comment ? <Row term="Комментарий">{r.sourceDetails.comment}</Row> : null}
+          </>
+        ) : null}
         {isBlock ? null : (
           <>
             <Row term="Сумма">{r.priceKzt != null ? `${kzt.format(r.priceKzt)} ₸${r.priceSource === "manager_agreed" ? "" : " (ориентир каталога)"}` : "не указана"}</Row>
@@ -104,11 +115,13 @@ export function ReservationDetails({
         {r.requestId ? <Row term="Заявка №">{r.requestId}</Row> : null}
         {released ? <Row term="Снята">{r.releasedAt ? clock(r.releasedAt) : "—"}</Row> : null}
       </dl>
-      <p className="mt-3 rounded-xl bg-paper p-2 text-xs text-muted">
-        Имя и возраст ребёнка, число детей и взрослых, аниматор и история изменений пока не отдаются API бронирования, поэтому здесь их нет. Ребёнок, указанный при создании, сохраняется в комментарии.
-      </p>
+      {r.sourceManaged ? (
+        <p className="mt-3 rounded-xl bg-paper p-2 text-xs text-muted">Эта запись управляется таблицей «Банкеты». Перенос и отмена в CRM отключены, пока работает синхронизация. Сумма предоплаты из таблицы не считается подтверждением поступления денег.</p>
+      ) : !isBlock ? (
+        <p className="mt-3 rounded-xl bg-paper p-2 text-xs text-muted">Имя и возраст ребёнка, число детей и взрослых, аниматор и история изменений пока не отдаются API бронирования, поэтому здесь их нет. Ребёнок, указанный при создании, сохраняется в комментарии.</p>
+      ) : null}
 
-      {released ? null : (
+      {released || r.sourceManaged ? null : (
         <div className="mt-4 grid gap-3">
           {isBlock ? null : rescheduling ? (
             <form action={rescheduleAction} className="grid gap-2 rounded-2xl border border-line p-3" aria-label="Перенос брони">

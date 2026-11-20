@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Boom Bala Google Sheets sync every 60 seconds
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+Unit=bb-sheets-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -18,6 +18,8 @@ const catalog: BookingCatalog = {
     { id: "ice-room", branchId: "almaty", name: "Ice Room" },
     { id: "magic-room", branchId: "almaty", name: "Magic Room" },
     { id: "rapunzel-room", branchId: "almaty", name: "Rapunzel Room" },
+    { id: "general-hall", branchId: "almaty", name: "Общий зал", occupancyMode: "shared" },
+    { id: "general-hall-2f", branchId: "almaty", name: "Общий зал 2 этаж", occupancyMode: "shared" },
   ],
   packages: [{ id: "boom-party", branchId: "almaty", name: "Boom Bala Party", priceFrom: 0, priceLabel: "", guestCapacityLabel: "" }],
 };
@@ -59,7 +61,7 @@ class FakeWriter {
   readonly calls: Array<Record<string, unknown>> = [];
   async getBookingCatalog() { return catalog; }
   async getBookingTimeline(branchId: string, date: string): Promise<BookingTimeline> {
-    return { branchId, date, timezone: "Asia/Almaty", bufferMinutes: 0, rooms: catalog.rooms.map(({ id, name }) => ({ id, name })), reservations: this.reservations.get(date) ?? [] };
+    return { branchId, date, timezone: "Asia/Almaty", bufferMinutes: 0, rooms: catalog.rooms.map(({ id, name, occupancyMode }) => ({ id, name, occupancyMode })), reservations: this.reservations.get(date) ?? [] };
   }
   async blockSlot(input: Record<string, unknown>) {
     this.calls.push(input);
@@ -142,8 +144,20 @@ test("occupied rooms, unknown rooms and out-of-hours events do not write", async
     row(156, "20.11.2026", "20:00", "Magic room"),
   ]), writer, now);
   assert.equal(result.counts.conflicts, 1);
-  assert.equal(result.counts.skipped, 2);
-  assert.equal(writer.calls.length, 0);
+  assert.equal(result.counts.created, 1); // Shared zone is not blocked by another room's occupancy.
+  assert.equal(result.counts.skipped, 1);
+  assert.equal(writer.calls.length, 1);
+});
+
+test("shared zones allow overlapping parties and exact room spellings on both floors", async () => {
+  const writer = new FakeWriter();
+  const first = row(160, "20.11.2026", "13:00", "Общий зал", { 8: "Синтетика 1" });
+  const second = row(161, "20.11.2026", "14:00", "Общий зал", { 8: "Синтетика 2", 7: "+7 700 000 00 01" });
+  const floor = row(162, "20.11.2026", "13:30", "Общий зал 2 этаж", { 8: "Синтетика 3", 7: "+7 700 000 00 02" });
+  const result = await importBookingSheetBlocks(plan([first, second, floor]), writer, now);
+  assert.equal(result.counts.created, 3);
+  assert.equal(result.counts.conflicts, 0);
+  assert.equal(writer.calls.length, 3);
 });
 
 test("the import plan is strict and rejects payment-operation fields", () => {

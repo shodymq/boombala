@@ -9,7 +9,7 @@ export type FastApiCrmActor = {
   requestId?: string;
 };
 
-export type BookingTimelineRoom = { id: string; name: string };
+export type BookingTimelineRoom = { id: string; name: string; occupancyMode?: "exclusive" | "shared" };
 
 export type BookingTimelineReservation = {
   id: string;
@@ -38,6 +38,13 @@ export type BookingTimelineReservation = {
   /** The responsible staff member's name, when the server shares it. */
   createdByName: string | null;
   releasedAt?: string | null;
+  /** Set for records whose source of truth is currently the Sheets sync; CRM edits are blocked while sync is enabled. */
+  sourceManaged?: boolean;
+  sourceState?: "active" | "manual_review" | "source_missing" | null;
+  sourceDetails?: {
+    childName: string | null; childAge: string | null; animator: string | null;
+    children: string | null; adults: string | null; prepaymentRaw: string | null; comment: string | null;
+  } | null;
 };
 
 export type BookingTimeline = {
@@ -58,7 +65,7 @@ export type BookingCatalogBranch = {
   workingHours: string;
   bufferMinutes: number;
 };
-export type BookingCatalogRoom = { id: string; branchId: string; name: string };
+export type BookingCatalogRoom = { id: string; branchId: string; name: string; occupancyMode?: "exclusive" | "shared" };
 export type BookingCatalogPackage = {
   id: string;
   branchId: string;
