@@ -13,6 +13,8 @@ import type { ValidSession } from "../../../core/session.ts";
 import { withFastApiClient } from "../../../server/crm-actor.ts";
 import { FastApiCrmError, type BookingCatalog, type BookingCatalogBranch, type BookingTimeline, type BirthdayLeadState, type FastApiLeadListItem } from "../../../server/fastapi-crm.ts";
 import { ContinueRequestForm, NewBookingForm, ReservationDetails, type ContinuedRequest } from "./booking-drawer";
+import { BookingCardPanel } from "./booking-card";
+import type { BookingCardView } from "../../../core/booking-card.ts";
 import type { CalendarView } from "../../../server/calendar-data.ts";
 import { loadLead } from "../../../server/lead-data.ts";
 import { confirmPaidRequestAction } from "./crm-actions";
@@ -57,7 +59,7 @@ const input = "h-11 w-full rounded-xl border-2 border-grape-200 bg-white px-3 te
 const btn = "h-11 rounded-full bg-grape-700 px-5 text-sm font-extrabold text-white hover:bg-grape-600 disabled:opacity-50";
 const btnGhost = "flex h-11 items-center rounded-full border-2 border-grape-700 px-4 text-sm font-extrabold text-grape-700 hover:bg-grape-50";
 
-type Search = { continue?: string; branch?: string; date?: string; ok?: string; reservation?: string; error?: string; request?: string; new?: string; block?: string; move?: string; room?: string; start?: string };
+type Search = { continue?: string; branch?: string; date?: string; ok?: string; reservation?: string; error?: string; request?: string; new?: string; block?: string; move?: string; room?: string; start?: string; card?: string; saved?: string; cerror?: string };
 
 /** The state a successful action must produce in FastAPI. Anything else is shown as not confirmed. */
 const EXPECTED_STATUS: Record<string, "confirmed" | "blocked" | "released"> = { booked: "confirmed", rescheduled: "confirmed", blocked: "blocked", released: "released" };
@@ -164,6 +166,17 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
   // After an action `reservation` only names the record to verify; the card opens only for a plain click on a block.
   const selected = search.reservation && !search.ok && !search.error ? timeline.reservations.find((r) => r.id === search.reservation) : undefined;
 
+  // The booking card is read only when it is opened (one extra bridge call, never on the plain calendar load).
+  let cardView: BookingCardView | null = null;
+  let cardFailed = false;
+  if (selected && search.card === "1") {
+    try {
+      cardView = await withFastApiClient(session, (client) => client.getBookingCard(selected.id));
+    } catch {
+      cardFailed = true;
+    }
+  }
+
   // Success is shown only when FastAPI's timeline holds the reservation in the expected state. The URL is a hint.
   const expected = search.ok ? EXPECTED_STATUS[search.ok] : undefined;
   const confirmedRecord = search.reservation && expected ? timeline.reservations.find((r) => r.id === search.reservation) : undefined;
@@ -201,6 +214,7 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
       {verifiedOk ? <p role="status" className="rounded-2xl bg-green-100 p-3 text-sm font-bold text-grape-900">{NOTICES[verifiedOk]} Проверено по данным системы.</p> : null}
       {unverifiedOk ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">Результат действия не подтверждён системой. Обновите страницу и проверьте календарь: без этого ничего не считается выполненным.</p> : null}
       {errorText ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">{errorText}</p> : null}
+      {cardFailed ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">Карточку не удалось загрузить. Данные брони ниже; повторите позже.</p> : null}
       {continueMissing ? <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-bold text-grape-900">Заявку нельзя продолжить: она не найдена, отменена или уже забронирована. Откройте раздел «Заявки».</p> : null}
       {search.request ? (
         requestState ? (
@@ -301,7 +315,15 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
         </ul>
       ) : null}
 
-      {selected ? (
+      {selected && search.card === "1" ? (
+        cardView ? (
+          <BookingCardPanel view={cardView} branchId={branch.id} date={date} closeHref={dayHref} backHref={q({ reservation: selected.id })} saved={search.saved} error={search.cerror}
+            sourceManaged={Boolean(selected.sourceManaged)} handedOver={Boolean(selected.sourceHandedOver)} />
+        ) : (
+          <ReservationDetails r={selected} roomName={rooms.find((x) => x.id === selected.roomId)?.name ?? "—"} rooms={rooms} quick={quick} hoursKnown={Boolean(hours)} branchId={branch.id} date={date}
+            closeHref={dayHref} rescheduling={false} rescheduleHref={q({ reservation: selected.id, move: "1" })} detailHref={q({ reservation: selected.id })} cardHref={q({ reservation: selected.id, card: "1" })} />
+        )
+      ) : selected ? (
         <ReservationDetails
           r={selected}
           roomName={rooms.find((x) => x.id === selected.roomId)?.name ?? "—"}
@@ -314,6 +336,7 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
           rescheduling={search.move === "1"}
           rescheduleHref={q({ reservation: selected.id, move: "1" })}
           detailHref={q({ reservation: selected.id })}
+          cardHref={q({ reservation: selected.id, card: "1" })}
         />
       ) : continued && hours ? (
         <ContinueRequestForm request={continued} rooms={rooms} packages={packages} quick={quick} branchId={branch.id} date={date} closeHref={dayHref} defaultRoomId={search.room} defaultStart={search.start ?? defaultStart} />

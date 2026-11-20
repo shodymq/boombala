@@ -28,7 +28,7 @@ const FUTURE = (() => {
 const KEY = Buffer.alloc(32, 21).toString("base64");
 
 /** Tables the public API must never reach. Every table of the schema is either in API_GRANTS or here, so a new table forces a decision. */
-const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections", "booking_operations", "manual_payment_facts", "sheet_sync_runs", "sheet_sync_records"];
+const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections", "booking_operations", "manual_payment_facts", "sheet_sync_runs", "sheet_sync_records", "booking_cards", "booking_card_events", "guest_tariffs", "package_archive", "package_program_options", "package_program_rules", "package_versions", "program_options"];
 
 describe("Database roles: one per application, least privilege", () => {
   let db: TestDb;
@@ -462,10 +462,10 @@ describe("Database roles: one per application, least privilege", () => {
 
       // enquiry -> booking -> release, manual booking
       const lead = await submitLead(api, { idempotencyKey: randomUUID(), name: "Заявка Роли", phone: "+77010000888", date: FUTURE, children: 4, consent: true });
-      const { reservationId } = await confirmLead(admin, owner2(), { leadId: lead.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party" });
-      await assert.rejects(() => createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party", name: "Конфликт", phone: "+77010000889" }), /slot_taken|conflict/i);
+      const { reservationId } = await confirmLead(admin, owner2(), { leadId: lead.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party" });
+      await assert.rejects(() => createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Конфликт", phone: "+77010000889" }), /slot_taken|conflict/i);
       await releaseReservation(admin, owner2(), reservationId, "ТЕСТ");
-      await createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "wow-party", name: "Ручной Роли", phone: "+77010000890" });
+      await createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Ручной Роли", phone: "+77010000890" });
 
       // notifications (the worker is part of the staff application)
       const sent: string[] = [];

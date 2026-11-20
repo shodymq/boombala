@@ -67,6 +67,25 @@ function field(formData: FormData, name: string): string {
   return typeof value === "string" ? value : "";
 }
 
+/** A form value as a card field: empty means "not set" (null), anything else is passed on and validated by the server. */
+function cardValue(formData: FormData, name: string): string | null {
+  const value = field(formData, name).trim();
+  return value === "" ? null : value;
+}
+
+const CARD_KINDS = ["show", "master_class", "challenge", "animation"] as const;
+
+/** The optional customer and headcount fields of the new-booking forms. Nothing here is required. */
+function newBookingCard(formData: FormData): Record<string, unknown> | undefined {
+  const card: Record<string, unknown> = {};
+  for (const name of ["childName", "childAge", "preferredLanguage", "childrenTotal", "adultsTotal", "responsibleUserId"]) {
+    const value = cardValue(formData, name);
+    if (value !== null) card[name] = value;
+  }
+  if (cardValue(formData, "headcountMode") === "by_fact") card.headcountMode = "by_fact";
+  return Object.keys(card).length ? card : undefined;
+}
+
 function calendarUrl(branchId: string, date: string, query: string): string {
   const params = new URLSearchParams();
   if (branchId) params.set("branch", branchId);
@@ -132,6 +151,7 @@ export async function createBookingAction(formData: FormData): Promise<void> {
       prepaymentKzt: input.prepaymentKzt,
       prepaymentMethod: input.prepaymentMethod,
       note,
+      card: newBookingCard(formData),
       idempotencyKey: input.idempotencyKey,
     }, almatyDate()),
   );
@@ -186,7 +206,7 @@ export async function continueRequestAction(formData: FormData): Promise<void> {
   if (!parsed.success) redirect(calendarUrl(branchId, rawDate, "error=invalid"));
   const input = parsed.data;
   if (!unifiedFastapiCrmEnabled()) redirect(calendarUrl(input.branchId, input.date, "error=unavailable"));
-  const result = await withFastApiClient(session, (client) => continueRequestFlow(client, { ...input }));
+  const result = await withFastApiClient(session, (client) => continueRequestFlow(client, { ...input, card: newBookingCard(formData) }));
   const outcome = result.ok ? okOutcome("booked", result.reservationId) : `error=${result.code}`;
   redirect(calendarUrl(input.branchId, input.date, `${outcome}&request=${encodeURIComponent(input.requestId)}`));
 }
@@ -260,4 +280,83 @@ export async function releaseAction(formData: FormData): Promise<void> {
     outcome = `error=${failureCode(error)}`;
   }
   redirect(calendarUrl(branchId, rawDate, outcome));
+}
+
+// ── Booking card (Booking V2) ──────────────────────────────────────────────────────────────────────────────────
+
+const cardSaveSchema = z.object({ reservationId: id, idempotencyKey: key, date });
+
+function cardUrl(branchId: string, d: string, reservationId: string, query: string): string {
+  return calendarUrl(branchId, d, `reservation=${encodeURIComponent(reservationId)}&card=1&${query}`);
+}
+
+/**
+ * Saves the card of an event. The browser sends only what the manager typed: the server recomputes the program rules, the
+ * amount and the permissions. A stale form (another manager saved first) is refused with `card_version_conflict`.
+ */
+export async function saveCardAction(formData: FormData): Promise<void> {
+  const session = await requirePermission("bookings.manage");
+  const { branchId, date: rawDate } = await branchAndDate(formData);
+  const parsed = cardSaveSchema.safeParse({ reservationId: field(formData, "reservationId"), idempotencyKey: field(formData, "idempotencyKey"), date: rawDate });
+  if (!parsed.success) redirect(calendarUrl(branchId, rawDate, "error=invalid"));
+  const input = parsed.data;
+  const versionRaw = cardValue(formData, "expectedVersion");
+
+  const fields: Record<string, unknown> = {
+    childName: cardValue(formData, "childName"),
+    childAge: cardValue(formData, "childAge"),
+    preferredLanguage: cardValue(formData, "preferredLanguage"),
+    headcountMode: cardValue(formData, "headcountMode") ?? "exact",
+    childrenTotal: cardValue(formData, "childrenTotal"),
+    adultsTotal: cardValue(formData, "adultsTotal"),
+    animators: field(formData, "animators").split(",").map((x) => x.trim()).filter(Boolean),
+    responsibleUserId: cardValue(formData, "responsibleUserId"),
+    animationNote: cardValue(formData, "animationNote"),
+    wishes: cardValue(formData, "wishes"),
+    decoration: cardValue(formData, "decoration"),
+    cake: cardValue(formData, "cake"),
+    staffComment: cardValue(formData, "staffComment"),
+    propsStatus: cardValue(formData, "propsStatus") ?? "not_started",
+    manualExtraChildrenKzt: cardValue(formData, "manualExtraChildrenKzt"),
+    manualExtraAdultsKzt: cardValue(formData, "manualExtraAdultsKzt"),
+    mealKzt: cardValue(formData, "mealKzt") ?? "0",
+    programStatus: formData.get("programApproved") ? "approved" : "draft",
+    selections: CARD_KINDS.flatMap((kind) => formData.getAll(`sel_${kind}`).filter((v): v is string => typeof v === "string" && v !== "").map((optionId) => ({ kind, optionId }))),
+    services: Array.from({ length: 31 }, (_, i) => i).flatMap((i) => {
+      const name = field(formData, `svcName${i}`).trim();
+      const amount = field(formData, `svcAmount${i}`).trim();
+      return name || amount ? [{ name, amountKzt: Number(amount) }] : [];
+    }),
+  };
+  // The invitation status exists only for the package that includes it; the form omits the field otherwise.
+  const invitation = cardValue(formData, "invitationStatus");
+  if (invitation) fields.invitationStatus = invitation;
+
+  let outcome: string;
+  try {
+    await withFastApiClient(session, (client) =>
+      client.saveBookingCard(input.reservationId, { idempotencyKey: input.idempotencyKey, expectedVersion: versionRaw === null ? null : Number(versionRaw), fields }),
+    );
+    outcome = "saved=card";
+  } catch (error) {
+    outcome = `cerror=${failureCode(error)}`;
+  }
+  redirect(cardUrl(branchId, input.date, input.reservationId, outcome));
+}
+
+/** Hands a Google Sheets record over to the CRM. Afterwards sync no longer moves or releases it. */
+export async function handoverAction(formData: FormData): Promise<void> {
+  const session = await requirePermission("bookings.manage");
+  const { branchId, date: rawDate } = await branchAndDate(formData);
+  const parsed = cardSaveSchema.safeParse({ reservationId: field(formData, "reservationId"), idempotencyKey: field(formData, "idempotencyKey"), date: rawDate });
+  if (!parsed.success) redirect(calendarUrl(branchId, rawDate, "error=invalid"));
+  const input = parsed.data;
+  let outcome: string;
+  try {
+    await withFastApiClient(session, (client) => client.handoverReservation(input.reservationId, { idempotencyKey: input.idempotencyKey }));
+    outcome = "saved=handover";
+  } catch (error) {
+    outcome = `cerror=${failureCode(error)}`;
+  }
+  redirect(cardUrl(branchId, input.date, input.reservationId, outcome));
 }

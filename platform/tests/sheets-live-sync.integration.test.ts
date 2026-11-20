@@ -5,6 +5,9 @@ import type { SheetRead } from "../src/core/sheets-import/reader.ts";
 import type { RawRow } from "../src/core/sheets-import/types.ts";
 import { stableSourceIdentity } from "../src/core/sheets-import/identity.ts";
 import { releaseReservation } from "../src/core/bookings.ts";
+import { handoverSheetRecord } from "../src/core/booking-card.ts";
+import { withTx } from "../src/core/db.ts";
+import { createUser } from "../src/core/users.ts";
 import { BOOKING_SHEETS_ID } from "../src/core/sheets-import/production-block-import.ts";
 import { startTestDb, type TestDb } from "./helpers/db.ts";
 
@@ -233,5 +236,33 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     const ambiguousRow = await db.pool.query<{ safe_review_code: string }>("SELECT safe_review_code FROM bb.sheet_sync_records WHERE source_key=$1", [ambiguousKey.sourceKey]);
     assert.equal(ambiguousRow.rows[0].safe_review_code, "legacy_source_match_ambiguous");
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE slot_date='2099-03-03' AND released_at IS NULL")).rows[0].n, 0);
+  });
+
+  it("a record handed over to the CRM is ignored by sync: not moved, not released, not marked missing", async () => {
+    process.env.SHEETS_SYNC_ENABLED = "1";
+    const handoverDate = "2099-04-10";
+    const created = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event("event-qa-handover", handoverDate, "13:30", "Синтетическая exclusive комната", "handover-41")]) });
+    assert.equal(created.counts.created, 1);
+    const record = (await db.pool.query<{ reservation_id: string }>("SELECT reservation_id FROM bb.sheet_sync_records WHERE reservation_id IN (SELECT id FROM bb.slot_reservations WHERE slot_date=$1)", [handoverDate])).rows[0];
+    const manager = await createUser(db.pool, null, { email: "handover.manager@example.test", name: "Передача", role: "manager", password: "correct horse battery staple" });
+    await withTx(db.pool, (tx) => handoverSheetRecord(tx, manager.id, record.reservation_id));
+
+    // The sheet row now says 14:00 and later disappears: the CRM owns the record, sync must not touch it.
+    const changed = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event("event-qa-handover", handoverDate, "14:00", "Синтетическая exclusive комната", "handover-41")]) });
+    assert.equal(changed.counts.updated, 0);
+    assert.equal(changed.counts.unchanged, 1);
+    const still = await db.pool.query<{ id: string; released_at: Date | null; starts_at: Date }>("SELECT id, released_at, starts_at FROM bb.slot_reservations WHERE slot_date=$1", [handoverDate]);
+    assert.equal(still.rowCount, 1, "no second reservation");
+    assert.equal(still.rows[0].id, record.reservation_id);
+    assert.equal(still.rows[0].released_at, null);
+    assert.equal(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Almaty", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(still.rows[0].starts_at), "13:30", "the time was not changed by the sheet");
+
+    const gone = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([]) });
+    assert.equal((await db.pool.query("SELECT state FROM bb.sheet_sync_records WHERE reservation_id=$1", [record.reservation_id])).rows[0].state, "crm_managed", "an absent row does not flip a handed-over record to source_missing");
+    assert.ok(gone.counts.sourceMissing >= 0);
+    const card = await db.pool.query("SELECT child_name, children_total, responsible_user_id FROM bb.booking_cards WHERE reservation_id=$1", [record.reservation_id]);
+    assert.equal(card.rows[0].child_name, "QA ребёнок handover-41");
+    assert.equal(card.rows[0].children_total, 3);
+    assert.equal(card.rows[0].responsible_user_id, manager.id);
   });
 });

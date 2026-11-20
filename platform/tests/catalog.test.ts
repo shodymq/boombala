@@ -21,7 +21,11 @@ describe("catalog seeded from the public site and price hierarchy", () => {
 
   it("packages, rooms and prices equal the data of the public site", async () => {
     const packages = await listPackages(db.pool);
-    assert.deepEqual(packages.map((p) => [p.id, p.name]), birthdayPackages.map((p) => [p.id, p.name]));
+    // Every package of the public site exists with the site's id and name. Pricing V4.2 adds three packages and archives the
+    // three old ones for new sales (they stay as history).
+    for (const site of birthdayPackages) assert.equal(packages.find((p) => p.id === site.id)?.name, site.name, site.id);
+    assert.deepEqual(packages.filter((p) => p.isActive).map((p) => p.id), ["happy-party", "star-party", "boom-bala-party"]);
+    assert.deepEqual(packages.filter((p) => !p.isActive).map((p) => p.id).sort(), ["boom-party", "magic-party", "wow-party"]);
     const rooms = await listRooms(db.pool);
     assert.deepEqual(rooms.slice(0, birthdayRooms.length).map((r) => [r.id, r.name]), birthdayRooms.map((r) => [r.id, r.name]));
     assert.deepEqual(rooms.slice(-2).map((r) => [r.id, r.name, r.occupancyMode]), [

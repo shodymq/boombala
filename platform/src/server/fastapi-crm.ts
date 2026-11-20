@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { bridgeRpc, legacyBridgeEnabled, LegacyBridgeError } from "./bridge-client.ts";
+import type { BookingCardView } from "../core/booking-card.ts";
 
 export type FastApiCrmActor = {
   /** A short-lived FastAPI admin access token for the same staff actor. */
@@ -40,7 +41,15 @@ export type BookingTimelineReservation = {
   releasedAt?: string | null;
   /** Set for records whose source of truth is currently the Sheets sync; CRM edits are blocked while sync is enabled. */
   sourceManaged?: boolean;
-  sourceState?: "active" | "manual_review" | "source_missing" | null;
+  sourceState?: "active" | "manual_review" | "source_missing" | "crm_managed" | null;
+  /** The record came from Google Sheets and was handed over to the CRM: sync no longer touches it. */
+  sourceHandedOver?: boolean;
+  /** The booking card summary (Booking V2). Null for an event that has no card yet. */
+  card?: {
+    programStatus: "draft" | "approved" | string | null; propsStatus: string | null; invitationStatus: string | null;
+    totalKzt: number | null; pricingStatus: "complete" | "incomplete" | string | null; childName: string | null;
+    childrenTotal: number | null; adultsTotal: number | null; headcountMode: "exact" | "by_fact" | string | null; responsibleName: string | null;
+  } | null;
   sourceDetails?: {
     childName: string | null; childAge: string | null; animator: string | null;
     children: string | null; adults: string | null; prepaymentRaw: string | null; comment: string | null;
@@ -264,6 +273,19 @@ export class FastApiCrmClient {
     return this.request(`/admin/birthday-reservations/${encodeURIComponent(reservationId)}/release`, { method: "POST", body: JSON.stringify(body) });
   }
 
+  /** The booking card of one event (Booking V2): fields, program rules, calculated amount and history. Bridge mode only. */
+  getBookingCard(reservationId: string): Promise<BookingCardView> {
+    return this.request<BookingCardView>(`/admin/birthday-reservations/${encodeURIComponent(reservationId)}/card`);
+  }
+
+  saveBookingCard(reservationId: string, body: Record<string, unknown>): Promise<{ version: number; programStatus: string; changed: string[] }> {
+    return this.request(`/admin/birthday-reservations/${encodeURIComponent(reservationId)}/card`, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  handoverReservation(reservationId: string, body: Record<string, unknown>): Promise<{ cardId: string }> {
+    return this.request(`/admin/birthday-reservations/${encodeURIComponent(reservationId)}/handover`, { method: "POST", body: JSON.stringify(body) });
+  }
+
   async recordManualPaymentAndRead(requestId: string, body: Record<string, unknown>): Promise<{ payment: unknown; lead: unknown }> {
     const payment = await this.recordManualPayment(requestId, body);
     const lead = await this.getBirthdayLead(requestId);
@@ -294,6 +316,8 @@ function legacyOperation(path: string, method: string): string {
   if (path.startsWith("/admin/birthday-requests/") && path.endsWith("/manual-payments") && method === "POST") return "booking.payment";
   if (path === "/admin/birthday-bookings/confirm" && method === "POST") return "booking.confirm";
   if (path === "/admin/birthday-slots/block" && method === "POST") return "booking.block";
+  if (path.startsWith("/admin/birthday-reservations/") && path.endsWith("/card")) return method === "POST" ? "booking.card.save" : "booking.card";
+  if (path.startsWith("/admin/birthday-reservations/") && path.endsWith("/handover") && method === "POST") return "booking.handover";
   if (path.startsWith("/admin/birthday-reservations/") && path.endsWith("/reschedule") && method === "POST") return "booking.reschedule";
   if (path.startsWith("/admin/birthday-reservations/") && path.endsWith("/release") && method === "POST") return "booking.release";
   throw new FastApiCrmConfigurationError("crm_base_url_invalid");
@@ -304,7 +328,7 @@ function legacyPathInput(path: string): Record<string, string> {
   if (lead) return { id: decodeURIComponent(lead[1]) };
   const payment = path.match(/^\/admin\/birthday-requests\/([^/]+)\/manual-payments$/);
   if (payment) return { requestId: decodeURIComponent(payment[1]) };
-  const reservation = path.match(/^\/admin\/birthday-reservations\/([^/]+)\/(?:release|reschedule)$/);
+  const reservation = path.match(/^\/admin\/birthday-reservations\/([^/]+)\/(?:release|reschedule|card|handover)$/);
   if (reservation) return { reservationId: decodeURIComponent(reservation[1]) };
   return {};
 }
