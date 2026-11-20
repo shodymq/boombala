@@ -81,6 +81,8 @@ try {
   check("success state shown", true);
   await page.screenshot({ path: `${OUT}/03-ru-success.png` });
   await page.waitForTimeout(3000);
+  const header = sent.length ? sent.at(-1).split("\n")[0] : "";
+  check("Telegram title names the chosen package (STAR PARTY), not the CTA", /НОВАЯ ЗАЯВКА — STAR PARTY$/.test(header), header);
   check("mock Telegram received the lead (package and name)", sent.some((t) => /STAR PARTY/i.test(t) && /Айгуль/.test(t)), sent.length ? sent[0].slice(0, 400).replace(/\n/g, " | ") : "no message");
 
   // 6. Error state: the lead API answers 502 (delivery failed)

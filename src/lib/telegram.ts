@@ -117,8 +117,10 @@ function almatyTimestamp(now = new Date()): string {
 
 /** Plain text on purpose: no parse_mode means no escaping pitfalls with user input. */
 export function buildLeadText(lead: LeadMessage): string {
+  // The title names the package the visitor CHOSE. The CTA the visitor clicked is analytics only (cta_source), never the title.
+  const chosen = lead.packageLabel && lead.packageLabel !== "Ещё не определились" ? lead.packageLabel : "пакет не выбран";
   return [
-    "🎂 НОВАЯ ЗАЯВКА — BOOM BALA",
+    `🎂 НОВАЯ ЗАЯВКА — ${chosen}`,
     ...(lead.crmNote ? ["", lead.crmNote] : []),
     "",
     `Имя: ${dash(lead.name)}`,
