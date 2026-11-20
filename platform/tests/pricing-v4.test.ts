@@ -4,7 +4,7 @@ import { resolvePrice, setPriceRule } from "../src/core/catalog.ts";
 import { seedFromSite, makeUser, startTestDb, type TestDb } from "./helpers/db.ts";
 
 /** Server-side price of each Pricing V3 package: weekday, weekend, the date rule, and a seed that never duplicates prices. */
-describe("Pricing V3: the server decides the price (weekday, weekend, special date, seed)", () => {
+describe("Pricing V4: the server decides the price (weekday, weekend, special date, seed)", () => {
   let db: TestDb;
   before(async () => {
     db = await startTestDb();
@@ -15,7 +15,7 @@ describe("Pricing V3: the server decides the price (weekday, weekend, special da
   const cases = [
     ["happy-party", 38430, 54900],
     ["star-party", 55930, 79900],
-    ["boom-bala-party", 94430, 134900],
+    ["boom-bala-party", 80430, 114900],
   ] as const;
 
   for (const [id, weekday, weekend] of cases) {

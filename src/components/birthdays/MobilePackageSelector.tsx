@@ -8,7 +8,7 @@ import { formatTenge } from "@/lib/format";
 import { trackBirthday } from "@/lib/funnel";
 import { useSelectedPackage } from "@/components/lead/SelectedPackage";
 import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
-import { badgeLabel, ProgramList } from "./shared";
+import { badgeLabel, ProgramList, StatStrip } from "./shared";
 
 /** Mobile-only (< lg) package picker: one package at a time, the full programme behind an accordion. */
 
@@ -150,6 +150,7 @@ export function MobilePackageSelector({
         ) : null}
         <h3 className={`font-display text-[1.625rem] font-black leading-none tracking-tight ${t.title}`}>{copy.name}</h3>
         <p className={`mt-1 text-sm ${t.sub}`}>{copy.tag}</p>
+        <StatStrip pkg={active} ui={ui} tone={tone === "dark" ? "dark" : "light"} />
 
         <div className="mt-3">
           <p className="flex flex-wrap items-center gap-2">

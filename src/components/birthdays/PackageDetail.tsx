@@ -6,7 +6,7 @@ import { TrackView } from "@/components/analytics/TrackView";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
-import { badgeLabel, ProgramList } from "./shared";
+import { badgeLabel, ProgramList, StatStrip } from "./shared";
 
 /** Boom is a separate, flagship block (FlagshipDetail). Happy and Star share this typographic layout. */
 const art: Partial<Record<BirthdayPackage["id"], string>> = {
@@ -64,6 +64,8 @@ export function PackageDetail({ pkg, locale }: { pkg: BirthdayPackage; locale: L
                   </li>
                 ))}
               </ul>
+
+              <StatStrip pkg={pkg} ui={ui} />
 
               <LeadButton variant="primary" package={pkg.id} source={`package-${pkg.id}`} locale={locale} className="mt-8 w-full sm:w-auto">
                 {ui.heroCta}

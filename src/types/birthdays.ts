@@ -4,30 +4,32 @@ export type PackageId = "happy-party" | "star-party" | "boom-bala-party";
 /** Site locales that carry package copy. `kk` is the Kazakh version (URL segment /kk). */
 export type Locale = "ru" | "kk";
 
-/** One line of "Что входит": a fixed item, or a choice of exactly one `options` entry. */
+/** One line of "Что входит" with its own duration. `pick` options are chosen by the guest (0 = a fixed item, no choice). */
 export interface ProgramItem {
   title: string;
-  detail?: string;
-  /** True when the guest chooses ONE of `options`; never shown as if all were included. */
-  choice: boolean;
+  minutes: number;
+  detail: string | null;
+  pick: number;
   options: string[];
+  /** Shown as a short note under the options (e.g. the Happy show list is confirmed by the manager). */
+  optionsNote?: string;
+  /** The closing block of the programme (Boom: piñata and photo; Star: figures). */
+  finale: boolean;
 }
 
 export interface PackageCopy {
   name: string;
   tag: string;
-  /** Two-line conditions as written in the approved Pricing V3 (title + note). */
+  /** Approved conditions. A condition is only what is INCLUDED; absent services are never listed in a card. */
   conditions: { title: string; note: string }[];
   program: ProgramItem[];
-  /** Boom only: the closing block (piñata and photo). */
-  finale: string[];
 }
 
-export type FiguresStatus = "included" | "not_included" | "not_stated";
+export type FiguresStatus = "included" | "not_included";
 
 /**
- * One birthday package. Numbers come from the approved Pricing V3 (`birthday-packages-v3.json`); the flags that are not in that
- * file come from the TS mapping in `src/data/birthdays.ts`, next to the approved table, so both are reviewed together.
+ * One birthday package (Pricing V4, approved 2026-11-20). Every number and flag comes from `birthday-packages-v4.json`; the TS mapping
+ * only derives values from it.
  */
 export interface BirthdayPackage {
   id: PackageId;
@@ -37,10 +39,10 @@ export interface BirthdayPackage {
   /** Guests on top of the birthday child, as sold. */
   guestsIncluded: number;
   adultsIncluded: number;
-  /** Length of the animation/holiday programme (not the room rental). */
+  /** Total length of the holiday programme (the sum of its items). Not the room rental (4 hours). */
   durationMinutes: number;
   animators: number;
-  /** "1 на выбор" / "2 на выбор": the guest chooses which animator(s) to book. */
+  /** The guest chooses which animator(s) to book. */
   animatorsSelectable: boolean;
   roomHours: number;
   /** Regular (weekend) price in tenge, integer. */
@@ -51,18 +53,18 @@ export interface BirthdayPackage {
   weekdaySavings: number;
   weekdayDiscountPct: number;
   extraChildDiscountPct: number;
-  /** Shows / interactives chosen as ONE of the options (0 means none is included). */
+  /** Number of shows / interactives included (Happy 1, Star 2, Boom 2). */
   showCount: number;
   workshop: "standard" | "premium" | null;
   challengeIncluded: boolean;
+  welcome: boolean;
   pinata: boolean;
   invitation: boolean;
   photo: boolean;
   figures: FiguresStatus;
-  /** Cake carry-out ceremony is part of the programme. The cake itself is NOT promised. */
+  /** The cake ceremony (carry-out) is in the programme. The cake itself is NOT included in any package. */
   cakeCarryOut: boolean;
   eligibleRoomIds: string[];
-  /** Badge key for the card. Only approved labels; "most popular" is never used. */
   badge: "optimal" | "flagship" | null;
   copy: Record<Locale, PackageCopy>;
 }

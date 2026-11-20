@@ -6,17 +6,18 @@ import { TrackView } from "@/components/analytics/TrackView";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/ui/Reveal";
 import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
-import { badgeLabel, ProgramList } from "./shared";
+import { badgeLabel, formatDuration, ProgramList } from "./shared";
 
 /**
- * BOOM BALA PARTY: the flagship. Full-bleed yellow, Boom breaks out of the dark section above. Everything that makes it different is
- * named here: 10 children, 3 adults, 2.5 hours, two animators, the premium workshop, the piñata, the photo and the invitation.
+ * BOOM BALA PARTY: the flagship. Full-bleed yellow, Boom breaks out of the dark section above. What makes it different is named here:
+ * 10 children, 3 adults, 2.5 hours, two animators, the premium workshop, the welcome, the piñata, the photo and the invitation.
  */
 export function FlagshipDetail({ pkg, locale }: { pkg: BirthdayPackage; locale: Locale }) {
   const ui = BIRTHDAYS_UI[locale];
   const copy = pkg.copy[locale];
   const badge = badgeLabel(pkg, locale);
-  const [finaleTitle, finaleText] = copy.finale;
+  const finale = copy.program.find((i) => i.finale);
+  const rest = copy.program.filter((i) => !i.finale);
 
   return (
     <section id={pkg.id} aria-labelledby={`${pkg.id}-detail-title`} className="relative bg-sun-400 pb-20 pt-36 text-grape-900 max-lg:hidden md:pb-28 lg:pt-28">
@@ -66,34 +67,37 @@ export function FlagshipDetail({ pkg, locale }: { pkg: BirthdayPackage; locale: 
               <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{copy.conditions[0].note}</dd>
             </div>
             <div className="py-4">
+              <dt className="sr-only">{ui.rowDurationLabel}</dt>
+              <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{formatDuration(pkg.durationMinutes, ui)}</dd>
+              <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{ui.rowDurationLabel.toLowerCase()}</dd>
+            </div>
+            <div className="py-4">
               <dt className="sr-only">{ui.rowAnimators}</dt>
               <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.animators}</dd>
               <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{ui.rowAnimators.toLowerCase()}</dd>
-            </div>
-            <div className="py-4">
-              <dt className="sr-only">{ui.rowAdults}</dt>
-              <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.adultsIncluded}</dd>
-              <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{copy.conditions[1].title}</dd>
             </div>
           </dl>
         </Reveal>
 
         <h3 className="mt-14 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-grape-800">{ui.includedTitle}</h3>
         <div className="mt-3 md:grid md:grid-cols-2 md:gap-x-14">
-          <ProgramList items={copy.program} ui={ui} chipClass="border-0 bg-white text-grape-800" lineClass="divide-grape-800/25" muted="text-grape-800/80" />
+          <ProgramList items={rest} ui={ui} chipClass="border-0 bg-white text-grape-800" lineClass="divide-grape-800/25" muted="text-grape-800/80" />
         </div>
 
         <div className="mt-8 grid gap-4 md:grid-cols-2 md:gap-x-14">
-          <div className="rounded-3xl bg-white/60 p-5">
-            <p className="font-display text-xl font-extrabold text-grape-800">{finaleTitle}</p>
-            <p className="mt-1 text-base">{finaleText}</p>
-          </div>
+          {finale ? (
+            <div className="rounded-3xl bg-grape-800 p-5 text-white">
+              <p className="font-display text-xl font-extrabold text-sun-400">{finale.title}</p>
+              {finale.detail ? <p className="mt-1 text-base">{finale.detail}</p> : null}
+              <p className="mt-2 text-sm font-bold text-sun-400">{finale.minutes} {ui.minShort}</p>
+            </div>
+          ) : null}
           <div className="rounded-3xl bg-white/60 p-5">
             <p className="font-display text-xl font-extrabold text-grape-800">{ui.photoTitle}</p>
             <p className="mt-1 text-base">{ui.photoText}</p>
           </div>
-          <div className="rounded-3xl bg-grape-800 p-5 text-white md:col-span-2">
-            <p className="font-display text-xl font-extrabold text-sun-400">{ui.bonusTitle}</p>
+          <div className="rounded-3xl bg-white/60 p-5 md:col-span-2">
+            <p className="font-display text-xl font-extrabold text-grape-800">{ui.bonusTitle}</p>
             <p className="mt-1 text-base">{ui.bonusText}</p>
           </div>
         </div>

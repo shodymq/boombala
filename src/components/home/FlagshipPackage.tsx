@@ -6,7 +6,7 @@ import { formatTenge } from "@/lib/format";
 import { LeadButton } from "@/components/lead/LeadButton";
 import { TrackView } from "@/components/analytics/TrackView";
 import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
-import { badgeLabel, isChoiceTitle } from "@/components/birthdays/shared";
+import { badgeLabel, StatStrip } from "@/components/birthdays/shared";
 
 /**
  * BOOM BALA PARTY: the flagship card. Yellow and tall, with Boom bursting out of the top edge. The card bleeds past the container on
@@ -55,23 +55,7 @@ export function FlagshipPackage({ pkg, locale }: { pkg: BirthdayPackage; locale:
         </p>
       </div>
 
-      <dl className="mt-6 grid grid-cols-3 divide-x-2 divide-grape-800/20 border-y-2 border-grape-800/20 text-center">
-        <div className="py-4">
-          <dt className="sr-only">{copy.conditions[0].title}</dt>
-          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.kidsIncluded}</dd>
-          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{copy.conditions[0].note}</dd>
-        </div>
-        <div className="py-4">
-          <dt className="sr-only">{ui.rowAnimators}</dt>
-          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.animators}</dd>
-          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{ui.rowAnimators.toLowerCase()}</dd>
-        </div>
-        <div className="py-4">
-          <dt className="sr-only">{ui.rowAdults}</dt>
-          <dd className="font-display text-3xl font-black text-grape-800 md:text-4xl">{pkg.adultsIncluded}</dd>
-          <dd className="mt-1 px-1 text-xs font-semibold leading-tight md:text-sm">{copy.conditions[1].title}</dd>
-        </div>
-      </dl>
+      <StatStrip pkg={pkg} ui={ui} tone="flagship" />
 
       <ul className="mt-6 grid gap-x-8 gap-y-3 max-md:hidden sm:grid-cols-2" aria-label={`${ui.includedTitle}: ${copy.name}`}>
         {copy.program.map((item) => (
@@ -81,7 +65,7 @@ export function FlagshipPackage({ pkg, locale }: { pkg: BirthdayPackage; locale:
             </span>
             <span>
               <span className="font-bold">{item.title}</span>
-              {item.choice && !isChoiceTitle(item.title) ? <span className="block text-sm text-grape-800">{ui.choiceNote}</span> : null}
+              {item.pick > 0 ? <span className="block text-sm text-grape-800">{ui.chooseN(item.pick)}</span> : null}
             </span>
           </li>
         ))}

@@ -5,7 +5,7 @@ import { formatTenge } from "@/lib/format";
 import { LeadButton } from "@/components/lead/LeadButton";
 import { TrackView } from "@/components/analytics/TrackView";
 import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
-import { badgeLabel, isChoiceTitle } from "@/components/birthdays/shared";
+import { badgeLabel, StatStrip } from "@/components/birthdays/shared";
 
 /** Secondary packages (Happy, Star): typographic rows on the dark section, no card chrome. */
 export function PackageRow({ pkg, locale }: { pkg: BirthdayPackage; locale: Locale }) {
@@ -22,6 +22,8 @@ export function PackageRow({ pkg, locale }: { pkg: BirthdayPackage; locale: Loca
         </h3>
         <p className="text-base text-grape-200">{copy.tag}</p>
       </div>
+
+      <StatStrip pkg={pkg} ui={ui} tone="dark" />
 
       <div className="mt-6 grid gap-6 sm:grid-cols-[auto_1fr] sm:gap-10">
         <div>
@@ -53,7 +55,7 @@ export function PackageRow({ pkg, locale }: { pkg: BirthdayPackage; locale: Loca
                 <Check size={18} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 text-sun-400" />
                 <span>
                   {item.title}
-                  {item.choice && !isChoiceTitle(item.title) ? <span className="text-grape-200"> ({ui.choiceNote})</span> : null}
+                  {item.pick > 0 ? <span className="text-grape-200"> ({ui.chooseN(item.pick)})</span> : null}
                 </span>
               </li>
             ))}

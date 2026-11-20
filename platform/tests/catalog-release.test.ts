@@ -83,7 +83,7 @@ describe("catalogue release: rehearsal of the switch, the retirement and the rol
     assert.equal(Number(await scalar("SELECT price_kzt v FROM bb.slot_reservations WHERE id = $1", [v3Reservation])), 55930, "Wednesday: weekday price");
     const sat = await submitLead(db.pool, { idempotencyKey: randomUUID(), name: "Новый Бум", phone: "+77010000104", date: FUTURE_SAT, children: 10, packageId: "boom-bala-party", roomId: "rapunzel-room", slotId: 3, consent: true });
     const boomSat = (await confirmLead(db.pool, actor(), { leadId: sat.leadId })).reservationId;
-    assert.equal(Number(await scalar("SELECT price_kzt v FROM bb.slot_reservations WHERE id = $1", [boomSat])), 134900, "Saturday: weekend price");
+    assert.equal(Number(await scalar("SELECT price_kzt v FROM bb.slot_reservations WHERE id = $1", [boomSat])), 114900, "Saturday: weekend price");
   });
 
   it("the client cannot set the price: the server prices the enquiry when the booking is confirmed", async () => {

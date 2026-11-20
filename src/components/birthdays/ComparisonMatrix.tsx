@@ -2,6 +2,7 @@ import { Check, Minus } from "@phosphor-icons/react/dist/ssr";
 import type { BirthdayPackage, Locale } from "@/types";
 import { formatNumber } from "@/lib/format";
 import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
+import { formatDuration } from "./shared";
 
 const cell = "px-1 py-3 text-center align-middle md:px-4";
 const label = "sticky left-0 z-10 bg-grape-800 px-2 py-3 text-left text-sm font-semibold leading-snug text-white md:px-6 md:text-base";
@@ -25,37 +26,22 @@ function No({ text, onFlagship }: { text: string; onFlagship?: boolean }) {
   );
 }
 
-/** "30 мин", "1 ч", "2,5 ч" — the same numbers as the approved table. */
-function durationText(minutes: number, locale: Locale): string {
-  const ui = BIRTHDAYS_UI[locale];
-  if (minutes === 150) return `2,5 ${ui.hourShort}`;
-  if (minutes % 60 === 0) return `${minutes / 60} ${ui.hourShort}`;
-  return `${minutes} ${ui.minShort}`;
-}
-
 /**
- * Comparison of the three packages. Every row reads the package's own facts, so the table can never disagree with the cards.
- * Shared conditions are shown above the table, not repeated in it. Prices sit in their own group at the bottom.
+ * Comparison of the three packages (Pricing V4). Every row reads the package's own facts, so the table cannot disagree with the cards.
+ * A dash means "not included in the price". The shared conditions are shown above the table, not repeated in it.
  */
 export function ComparisonMatrix({ packages, locale }: { packages: BirthdayPackage[]; locale: Locale }) {
   const ui = BIRTHDAYS_UI[locale];
   const copy = (p: BirthdayPackage) => p.copy[locale];
   const flagship = (p: BirthdayPackage) => p.badge === "flagship";
+  const yesNo = (on: boolean) => (on ? <Yes text={ui.included} /> : <No text={ui.notIncluded} />);
+  const dash = <span aria-label={ui.notIncluded}>{ui.dash}</span>;
 
   const facts: { label: string; value: (p: BirthdayPackage) => React.ReactNode }[] = [
     { label: ui.rowKids, value: (p) => p.kidsIncluded },
-    { label: ui.rowGuests, value: (p) => p.guestsIncluded },
-    { label: ui.rowDurationLabel, value: (p) => durationText(p.durationMinutes, locale) },
-    {
-      label: ui.rowAnimators,
-      value: (p) => (p.animatorsSelectable ? ui.animatorsSelectable(p.animators) : ui.animatorsFixed(p.animators)),
-    },
-    { label: ui.rowAdults, value: (p) => ui.adultsValue(p.adultsIncluded) },
-    { label: ui.rowRoom, value: () => ui.roomValue(4) },
-    {
-      label: ui.rowShow,
-      value: (p) => (p.showCount > 0 ? p.showCount : <span aria-label={ui.notIncluded}>{ui.dash}</span>),
-    },
+    { label: ui.rowDurationLabel, value: (p) => formatDuration(p.durationMinutes, ui) },
+    { label: ui.rowAnimators, value: (p) => (p.animatorsSelectable ? ui.animatorsSelectable(p.animators) : ui.animatorsFixed(p.animators)) },
+    { label: ui.rowShow, value: (p) => (p.showCount > 0 ? p.showCount : dash) },
     {
       label: ui.rowWorkshop,
       value: (p) =>
@@ -65,30 +51,18 @@ export function ComparisonMatrix({ packages, locale }: { packages: BirthdayPacka
             <span className="block text-[0.625rem] font-semibold leading-tight normal-case opacity-90 md:text-xs">{ui.workshopValue(p.workshop)}</span>
           </>
         ) : (
-          <span aria-label={ui.notIncluded}>{ui.dash}</span>
+          dash
         ),
     },
-    {
-      label: ui.rowChallenge,
-      value: (p) => (p.challengeIncluded ? "1" : <span aria-label={ui.notIncluded}>{ui.dash}</span>),
-    },
-    {
-      label: ui.rowFigures,
-      value: (p) =>
-        p.figures === "included" ? (
-          <Yes text={ui.included} />
-        ) : p.figures === "not_stated" ? (
-          <span className={`text-xs font-semibold leading-tight ${flagship(p) ? "text-grape-900" : "text-white/80"}`}>{ui.figuresNotStated}</span>
-        ) : (
-          <No text={ui.notIncluded} onFlagship={flagship(p)} />
-        ),
-    },
-    { label: ui.rowPinata, value: (p) => (p.pinata ? <Yes text={ui.included} /> : <No text={ui.notIncluded} onFlagship={flagship(p)} />) },
-    { label: ui.rowInvitation, value: (p) => (p.invitation ? <Yes text={ui.included} /> : <No text={ui.notIncluded} onFlagship={flagship(p)} />) },
-    { label: ui.rowPhoto, value: (p) => (p.photo ? <Yes text={ui.included} /> : <No text={ui.notIncluded} onFlagship={flagship(p)} />) },
+    { label: ui.rowChallenge, value: (p) => yesNo(p.challengeIncluded) },
+    { label: ui.welcomeRow, value: (p) => yesNo(p.welcome) },
+    { label: ui.rowFigures, value: (p) => (p.figures === "included" ? <Yes text={ui.included} /> : <No text={ui.notIncluded} onFlagship={flagship(p)} />) },
+    { label: ui.rowAdults, value: (p) => ui.adultsValue(p.adultsIncluded) },
+    { label: ui.rowInvitation, value: (p) => yesNo(p.invitation) },
+    { label: ui.rowPhoto, value: (p) => yesNo(p.photo) },
+    { label: ui.rowPinata, value: (p) => yesNo(p.pinata) },
   ];
 
-  // Column headers: the package name as approved (brand names are not translated).
   return (
     <div className="max-w-[60rem] overflow-x-auto border-y-2 border-white/30" data-testid="comparison">
       <table className="w-full min-w-[18rem] table-fixed border-collapse text-left">

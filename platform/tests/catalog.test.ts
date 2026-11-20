@@ -40,7 +40,7 @@ describe("catalog seeded from the public site and price hierarchy", () => {
     const again = await seedFromSite(db.pool);
     assert.deepEqual(again, { packagesAdded: 0, roomsAdded: 0, priceRulesAdded: 0 });
     assert.equal((await resolvePrice(db.pool, "boom-bala-party", "2027-03-06"))!.amountKzt, 85000); // a Saturday: regular price
-    await setPriceRule(db.pool, owner, { packageId: "boom-bala-party", ruleType: "base", amountKzt: 134900 }); // restore for later tests
+    await setPriceRule(db.pool, owner, { packageId: "boom-bala-party", ruleType: "base", amountKzt: 114900 }); // restore for later tests
   });
 
   it("weekday detection uses the calendar date", () => {
