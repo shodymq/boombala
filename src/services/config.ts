@@ -29,12 +29,15 @@ export const siteConfig = {
     street: "ул. Шолохова, 29",
     mall: "ТРК «Жібек жолы»",
     floor: "3 этаж",
-    /** Route link (2GIS). NEXT_PUBLIC_MAP_URL overrides. `null` hides the route button. */
-    mapUrl: (process.env.NEXT_PUBLIC_MAP_URL || "https://go.2gis.com/6zqEx") as string | null,
+    /** Official Boom Bala route link (2GIS). `null` hides the route button. */
+    mapUrl: "https://go.2gis.com/glADK" as string | null,
   },
   contacts: {
-    instagram: "https://www.instagram.com/boombala.almaty",
+    email: "boombala888@gmail.com",
+    instagram: "https://www.instagram.com/boombala.almaty/",
     instagramHandle: "@boombala.almaty",
+    threads: "https://www.threads.com/@boombala.almaty",
+    tiktok: "https://www.tiktok.com/@boombala777",
     /** Official number for calls and WhatsApp (+7 747 595 62 67). Digits only with country code. */
     whatsapp: "77475956267" as string | null,
     phone: {

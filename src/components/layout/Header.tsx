@@ -5,7 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef } from "react";
 import { CaretRight, List, X } from "@phosphor-icons/react";
-import { homeLink, infoLinks, isCurrentPage, pageLinks } from "@/lib/nav";
+import { isCurrentPage, navFor, shellUi } from "@/lib/nav";
+import type { Locale } from "@/types";
 import { useLeadForm } from "@/components/lead/LeadFormProvider";
 import { useSelectedPackage } from "@/components/lead/SelectedPackage";
 import { useMenuState } from "./MenuState";
@@ -19,7 +20,9 @@ const navLink =
 /** Active page: bolder text and a yellow underline. Anchors never look "active". */
 const activeMark = (active: boolean) => (active ? " font-extrabold after:absolute after:inset-x-2 after:-bottom-0.5 after:h-[3px] after:rounded-full after:bg-sun-400" : "");
 
-export function Header() {
+export function Header({ locale = "ru" }: { locale?: Locale }) {
+  const { homeLink, infoLinks, pageLinks } = navFor(locale);
+  const ui = shellUi[locale];
   const { menuOpen: open, setMenuOpen: setOpen } = useMenuState();
   const pathname = usePathname();
   const { open: openLead } = useLeadForm();
@@ -91,7 +94,7 @@ export function Header() {
     // Focus goes to the menu button first, so the form returns focus there when it closes.
     toggleRef.current?.focus({ preventScroll: true });
     setOpen(false);
-    openLead({ package: selected ?? undefined, room: room || undefined, source });
+    openLead({ package: selected ?? undefined, room: room || undefined, source, locale });
   };
 
   const rowClass = (active: boolean) =>
@@ -102,7 +105,7 @@ export function Header() {
       <div className="mx-auto flex h-16 w-full max-w-[1280px] items-center justify-between gap-4 px-4 sm:px-6 md:h-[72px] lg:px-10">
         <Link
           href="/"
-          aria-label="Boom Bala — на главную"
+          aria-label={ui.homeAria}
           aria-current={pathname === "/" ? "page" : undefined}
           className="shrink-0"
           onClick={() => open && closeMenu(false)}
@@ -119,7 +122,7 @@ export function Header() {
         </Link>
 
         {/* From 1080 px: pages first, then the home-page sections. Абонемент and Вопросы join from 1280 px. */}
-        <nav aria-label="Основная навигация" className="hidden min-[1080px]:block">
+        <nav aria-label={ui.mainNav} className="hidden min-[1080px]:block">
           <ul className="flex items-center gap-0.5 xl:gap-0.5">
             {pageLinks.map((item) => {
               const active = isCurrentPage(item.href, pathname);
@@ -143,7 +146,7 @@ export function Header() {
 
         <div className="flex items-center gap-2">
           <button type="button" className={`${cta} max-[1079px]:hidden`} onClick={() => book("header")}>
-            Забронировать праздник
+            {ui.bookCta}
           </button>
           <button
             ref={toggleRef}
@@ -151,7 +154,7 @@ export function Header() {
             className="inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-grape-700 text-grape-700 transition-colors hover:bg-grape-50 min-[1080px]:hidden"
             aria-expanded={open}
             aria-controls="mobile-nav"
-            aria-label={open ? "Закрыть меню" : "Открыть меню"}
+            aria-label={open ? ui.closeMenu : ui.openMenu}
             onClick={() => (open ? closeMenu() : setOpen(true))}
           >
             {open ? <X size={22} weight="bold" aria-hidden="true" /> : <List size={22} weight="bold" aria-hidden="true" />}
@@ -166,7 +169,7 @@ export function Header() {
           <nav
             ref={panelRef}
             id="mobile-nav"
-            aria-label="Мобильная навигация"
+            aria-label={ui.mobileNav}
             className="absolute inset-x-0 top-full max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-b border-line bg-paper px-2 pb-4 pt-1.5 shadow-soft md:left-auto md:right-6 md:max-h-[calc(100dvh-5.5rem)] md:w-[26rem] md:rounded-b-3xl md:border-x min-[1080px]:hidden"
           >
             <Link
@@ -220,7 +223,7 @@ export function Header() {
                 onClick={() => book("mobile-menu")}
                 className="flex h-14 w-full items-center justify-center rounded-full bg-sun-400 font-display text-base font-extrabold text-grape-900 shadow-[0_5px_0_0_#b98600] transition-[transform,box-shadow] duration-150 active:translate-y-[3px] active:shadow-[0_2px_0_0_#b98600]"
               >
-                Забронировать праздник
+                {ui.bookCta}
               </button>
             </div>
           </nav>

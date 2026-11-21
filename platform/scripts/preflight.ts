@@ -12,7 +12,8 @@ if (!url) {
 }
 const pool = createPool(url, { max: 1 });
 try {
-  const r = await preflight(pool, join(dirname(fileURLToPath(import.meta.url)), "..", "migrations"));
+  // --final: after the site switch (the legacy packages must be off sale). Without it: "ready" for the switch.
+  const r = await preflight(pool, join(dirname(fileURLToPath(import.meta.url)), "..", "migrations"), process.argv.includes("--final") ? "final" : "ready");
   // A catalog that was never seeded makes every birthday enquiry fail with "rejected" although everything else is green.
   const seeded = (await pool.query<{ p: number; r: number }>("SELECT (SELECT count(*) FROM bb.packages)::int AS p, (SELECT count(*) FROM bb.rooms)::int AS r")).rows[0];
   if (seeded.p === 0 || seeded.r === 0) r.problems.push("catalog_not_seeded: run npm run db:seed");

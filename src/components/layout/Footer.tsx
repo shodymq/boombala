@@ -2,10 +2,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { InstagramLogo } from "@phosphor-icons/react/dist/ssr";
 import { siteConfig } from "@/services/config";
-import { homeLink, infoLinks, pageLinks } from "@/lib/nav";
+import { navFor, shellUi } from "@/lib/nav";
+import type { Locale } from "@/types";
 import { Container } from "@/components/ui/Container";
 
-export function Footer() {
+export function Footer({ locale = "ru" }: { locale?: Locale }) {
+  const { homeLink, infoLinks, legalLinks, pageLinks } = navFor(locale);
+  const ui = shellUi[locale];
   return (
     <footer className="bg-grape-900 text-grape-100">
       <Container className="grid gap-10 py-12 md:grid-cols-[1.2fr_2fr] md:py-16">
@@ -19,18 +22,17 @@ export function Footer() {
             className="-ml-2 h-auto w-[168px] select-none"
           />
           <p className="mt-5 max-w-[34ch] text-base leading-relaxed text-grape-200">
-            Бум Бала (Boom Bala) — детский игровой и развлекательный центр в {siteConfig.city}.
+            {locale === "kk" ? "Boom Bala — Алматыдағы балаларға арналған ойын-сауық орталығы." : `Бум Бала (Boom Bala) — детский игровой и развлекательный центр в ${siteConfig.city}.`}
           </p>
           <address className="mt-4 text-base not-italic leading-relaxed text-grape-200">
-            Адрес: {siteConfig.location.street}
-            <br />
-            {siteConfig.location.mall}, {siteConfig.location.floor}
+            {locale === "kk" ? `${siteConfig.location.city} қ., ${siteConfig.location.street}, ${siteConfig.location.mall}, 3-қабат.` : `Адрес: ${siteConfig.location.street}`}
+            {locale === "kk" ? null : <><br />{siteConfig.location.mall}, {siteConfig.location.floor}</>}
           </address>
         </div>
 
-        <div className="grid grid-cols-2 gap-8 min-[1200px]:grid-cols-3">
-          <nav aria-label="Страницы сайта">
-            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Страницы</p>
+        <div className="grid grid-cols-2 gap-8 min-[1200px]:grid-cols-4">
+          <nav aria-label={ui.footerPages}>
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerPages}</p>
             <ul className="grid gap-1">
               {[homeLink, ...pageLinks].map((item) => (
                 <li key={item.href}>
@@ -42,8 +44,8 @@ export function Footer() {
             </ul>
           </nav>
 
-          <nav aria-label="Информация на главной">
-            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Информация</p>
+          <nav aria-label={ui.footerInfo}>
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerInfo}</p>
             <ul className="grid gap-1">
               {infoLinks.map((item) => (
                 <li key={item.href}>
@@ -55,8 +57,21 @@ export function Footer() {
             </ul>
           </nav>
 
+          <nav aria-label={ui.footerDocs}>
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerDocs}</p>
+            <ul className="grid gap-1">
+              {legalLinks.map((item) => (
+                <li key={item.href}>
+                  <Link href={item.href} className="inline-block py-1.5 text-base transition-colors hover:text-white">
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
           <div className="col-span-2 min-[1200px]:col-span-1">
-            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">Мы в соцсетях</p>
+            <p className="mb-3 font-display text-sm font-extrabold uppercase tracking-[0.14em] text-sun-400">{ui.footerSocial}</p>
             <a
               href={siteConfig.contacts.instagram}
               target="_blank"

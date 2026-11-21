@@ -164,23 +164,24 @@ for (const prof of PROFILES) {
   await pkgBtn.click();
   const pkgList = page.locator('dialog [role=listbox]');
   ok(await pkgList.isVisible(), "package list opens inline");
-  ok((await pkgList.locator("[role=option]").allInnerTexts()).map((t) => t.trim()).join("|") === "WOW PARTY|MAGIC PARTY|BOOM PARTY|Ещё не определились", "package options: WOW, MAGIC, BOOM, undecided");
+  ok((await pkgList.locator("[role=option]").allInnerTexts()).map((t) => t.trim()).join("|") === "HAPPY PARTY|STAR PARTY|BOOM BALA PARTY|Ещё не определились", "package options: WOW, MAGIC, BOOM, undecided");
   ok((await probe(page)).top === m0.top, "opening the list does not move the sheet");
   ok(await page.evaluate(() => document.activeElement?.getAttribute("role") === "listbox"), "focus moves into the list");
   const optHeights = await pkgList.locator("[role=option]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
   ok(optHeights.every((h) => h >= 44), `package cards are at least 44px tall (${optHeights.join(",")})`);
-  await pkgList.locator('[role=option][data-value="magic-party"]').click();
+  await pkgList.locator('[role=option][data-value="happy-party"]').click();
   ok((await page.locator('dialog [role=listbox]').count()) === 0, "the list closes after a choice");
-  ok((await pkgBtn.innerText()).includes("MAGIC PARTY"), "the field shows the choice");
+  ok((await pkgBtn.innerText()).includes("HAPPY PARTY"), "the field shows the choice");
   ok(await page.evaluate(() => document.activeElement === document.querySelector("dialog button[aria-haspopup=listbox]")), "focus returns to the field");
-  ok(await sawEvent(page, "birthday_package_select", "package_id", "magic-party"), "analytics: birthday_package_select fired with the new package");
+  ok(await sawEvent(page, "birthday_package_select", "package_id", "happy-party"), "analytics: birthday_package_select fired with the new package");
 
   // keyboard: arrows, Enter, Escape closes only the list
   await pkgBtn.focus();
   await page.keyboard.press("Enter");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  ok((await pkgBtn.innerText()).includes("BOOM PARTY"), "keyboard: Enter opens, ArrowDown moves, Enter chooses");
+  // the list starts on HAPPY PARTY (the first choice) and ArrowDown moves to STAR PARTY (Pricing V3 order: happy, star, boom)
+  ok((await pkgBtn.innerText()).includes("STAR PARTY"), "keyboard: Enter opens, ArrowDown moves, Enter chooses");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Escape");
   ok((await page.locator("dialog.sheet[open]").count()) === 1 && (await page.locator("dialog [role=listbox]").count()) === 0, "Escape inside the list closes only the list, the form stays open");
@@ -253,7 +254,7 @@ for (const prof of PROFILES) {
   ok(a11y.every((x) => x.name && x.expanded === "false"), `each combobox has an accessible name and aria-expanded ("${a11y.map((x) => x.name.slice(0, 22)).join('", "')}")`);
   await page.unroute("**/api/lead");
   await page.locator("dialog button[aria-haspopup=listbox]").nth(0).click();
-  await page.locator('dialog [role=option][data-value="boom-party"]').click();
+  await page.locator('dialog [role=option][data-value="boom-bala-party"]').click();
   ok((await page.locator('dialog [role=combobox][aria-invalid=true]').count()) === 1, "changing a field clears only its own error state");
   await page.locator("dialog button[aria-haspopup=listbox]").nth(1).click();
   await page.locator('dialog [role=option][data-value="rapunzel-room"]').click();
@@ -261,11 +262,11 @@ for (const prof of PROFILES) {
   await page.getByText("Заявка отправлена").waitFor({ timeout: 10000 });
   ok(true, "a valid enquiry is accepted");
   const sent = leadRequests.at(-1);
-  ok(sent && sent.package === "boom-party" && sent.room === "rapunzel-room" && sent.date === iso && sent.phone.startsWith("+7") && sent.consent === true && sent.children === "6", "the request carries package, room, ISO date, +7 phone and consent");
+  ok(sent && sent.package === "boom-bala-party" && sent.room === "rapunzel-room" && sent.date === iso && sent.phone.startsWith("+7") && sent.consent === true && sent.children === "6", "the request carries package, room, ISO date, +7 phone and consent");
   ok(sent && sent.slot === "2", "the chosen interval is sent with the enquiry (slot 2)");
   await page.waitForTimeout(200);
   // With LEAD_PIPELINE=dual the platform (not this script's mock) delivers to Telegram: set SKIP_TELEGRAM_CHECK=1 there.
-  if (process.env.SKIP_TELEGRAM_CHECK !== "1") ok(received.some((t) => t.includes("BOOM PARTY") && t.includes("Rapunzel Room")), "Telegram (mock) received the lead with package and room");
+  if (process.env.SKIP_TELEGRAM_CHECK !== "1") ok(received.some((t) => t.includes("BOOM BALA PARTY") && t.includes("Rapunzel Room")), "Telegram (mock) received the lead with package and room");
   if (process.env.SKIP_TELEGRAM_CHECK !== "1") ok(received.some((t) => t.includes("Предпочитаемый слот: 14:00–18:00")), "Telegram (mock) received the preferred interval");
 
   // close / focus / scroll restoration / reopen

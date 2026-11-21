@@ -56,6 +56,8 @@ export function AvailabilityPanel({
   packageId,
   slot,
   onSlot,
+  preferredStartTime,
+  onPreferredStartTime,
   onPickDate,
   minDate,
 }: {
@@ -63,6 +65,8 @@ export function AvailabilityPanel({
   packageId: string;
   slot: string;
   onSlot: (id: string) => void;
+  preferredStartTime: string;
+  onPreferredStartTime: (time: string) => void;
   onPickDate: (date: string) => void;
   minDate: string;
 }) {
@@ -143,7 +147,7 @@ export function AvailabilityPanel({
           <div className="grid gap-3" data-testid="availability-outage">
             <p role="alert" className="text-sm font-semibold text-[#b3261e]">Сейчас не удаётся получить свободное время и цену на эту дату. Вы можете отправить заявку: менеджер подтвердит время и стоимость.</p>
             <button type="button" onClick={dayRes.retry} className="min-h-11 justify-self-start rounded-full border-2 border-grape-200 bg-white px-4 font-display text-sm font-extrabold text-grape-800">Проверить ещё раз</button>
-            <PreferredTime slot={slot} onSlot={onSlot} />
+            <PreferredTime value={preferredStartTime} onChange={onPreferredStartTime} />
           </div>
         ) : day ? (
           <div aria-busy={dayState === "loading"}>

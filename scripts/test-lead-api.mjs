@@ -37,7 +37,7 @@ const mock = http.createServer((req, res) => {
 });
 await new Promise((r) => mock.listen(4010, r));
 
-const base = { name: NAME, phone: "+77071234567", date: "2026-12-05", package: "wow-party", consent: true, children: "8", page: "/birthdays" };
+const base = { name: NAME, phone: "+77071234567", date: "2026-12-05", package: "star-party", consent: true, children: "8", page: "/birthdays" };
 let n = 0;
 const RUNIP = `192.0.2.${1 + Math.floor(Math.random() * 250)}`; // own IP per run, so the per-IP limit never leaks between runs
 const RUN = Math.floor(Math.random() * 8000000); // random per run: re-running within 90 s must not hit the duplicate guard
@@ -59,12 +59,12 @@ const check = async (title, fn) => {
 
 console.log(`Server: ${BASE} | mock Telegram: :4010 | test lead name: "${NAME}"\n`);
 
-await check("A. WOW PARTY + Roblox Room -> message has package, room, phone, date, children, name", async (r, b) => {
-  const out = await post({ package: "wow-party", room: "roblox-room" });
+await check("A. STAR PARTY + Roblox Room -> message has package, room, phone, date, children, name", async (r, b) => {
+  const out = await post({ package: "star-party", room: "roblox-room" });
   assert.equal(out.status, 200); assert.equal(out.json.ok, true);
   assert.equal(r.length, b + 1);
   const t = r[b];
-  assert.equal(line(t, "Пакет:"), "WOW PARTY");
+  assert.equal(line(t, "Пакет:"), "STAR PARTY");
   assert.equal(line(t, "Предпочитаемая комната:"), "Roblox Room");
   assert.match(line(t, "Телефон:"), /^\+7 707 \d{3} \d{2} \d{2}$/);
   assert.equal(line(t, "Дата:"), "05.12.2026");
@@ -74,10 +74,10 @@ await check("A. WOW PARTY + Roblox Room -> message has package, room, phone, dat
   assert.ok(!/undefined|null/.test(t), "message must not contain undefined/null");
 });
 
-await check("B. BOOM PARTY + Rapunzel Room", async (r, b) => {
-  const out = await post({ package: "boom-party", room: "rapunzel-room" });
+await check("B. BOOM BALA PARTY + Rapunzel Room", async (r, b) => {
+  const out = await post({ package: "boom-bala-party", room: "rapunzel-room" });
   assert.equal(out.status, 200); assert.equal(r.length, b + 1);
-  assert.equal(line(r[b], "Пакет:"), "BOOM PARTY");
+  assert.equal(line(r[b], "Пакет:"), "BOOM BALA PARTY");
   assert.equal(line(r[b], "Предпочитаемая комната:"), "Rapunzel Room");
 });
 
@@ -88,10 +88,10 @@ await check("C. no room (empty and absent) -> sent, room line is a dash; old cli
 });
 
 await check("D. the same room with a different package -> each lead keeps its own room and package", async (r, b) => {
-  await post({ package: "wow-party", room: "ice-room", date: "2026-12-06" }); await post({ package: "boom-party", room: "ice-room", date: "2026-12-07" });
+  await post({ package: "star-party", room: "ice-room", date: "2026-12-06" }); await post({ package: "boom-bala-party", room: "ice-room", date: "2026-12-07" });
   assert.equal(r.length, b + 2);
-  assert.deepEqual([line(r[b], "Пакет:"), line(r[b], "Предпочитаемая комната:")], ["WOW PARTY", "Ice Room"]);
-  assert.deepEqual([line(r[b + 1], "Пакет:"), line(r[b + 1], "Предпочитаемая комната:")], ["BOOM PARTY", "Ice Room"]);
+  assert.deepEqual([line(r[b], "Пакет:"), line(r[b], "Предпочитаемая комната:")], ["STAR PARTY", "Ice Room"]);
+  assert.deepEqual([line(r[b + 1], "Пакет:"), line(r[b + 1], "Предпочитаемая комната:")], ["BOOM BALA PARTY", "Ice Room"]);
 });
 
 await check("E. invalid room id (unknown string, markup, number, array, object) -> 400, nothing sent", async (r, b) => {
@@ -132,7 +132,7 @@ await check("foreign Origin -> 403, nothing sent", async (r, b) => {
 });
 
 await check("double submit of the same lead within seconds -> one Telegram message", async (r, b) => {
-  const fixed = { phone: `+7707999${String(RUN).slice(-4)}`, date: "2026-12-20", package: "magic-party", room: "magic-room" };
+  const fixed = { phone: `+7707999${String(RUN).slice(-4)}`, date: "2026-12-20", package: "happy-party", room: "magic-room" };
   const first = await fetch(BASE + "/api/lead", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": RUNIP }, body: JSON.stringify({ ...base, ...fixed }) });
   const second = await fetch(BASE + "/api/lead", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": RUNIP }, body: JSON.stringify({ ...base, ...fixed }) });
   const j2 = await second.json(); await new Promise((r) => setTimeout(r, 150));
@@ -141,7 +141,7 @@ await check("double submit of the same lead within seconds -> one Telegram messa
 });
 
 await check("G. delivery failed -> the parent's retry of the SAME lead is delivered (not swallowed as a duplicate)", async (r, b) => {
-  const same = { phone: `+7707888${String(RUN).slice(-4)}`, date: "2026-12-21", package: "wow-party", room: "ice-room" };
+  const same = { phone: `+7707888${String(RUN).slice(-4)}`, date: "2026-12-21", package: "star-party", room: "ice-room" };
   const failed = await post({ ...same, name: `${NAME} FAIL-TELEGRAM` });
   assert.equal(failed.status, 502);
   const retry = await post({ ...same });
@@ -151,7 +151,7 @@ await check("G. delivery failed -> the parent's retry of the SAME lead is delive
 });
 
 await check("H. two identical submissions at the same moment -> one message, both answered ok", async (r, b) => {
-  const same = { ...base, phone: `+7707889${String(RUN).slice(-4)}`, date: "2026-12-22", package: "boom-party", room: "magic-room" };
+  const same = { ...base, phone: `+7707889${String(RUN).slice(-4)}`, date: "2026-12-22", package: "boom-bala-party", room: "magic-room" };
   const go = () => fetch(BASE + "/api/lead", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": RUNIP }, body: JSON.stringify(same) });
   const [x, y] = await Promise.all([go(), go()]); await new Promise((r) => setTimeout(r, 200));
   assert.equal(x.status, 200); assert.equal(y.status, 200);
@@ -167,7 +167,7 @@ await check("I. invalid and undeliverable submissions do not use up the visitor'
 });
 
 await check("J. Telegram timeout (no answer) -> 502 within ~20 s, then the retry of the same lead is delivered", async (r, b) => {
-  const same = { phone: `+7707887${String(RUN).slice(-4)}`, date: "2026-12-23", package: "magic-party", room: "rapunzel-room" };
+  const same = { phone: `+7707887${String(RUN).slice(-4)}`, date: "2026-12-23", package: "happy-party", room: "rapunzel-room" };
   const t0 = Date.now();
   const hung = await post({ ...same, name: `${NAME} HANG-TELEGRAM` });
   const took = (Date.now() - t0) / 1000;
@@ -194,6 +194,57 @@ await check("L. 29th and 30th delivered leads from one IP pass, the 31st gets 42
   assert.equal(r.length, b + 30, "exactly 30 messages were delivered");
   // another visitor (another IP) is not affected
   assert.equal((await post({}, { "x-forwarded-for": "198.51.100.9" })).status, 200);
+});
+
+// ---- Wished start time (preferredStartTime): a wish, never a booking slot ----
+await check("W1. wished start 15:00 is accepted and sent as the exact wish, not as a slot", async (r, b) => {
+  const out = await post({ phone: "+77071110015", preferredStartTime: "15:00" });
+  assert.equal(out.status, 200, JSON.stringify(out.json));
+  assert.equal(r.length, b + 1);
+  const t = r.at(-1);
+  assert.equal(line(t, "Желаемое начало:"), "15:00");
+  assert.ok(!t.includes("Предпочитаемый слот:"), "no legacy slot line when only a wish was chosen");
+});
+await check("W2. wished start 19:00 is accepted, marked for separate manager agreement (4 h does not fit before 22:00)", async (r, b) => {
+  const out = await post({ phone: "+77071110019", preferredStartTime: "19:00" });
+  assert.equal(out.status, 200, JSON.stringify(out.json));
+  assert.match(r.at(-1), /Желаемое начало: 19:00 — согласовать отдельно/);
+});
+await check("W3. a minute that is not on the hour (15:30) is refused with a field error", async () => {
+  const out = await post({ phone: "+77071110030", preferredStartTime: "15:30" });
+  assert.equal(out.status, 400);
+  assert.ok(out.json.fieldErrors?.preferredStartTime, JSON.stringify(out.json));
+});
+await check("W4. 23:00 (after closing) and 09:00 (before opening) are refused", async () => {
+  for (const t of ["23:00", "09:00"]) {
+    const out = await post({ phone: `+7707111${t.replace(":", "")}`, preferredStartTime: t });
+    assert.equal(out.status, 400, t);
+    assert.ok(out.json.fieldErrors?.preferredStartTime, t);
+  }
+});
+await check("W5. the legacy booking slot still works and does not become a wished start", async (r, b) => {
+  const out = await post({ phone: "+77071110051", slot: "2" });
+  assert.equal(out.status, 200, JSON.stringify(out.json));
+  const t = r.at(-1);
+  assert.equal(line(t, "Предпочитаемый слот:"), "14:00–18:00");
+  assert.ok(!t.includes("Желаемое начало:"), "a legacy slot never produces a wished start line");
+});
+await check("W6. the same request with the same wished start is a duplicate: no second message", async (r, b) => {
+  const phone = "+77071110066";
+  const first = await post({ phone, preferredStartTime: "16:00" });
+  const again = await post({ phone, preferredStartTime: "16:00" });
+  assert.equal(first.status, 200);
+  assert.equal(again.json.duplicate, true);
+  assert.equal(r.length, b + 1, "one message for two identical requests");
+});
+await check("W7. the same request with ANOTHER wished start is a new enquiry (not swallowed as a duplicate)", async (r, b) => {
+  const phone = "+77071110077";
+  const first = await post({ phone, preferredStartTime: "12:00" });
+  const other = await post({ phone, preferredStartTime: "13:00" });
+  assert.equal(first.status, 200);
+  assert.ok(!other.json.duplicate, "a different wished time is delivered");
+  assert.equal(r.length, b + 2);
+  assert.equal(line(r.at(-1), "Желаемое начало:"), "13:00");
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? ", SOME FAILED" : ""}`);

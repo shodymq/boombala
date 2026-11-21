@@ -37,15 +37,22 @@ export interface PreflightResult {
  * Full verification of a database before the applications start. `migrationsDir` lets it compare every migration file with
  * what was applied (names, order, checksums, nothing missing, nothing extra). Roles are checked only when they exist.
  */
-export async function preflight(db: Queryable, migrationsDir?: string): Promise<PreflightResult> {
+export const BIRTHDAY_PACKAGES_V3 = ["happy-party", "star-party", "boom-bala-party"] as const;
+export const RETIRED_BIRTHDAY_PACKAGES = ["wow-party", "magic-party", "boom-party"] as const;
+
+/**
+ * "ready": the database can take the NEW site (the three Pricing V4 packages are active and priced; the retired ones may still be on sale).
+ * "final": after the switch, the retired packages must be off sale too.
+ */
+export async function preflight(db: Queryable, migrationsDir?: string, phase: "ready" | "final" = "ready"): Promise<PreflightResult> {
   try {
-    return await runPreflight(db, migrationsDir);
+    return await runPreflight(db, migrationsDir, phase);
   } catch (error) {
     return { ok: false, problems: [`preflight_failed: ${(error as { code?: string }).code ?? "database error"}`] };
   }
 }
 
-async function runPreflight(db: Queryable, migrationsDir?: string): Promise<PreflightResult> {
+async function runPreflight(db: Queryable, migrationsDir: string | undefined, phase: "ready" | "final"): Promise<PreflightResult> {
   const problems: string[] = [];
   const has = async (sql: string, params: unknown[] = []) => (await db.query<{ v: boolean }>(`SELECT (${sql}) AS v`, params)).rows[0].v === true;
 
@@ -65,6 +72,18 @@ async function runPreflight(db: Queryable, migrationsDir?: string): Promise<Pref
   }
 
   if (!(await attendanceSchemaReady(db))) problems.push("attendance_schema_missing: apply migration 013");
+  // Pricing V4 packages: the three new packages active and priced (017 + `npm run db:seed`); retired ones off sale only in "final".
+  const v4 = await db.query<{ id: string; price: number | null; weekday: number | null; is_active: boolean }>(
+    `SELECT p.id, p.is_active,
+            (SELECT amount_kzt FROM bb.price_rules r WHERE r.package_id = p.id AND r.rule_type = 'base' ORDER BY r.id DESC LIMIT 1) AS price,
+            (SELECT amount_kzt FROM bb.price_rules r WHERE r.package_id = p.id AND r.rule_type = 'weekday' ORDER BY r.id DESC LIMIT 1) AS weekday
+       FROM bb.packages p WHERE p.id = ANY($1::text[])`,
+    [[...BIRTHDAY_PACKAGES_V3]],
+  );
+  const ready = new Set(v4.rows.filter((r) => r.is_active && r.price !== null && r.weekday !== null).map((r) => r.id));
+  if (BIRTHDAY_PACKAGES_V3.some((id) => !ready.has(id))) problems.push("birthday_packages_v4_missing: run npm run db:seed (the three Pricing V4 packages must be active and priced)");
+  const onSale = await db.query<{ id: string }>("SELECT id FROM bb.packages WHERE id = ANY($1::text[]) AND is_active", [[...RETIRED_BIRTHDAY_PACKAGES]]);
+  if (phase === "final" && onSale.rows.length > 0) problems.push("retired_birthday_package_on_sale: run npm run catalog:retire-legacy after the site switch");
   const fnArgs = (await db.query<{ args: string }>("SELECT pg_get_function_identity_arguments(p.oid) AS args FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname = 'intake_insert_registration'")).rows.map((r) => r.args);
   if (!fnArgs.some((a) => /smallint/.test(a))) problems.push("intake_insert_registration_without_children_count_missing");
   if (fnArgs.some((a) => !/smallint/.test(a))) problems.push("old_intake_insert_registration_still_exists");

@@ -1,6 +1,7 @@
 import type { FaqItem } from "@/types";
 import { pricingTable } from "./pricing";
 import { membership } from "./membership";
+import { birthdayPackages } from "./birthdays";
 import { formatTenge, formatPriceOrFree } from "@/lib/format";
 import { siteConfig } from "@/services/config";
 import { grandOpeningDayLabel, grandOpeningFullLabel, openingDateLabel, startFullLabel } from "@/lib/opening";
@@ -30,7 +31,7 @@ export const faqItems: FaqItem[] = [
     id: "birthday-free",
     question: "Бесплатно ли имениннику?",
     answer:
-      "Да, вход для именинников бесплатный. В пакетах праздников также бесплатно проходят дети-гости: 5 в WOW PARTY и 6 в MAGIC PARTY и BOOM PARTY.",
+      `Да, вход для именинников бесплатный. В пакетах праздников также бесплатно проходят гости-дети: ${birthdayPackages.map((p) => `${p.guestsIncluded} в ${p.copy.ru.name}`).join(", ")}.`,
   },
   {
     id: "membership",

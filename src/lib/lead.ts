@@ -1,14 +1,14 @@
 import { siteConfig } from "@/services/config";
 import { ROOM_IDS } from "@/data/birthdayRooms";
+import { birthdayPackages, isPackageId, RETIRED_PACKAGE_IDS } from "@/data/birthdays";
 
-export const PACKAGE_OPTIONS = [
-  { value: "wow-party", label: "WOW PARTY" },
-  { value: "magic-party", label: "MAGIC PARTY" },
-  { value: "boom-party", label: "BOOM PARTY" },
+/** The active packages (Pricing V3) plus "not decided yet". Built from the same config as the page. */
+export const PACKAGE_OPTIONS: readonly { value: string; label: string }[] = [
+  ...birthdayPackages.map((p) => ({ value: p.id, label: p.copy.ru.name })),
   { value: "undecided", label: "Ещё не определились" },
-] as const;
+];
 
-export type LeadPackage = (typeof PACKAGE_OPTIONS)[number]["value"];
+export type LeadPackage = (typeof birthdayPackages)[number]["id"] | (typeof RETIRED_PACKAGE_IDS)[number] | "undecided";
 
 export interface LeadFields {
   name: string;
@@ -20,8 +20,10 @@ export interface LeadFields {
   consent: boolean;
   /** Preferred room id, or "" for none. Optional; validated against ROOM_IDS. */
   room: string;
-  /** Preferred time slot id ("1" | "2" | "3") or "". A preference only: an enquiry never reserves a slot. */
+  /** Preferred time slot id ("1" | "2" | "3") or "". A preference only: an enquiry never reserves a slot. Legacy contract with the platform. */
   slot: string;
+  /** Wished START time of the party, "HH:MM" on the hour (10:00 … 22:00), or "". A wish, never a booking. */
+  preferredStartTime: string;
 }
 
 /** The three fixed, back-to-back slots (same as the platform's time_slots). */
@@ -30,6 +32,19 @@ export const BOOKING_SLOTS = [
   { id: "2", label: "14:00–18:00" },
   { id: "3", label: "18:00–22:00" },
 ] as const;
+
+/**
+ * The wished start time, one hour apart from 10:00 to 22:00 inclusive. It is a separate field from `slot` (the legacy numeric
+ * booking slots 1/2/3, which the platform still reads): a start time is never sent as a slot id.
+ */
+export const PREFERRED_START_TIMES = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00"] as const;
+
+/** A 4-hour programme starting at or after 19:00 does not fit before the 22:00 closing: the manager confirms it separately. */
+export const LATE_START_FROM = "19:00";
+
+export function needsManagerForStart(time: string): boolean {
+  return time >= LATE_START_FROM;
+}
 
 export type LeadErrors = Partial<Record<keyof LeadFields, string>>;
 
@@ -87,7 +102,7 @@ function isRealDate(value: string): boolean {
 export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>): {
   ok: boolean;
   errors: LeadErrors;
-  data?: { name: string; phone: string; date: string; children: number | null; package: LeadPackage; room: string | null; slot: string | null };
+  data?: { name: string; phone: string; date: string; children: number | null; package: LeadPackage; room: string | null; slot: string | null; preferredStartTime: string | null };
 } {
   const errors: LeadErrors = {};
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -125,10 +140,19 @@ export function validateLead(input: Partial<Record<keyof LeadFields, unknown>>):
   const slotWrongType = input.slot !== undefined && input.slot !== null && typeof input.slot !== "string";
   if (slotWrongType || (slotRaw && !BOOKING_SLOTS.some((x) => x.id === slotRaw))) errors.slot = "Выберите время из списка";
 
+  // A package id is passed through unchanged: the platform decides what is on sale (it refuses an inactive id, and the
+  // site turns that refusal into the message "this package is no longer sold"). Old cached pages therefore keep working
+  // until the legacy packages are retired, and nothing is ever silently replaced by another package.
   const pkgRaw = str(input.package);
-  const pkg = PACKAGE_OPTIONS.find((o) => o.value === pkgRaw)?.value;
+  const known = pkgRaw === "undecided" || isPackageId(pkgRaw) || (RETIRED_PACKAGE_IDS as readonly string[]).includes(pkgRaw);
+  const pkg = known ? (pkgRaw as LeadPackage) : null;
   if (!pkg) errors.package = "Выберите пакет";
 
+  // The wished start time: optional, one of the approved hours, never a slot id.
+  const startRaw = str(input.preferredStartTime);
+  const startWrongType = input.preferredStartTime !== undefined && input.preferredStartTime !== null && typeof input.preferredStartTime !== "string";
+  if (startWrongType || (startRaw && !(PREFERRED_START_TIMES as readonly string[]).includes(startRaw))) errors.preferredStartTime = "Выберите время из списка";
+
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg!, room: roomRaw || null, slot: slotRaw || null } };
+  return { ok: true, errors, data: { name, phone: phone!, date, children, package: pkg!, room: roomRaw || null, slot: slotRaw || null, preferredStartTime: startRaw || null } };
 }
