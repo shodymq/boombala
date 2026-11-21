@@ -10,7 +10,7 @@
  * Any other profile (development, tests, Preview, today's production) has no requirements and behaves exactly as before.
  * Problems are CODES; no value of the environment is ever returned or logged.
  */
-const FORBIDDEN = ["DATABASE_URL", "MFA_ENC_KEY", "CRON_SECRET", "PLATFORM_IP_PEPPER", "PLATFORM_ROLE", "PLATFORM_PROFILE", "ADMIN_ALLOWED_CIDRS", "SITE_REVALIDATE_URL", "TELEGRAM_NOTIFY_LEVEL"] as const;
+const FORBIDDEN = ["DATABASE_URL", "MFA_ENC_KEY", "CRON_SECRET", "PLATFORM_IP_PEPPER", "PLATFORM_ROLE", "PLATFORM_PROFILE", "ADMIN_ALLOWED_CIDRS", "SITE_REVALIDATE_URL", "TELEGRAM_NOTIFY_LEVEL", "UNIFIED_FASTAPI_WEBSITE_LEADS"] as const;
 
 /**
  * `SITE_PROFILE=rollback-safe`: the site as it runs on the temporary rollback deployment (the one DNS may be pointed back

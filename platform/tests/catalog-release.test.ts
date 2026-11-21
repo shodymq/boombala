@@ -50,9 +50,16 @@ describe("catalogue release: rehearsal of the switch, the retirement and the rol
     );
     await db.pool.query("INSERT INTO bb.legal_documents (kind, version, title, body, status, published_at) VALUES ('personal_data_consent', 1, 'Согласие', 'Текст.', 'published', now())");
 
-    // A legacy enquiry and booking, confirmed while BOOM PARTY was on sale.
-    const lead = await submitLead(db.pool, { idempotencyKey: randomUUID(), name: "Анна Старая", phone: "+77010000101", date: FUTURE, children: 6, packageId: "boom-party", roomId: "roblox-room", slotId: 1, consent: true });
-    legacyReservation = (await confirmLead(db.pool, actor(), { leadId: lead.leadId })).reservationId;
+    // A legacy enquiry and booking, confirmed while BOOM PARTY was on sale. Build it through
+    // the pre-release 12-argument writer because this fixture intentionally stops at migration 016.
+    const legacyContact = (await db.pool.query(
+      "INSERT INTO bb.contacts (name,name_key,phone_e164,source) VALUES ('Анна Старая','анна старая','+77010000101','birthday_form') RETURNING id",
+    )).rows[0].id;
+    const legacyLead = (await db.pool.query(
+      "SELECT id FROM bb.intake_insert_lead($1,$2,'boom-party','roblox-room',$3::date,6::smallint,'/birthdays',NULL,NULL,NULL,NULL,1::smallint)",
+      [randomUUID(), legacyContact, FUTURE],
+    )).rows[0];
+    legacyReservation = (await confirmLead(db.pool, actor(), { leadId: legacyLead.id })).reservationId;
     snapshot = await snapshotCatalog(db.pool);
   });
 

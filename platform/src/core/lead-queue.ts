@@ -36,7 +36,7 @@ export interface LeadDetail extends LeadRow {
 }
 
 const LEAD_COLUMNS = `l.id, l.seq, l.created_at, l.status, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS requested_date,
-            l.slot_id, l.room_id, l.package_id, l.children,
+            l.slot_id, to_char(l.preferred_start_time, 'HH24:MI') AS preferred_start_time, l.room_id, l.package_id, l.children,
             (SELECT r.id FROM bb.slot_reservations r WHERE r.lead_request_id = l.id AND r.released_at IS NULL) AS reservation_id`;
 
 function leadRow(r: Record<string, unknown>): LeadRow {
@@ -49,6 +49,7 @@ function leadRow(r: Record<string, unknown>): LeadRow {
     phone: r.phone_e164 as string,
     requestedDate: r.requested_date as string,
     slotId: r.slot_id as number | null,
+    preferredStartTime: r.preferred_start_time as string | null,
     roomId: r.room_id as string | null,
     packageId: r.package_id as string | null,
     children: r.children as number | null,

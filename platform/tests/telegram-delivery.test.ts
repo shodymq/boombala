@@ -1,9 +1,11 @@
+// TEST FIXTURES: all identities, phone values, emails, and auth values below are synthetic and used only in isolated tests.
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 import { submitLead } from "../src/core/intake.ts";
+import { getLead, searchLeads } from "../src/core/lead-queue.ts";
 import { drainOutbox } from "../src/core/outbox.ts";
 import { sendTelegram, type TelegramConfig } from "../src/core/telegram.ts";
 import { makeUser, seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
@@ -24,13 +26,14 @@ describe("Telegram delivery of enquiries (the outbox worker, the message and the
   let owner: Awaited<ReturnType<typeof makeUser>>;
   const outboxRow = async (leadId: string) => (await db.pool.query("SELECT id, status, attempts, last_error_code FROM bb.outbox WHERE ref_id = $1 AND topic = 'telegram.lead'", [leadId])).rows[0];
   const drain = (leadId?: string) => drainOutbox(db.pool, { level: "full", send: (text) => sendTelegram(config, text, 3000), onlyRefId: leadId, limit: 20 });
-  const enquiry = (over: Record<string, unknown>) => ({ idempotencyKey: randomUUID(), name: "Айгерим Тестова", phone: "+77011112233", date: "2099-03-04", children: 7, consent: true as const, ...over }) as Parameters<typeof submitLead>[1];
+  const drainMinimal = (leadId?: string) => drainOutbox(db.pool, { level: "minimal", send: (text) => sendTelegram(config, text, 3000), onlyRefId: leadId, limit: 20 });
+  const enquiry = (over: Record<string, unknown>) => ({ idempotencyKey: randomUUID(), name: "Synthetic client", phone: "+70000000000", date: "2099-03-04", children: 7, consent: true as const, ...over }) as Parameters<typeof submitLead>[1];
 
   before(async () => {
     db = await startTestDb();
     await seedFromSite(db.pool);
     await db.pool.query("INSERT INTO bb.legal_documents (kind, version, title, body, status, published_at) VALUES ('personal_data_consent', 1, 'Согласие', 'Текст.', 'published', now())");
-    owner = await makeUser(db.pool, "owner", "telegram.owner@example.test");
+    owner = await makeUser(db.pool, "owner", "synthetic@example.invalid");
     server = createServer((req, res) => {
       let body = "";
       req.on("data", (c) => (body += c));
@@ -49,7 +52,7 @@ describe("Telegram delivery of enquiries (the outbox worker, the message and the
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    config = { token: "123456:TEST-ONLY-TOKEN-0000000000000000", chatId: "-1000000000", apiBase: base };
+    config = { token: "synthetic-invalid-bot-token", chatId: "synthetic-chat-id", apiBase: base };
   });
 
   after(async () => {
@@ -64,10 +67,48 @@ describe("Telegram delivery of enquiries (the outbox worker, the message and the
     assert.equal(row.status, "pending");
   });
 
+  it("strict intake stores the exact HH:00 wish separately, shows it in CRM and sends only a non-personal minimal notice once", async () => {
+    received.length = 0;
+    mode = "ok";
+    const input = enquiry({ idempotencyKey: randomUUID(), packageId: "star-party", slotId: null, preferredStartTime: "15:00", name: "SYNTHETIC STRICT TEST", phone: "+70000000000" });
+    const result = await submitLead(db.pool, input);
+    const persisted = (await db.pool.query("SELECT slot_id, to_char(preferred_start_time, 'HH24:MI') AS preferred_start_time FROM bb.lead_requests WHERE id=$1", [result.leadId])).rows[0];
+    assert.deepEqual(persisted, { slot_id: null, preferred_start_time: "15:00" }, "wish is not mapped to an old slot ID");
+
+    const actor = { id: owner.id, role: "owner" as const };
+    assert.equal((await searchLeads(db.pool, actor, { q: "SYNTHETIC STRICT TEST" })).items[0]?.preferredStartTime, "15:00");
+    assert.equal((await getLead(db.pool, actor, result.leadId))?.preferredStartTime, "15:00");
+
+    const delivered = await drainMinimal(result.leadId);
+    assert.deepEqual(delivered, { sent: 1, retry: 0, dead: 0 });
+    const message = received.at(-1)!;
+    assert.match(message, /CRM №\d+/);
+    assert.match(message, /Дата: 04\.03\.2099/);
+    assert.match(message, /Пакет: STAR PARTY/);
+    assert.ok(!message.includes("SYNTHETIC STRICT TEST"));
+    assert.ok(!message.includes("+7 701 111 88 88"));
+    assert.ok(!message.includes("15:00"), "the requested time and contact details stay in the CRM");
+    assert.equal((await outboxRow(result.leadId)).status, "sent");
+
+    const duplicate = await submitLead(db.pool, input);
+    assert.equal(duplicate.duplicate, true);
+    assert.equal(duplicate.leadId, result.leadId);
+    await drainMinimal(result.leadId);
+    assert.equal(received.length, 1, "a retry with the same idempotency key cannot send a duplicate");
+    assert.equal(Number((await db.pool.query("SELECT count(*) n FROM bb.outbox WHERE ref_id=$1 AND topic='telegram.lead'", [result.leadId])).rows[0].n), 1);
+  });
+
+  it("strict intake rejects non-hour preferences instead of rounding them", async () => {
+    await assert.rejects(
+      () => submitLead(db.pool, enquiry({ packageId: "star-party", preferredStartTime: "15:30" })),
+      /validation/i,
+    );
+  });
+
   it("Star Party: the manager receives the full package name, date, room, children and the time slot", async () => {
     received.length = 0;
     mode = "ok";
-    const r = await submitLead(db.pool, enquiry({ packageId: "star-party", roomId: "ice-room", slotId: 2, phone: "+77011112201" }));
+    const r = await submitLead(db.pool, enquiry({ packageId: "star-party", roomId: "ice-room", slotId: 2, phone: "+70000000000" }));
     const res = await drain(r.leadId);
     assert.equal(res.sent, 1);
     const text = received.at(-1)!;
@@ -95,19 +136,19 @@ describe("Telegram delivery of enquiries (the outbox worker, the message and the
   it("a repeat of the same request (double tap, retry) makes no second enquiry and no second message", async () => {
     received.length = 0;
     const key = randomUUID();
-    const first = await submitLead(db.pool, enquiry({ idempotencyKey: key, packageId: "star-party", phone: "+77011119999" }));
-    const again = await submitLead(db.pool, enquiry({ idempotencyKey: key, packageId: "star-party", phone: "+77011119999" }));
+    const first = await submitLead(db.pool, enquiry({ idempotencyKey: key, packageId: "star-party", name: "Synthetic duplicate case", phone: "+70000000000" }));
+    const again = await submitLead(db.pool, enquiry({ idempotencyKey: key, packageId: "star-party", name: "Synthetic duplicate case", phone: "+70000000000" }));
     assert.equal(again.duplicate, true);
     assert.equal(again.leadId, first.leadId);
     await drain();
-    assert.equal(received.filter((t) => t.includes("+7 701 111 99 99")).length, 1, "one message");
+    assert.equal(received.filter((text) => text.includes("Synthetic duplicate case")).length, 1, "one message for this enquiry");
     const n = Number((await db.pool.query("SELECT count(*) n FROM bb.outbox WHERE ref_id = $1", [first.leadId])).rows[0].n);
     assert.equal(n, 1, "one notification task");
   });
 
   it("Telegram down: the task is NOT marked sent, it is retried later, and the enquiry is still safe in the CRM", async () => {
     mode = "down";
-    const r = await submitLead(db.pool, enquiry({ packageId: "boom-bala-party", roomId: "magic-room", phone: "+77011117777", children: 10 }));
+    const r = await submitLead(db.pool, enquiry({ packageId: "boom-bala-party", roomId: "magic-room", phone: "+70000000000", children: 10 }));
     const res = await drain(r.leadId);
     assert.equal(res.sent, 0);
     assert.equal(res.retry, 1);
@@ -134,7 +175,7 @@ describe("Telegram delivery of enquiries (the outbox worker, the message and the
 
   it("a rejected message (bad chat) is a failure with its code, never a success", async () => {
     mode = "rejected";
-    const r = await submitLead(db.pool, enquiry({ packageId: "star-party", phone: "+77011115555" }));
+    const r = await submitLead(db.pool, enquiry({ packageId: "star-party", phone: "+70000000000" }));
     const res = await drain(r.leadId);
     assert.equal(res.sent, 0);
     assert.equal((await outboxRow(r.leadId)).status, "pending");

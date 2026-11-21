@@ -325,6 +325,7 @@ export interface LeadRow {
   phone: string;
   requestedDate: string;
   slotId: number | null;
+  preferredStartTime: string | null;
   roomId: string | null;
   packageId: string | null;
   children: number | null;
@@ -341,7 +342,7 @@ export async function listLeads(pool: Pool, actor: Actor, filter: { status?: str
   }
   const { rows } = await pool.query(
     `SELECT l.id, l.seq, l.created_at, l.status, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS requested_date,
-            l.slot_id, l.room_id, l.package_id, l.children,
+            l.slot_id, to_char(l.preferred_start_time, 'HH24:MI') AS preferred_start_time, l.room_id, l.package_id, l.children,
             (SELECT r.id FROM bb.slot_reservations r WHERE r.lead_request_id = l.id AND r.released_at IS NULL) AS reservation_id
        FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id
        ${where} ORDER BY (l.status IN ('new', 'in_progress')) DESC, l.requested_date, l.seq DESC LIMIT ${Math.min(Math.max(limit, 1), 500)}`,
@@ -349,7 +350,7 @@ export async function listLeads(pool: Pool, actor: Actor, filter: { status?: str
   );
   return rows.map((r) => ({
     id: r.id, seq: Number(r.seq), createdAt: r.created_at, status: r.status, name: r.name, phone: r.phone_e164, requestedDate: r.requested_date,
-    slotId: r.slot_id, roomId: r.room_id, packageId: r.package_id, children: r.children, reservationId: r.reservation_id,
+    slotId: r.slot_id, preferredStartTime: r.preferred_start_time, roomId: r.room_id, packageId: r.package_id, children: r.children, reservationId: r.reservation_id,
   }));
 }
 

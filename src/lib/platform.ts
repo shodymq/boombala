@@ -77,7 +77,8 @@ export interface PlatformLead {
   children: number | null;
   packageId: string;
   roomId: string | null;
-  slotId: number | null;
+  /** Requested start, persisted separately from booking slots. Never rounded or mapped to slot IDs. */
+  preferredStartTime: string | null;
   page: string;
   referrer: string;
   utmSource: string;

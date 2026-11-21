@@ -121,9 +121,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // CRM path (LEAD_PIPELINE=dual|strict). The default `telegram-only` skips this block entirely: today's behaviour.
-    // NOTE: the wished start time (preferredStartTime) is NOT carried into the platform or the FastAPI path yet: the platform
-    // intake has no field for it and a schema change is required first. Only the Telegram path below carries it.
+    // CRM path (LEAD_PIPELINE=dual|strict). The wished start time remains a separate HH:00 preference;
+    // it is never translated to the legacy slot IDs 1/2/3.
     // Success is reported only after the platform has committed the enquiry; the platform then notifies Telegram itself
     // (with retries). In `dual` any platform failure falls through to the direct Telegram path below, so nothing is lost.
     const pipeline = leadPipeline();
@@ -143,7 +142,7 @@ export async function POST(request: Request) {
           children: lead.children,
           packageId: lead.package,
           roomId: lead.room,
-          slotId: lead.slot ? Number(lead.slot) : null,
+          preferredStartTime: lead.preferredStartTime,
           page: pagePath.startsWith("/") ? pagePath : "",
           referrer: clip(body.referrer, 300),
           utmSource: clip(body.utm_source, 100),

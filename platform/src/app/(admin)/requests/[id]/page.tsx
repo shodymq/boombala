@@ -74,6 +74,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
           <div><dt className="text-muted">Телефон</dt><dd className="font-bold">{lead.phone}</dd></div>
           <div><dt className="text-muted">Желаемая дата</dt><dd className="font-bold">{lead.requestedDate ?? "не указана"}</dd></div>
+          <div><dt className="text-muted">Пожелание по времени</dt><dd className="font-bold">{lead.preferredStartTime ?? "не указано"}</dd></div>
           <div><dt className="text-muted">Пакет</dt><dd className="font-bold">{pkg}</dd></div>
           <div><dt className="text-muted">Комната</dt><dd className="font-bold">{room}</dd></div>
           <div><dt className="text-muted">Детей</dt><dd className="font-bold">{lead.children ?? "—"}</dd></div>

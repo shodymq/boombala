@@ -126,6 +126,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                     <span className="crm-requests-mobile-label">Детали заявки</span>
                     <div className="crm-requests-details">
                       <span>Дата: {l.requestedDate ?? "не указана"}</span>
+                      {l.preferredStartTime ? <span>Желаемое время: {l.preferredStartTime}</span> : null}
                       <span>Пакет: {pkgName(l.packageId)}</span>
                       {l.children != null ? <span>Детей: {l.children}</span> : null}
                       {l.reservationId ? <Link href={`/bookings?date=${l.requestedDate}`}>Показать в календаре</Link> : null}

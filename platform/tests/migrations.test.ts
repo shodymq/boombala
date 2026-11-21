@@ -1,7 +1,9 @@
+// TEST FIXTURES: all identities, phone values, emails, and auth values below are synthetic and used only in isolated tests.
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { migrate } from "../src/core/migrate.ts";
 import { MIGRATIONS_DIR, startTestDb, type TestDb } from "./helpers/db.ts";
@@ -72,7 +74,7 @@ describe("migrations and DB-level guarantees", () => {
         cpSync(join(MIGRATIONS_DIR, file), join(oldDir, file));
       }
       await migrate(pre017.pool, oldDir);
-      const user = await pre017.pool.query<{ id: string }>("INSERT INTO users (email,name,password_hash,role) VALUES ('migration-017@example.test','Migration test','x','manager') RETURNING id");
+      const user = await pre017.pool.query<{ id: string }>("INSERT INTO users (email,name,password_hash,role) VALUES ('synthetic@example.invalid','Synthetic migration test','x','manager') RETURNING id");
       await pre017.pool.query("INSERT INTO rooms (id,name) VALUES ('legacy-room-preserve','Legacy room')");
       const before = await pre017.pool.query<{ id: string }>(
         "INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-01-20',NULL,'legacy-room-preserve','kept', $1,'2099-01-20 10:00:00+05','2099-01-20 14:00:00+05') RETURNING id", [user.rows[0].id]);
@@ -103,7 +105,7 @@ describe("migrations and DB-level guarantees", () => {
       rmSync(collisionDir, { recursive: true, force: true });
     }
 
-    const actor = await db.pool.query<{ id: string }>("INSERT INTO users (email,name,password_hash,role) VALUES ('shared-zone@example.test','Shared zone test','x','manager') RETURNING id");
+    const actor = await db.pool.query<{ id: string }>("INSERT INTO users (email,name,password_hash,role) VALUES ('synthetic@example.invalid','Synthetic shared-zone test','x','manager') RETURNING id");
     const sharedOne = await db.pool.query<{ id: string }>(
       "INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-02-20',NULL,'general-hall','one',$1,'2099-02-20 10:00:00+05','2099-02-20 14:00:00+05') RETURNING id", [actor.rows[0].id]);
     const sharedTwo = await db.pool.query<{ id: string }>(
@@ -123,8 +125,8 @@ describe("migrations and DB-level guarantees", () => {
       const q = (sql: string, p: unknown[] = []) => pre018.pool.query(sql, p);
       await q("INSERT INTO packages (id,name,sort_order) VALUES ('wow-party','WOW PARTY',0),('magic-party','MAGIC PARTY',1),('boom-party','BOOM PARTY',2)");
       await q("INSERT INTO price_rules (package_id,rule_type,amount_kzt) VALUES ('wow-party','base',37900),('wow-party','weekday',26530),('boom-party','base',79990)");
-      const user = (await q("INSERT INTO users (email,name,password_hash,role) VALUES ('m018@example.test','M','x','manager') RETURNING id")).rows[0].id;
-      const contact = (await q("INSERT INTO contacts (name,name_key,phone_e164,source) VALUES ('Историч','историч','+77075550999','manual') RETURNING id")).rows[0].id;
+      const user = (await q("INSERT INTO users (email,name,password_hash,role) VALUES ('synthetic@example.invalid','M','x','manager') RETURNING id")).rows[0].id;
+      const contact = (await q("INSERT INTO contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical','историч','+70000000000','manual') RETURNING id")).rows[0].id;
       const lead = (await q("INSERT INTO lead_requests (idempotency_key,contact_id,package_id,requested_date,children,status) VALUES (gen_random_uuid(),$1,'wow-party','2099-03-10',6,'confirmed') RETURNING id", [contact])).rows[0].id;
       const reservation = (await q(
         `INSERT INTO slot_reservations (kind,slot_date,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,created_by,starts_at,ends_at)
@@ -162,6 +164,46 @@ describe("migrations and DB-level guarantees", () => {
     }
   });
 
+  it("019 preserves historical leads and stores HH:00 preferences without slot IDs or rounding", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bb-before-019-"));
+    const prior = await startTestDb({ migrate: false });
+    try {
+      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name < "019_lead_preferred_start_time.sql")) {
+        cpSync(join(MIGRATIONS_DIR, file), join(dir, file));
+      }
+      await migrate(prior.pool, dir);
+      const contact = (await prior.pool.query("INSERT INTO bb.contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical lead','historical lead','+70000000000','birthday_form') RETURNING id")).rows[0].id;
+      const oldLead = (await prior.pool.query("INSERT INTO bb.lead_requests (idempotency_key,contact_id,requested_date,slot_id,status) VALUES ($1,$2,'2099-02-03',2,'new') RETURNING id,seq,slot_id", [randomUUID(), contact])).rows[0];
+
+      const applied = await migrate(prior.pool, MIGRATIONS_DIR);
+      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql"]);
+      const after = (await prior.pool.query("SELECT id,seq,slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [oldLead.id])).rows[0];
+      assert.deepEqual(after, { ...oldLead, preferred_start_time: null }, "old identity, slot and status are preserved; no preference is invented");
+
+      const legacy = (await prior.pool.query(
+        "SELECT id,seq FROM bb.intake_insert_lead($1,$2,NULL,NULL,'2099-02-04',NULL,NULL,NULL,NULL,NULL,NULL,2::smallint)",
+        [randomUUID(), contact],
+      )).rows[0];
+      assert.equal((await prior.pool.query("SELECT slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [legacy.id])).rows[0].slot_id, 2,
+        "the old writer remains available for a safe application rollback");
+
+      const preferred = "15:00";
+      const inserted = (await prior.pool.query(
+        "SELECT id,seq FROM bb.intake_insert_lead($1,$2,NULL,NULL,'2099-02-04',NULL,NULL,NULL,NULL,NULL,NULL,NULL,$3::time)",
+        [randomUUID(), contact, preferred],
+      )).rows[0];
+      const exact = (await prior.pool.query("SELECT slot_id,to_char(preferred_start_time,'HH24:MI') preference FROM bb.lead_requests WHERE id=$1", [inserted.id])).rows[0];
+      assert.deepEqual(exact, { slot_id: null, preference: preferred });
+      await assert.rejects(
+        () => prior.pool.query("SELECT * FROM bb.intake_insert_lead($1,$2,NULL,NULL,'2099-02-05',NULL,NULL,NULL,NULL,NULL,NULL,NULL,'15:30'::time)", [randomUUID(), contact]),
+        (error: { code?: string; constraint?: string }) => error.code === "23514" && error.constraint === "lead_requests_preferred_start_time_check",
+      );
+    } finally {
+      await prior.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("audit_log and price_rules are append-only", async () => {
     await db.pool.query("INSERT INTO audit_log (action) VALUES ('test.created')");
     await assert.rejects(() => db.pool.query("UPDATE audit_log SET action = 'test.changed'"), /append-only/);
@@ -188,15 +230,15 @@ describe("migrations and DB-level guarantees", () => {
   });
 
   it("a user referenced by the audit log or price history cannot be deleted (deactivate instead)", async () => {
-    const { rows } = await db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('hist@example.test', 'Hist', 'h', 'owner') RETURNING id");
+    const { rows } = await db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('history-owner@example.invalid', 'Synthetic history owner', 'h', 'owner') RETURNING id");
     await db.pool.query("INSERT INTO audit_log (action, actor_user_id) VALUES ('test.acted', $1)", [rows[0].id]);
     await assert.rejects(() => db.pool.query("DELETE FROM users WHERE id = $1", [rows[0].id]), /foreign key|violates/i);
-    const { rows: free } = await db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('free@example.test', 'Free', 'h', 'editor') RETURNING id");
+    const { rows: free } = await db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('free-editor@example.invalid', 'Synthetic free editor', 'h', 'editor') RETURNING id");
     await db.pool.query("DELETE FROM users WHERE id = $1", [free[0].id]); // no history: deletable
   });
 
   it("e-mail must be stored lower-case and users need a valid role", async () => {
-    await assert.rejects(() => db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('A@B.test', 'x', 'h', 'owner')"), /check/i);
-    await assert.rejects(() => db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('a@b.test', 'x', 'h', 'admin')"), /invalid input value/);
+    await assert.rejects(() => db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('Uppercase@example.invalid', 'Synthetic invalid user', 'h', 'owner')"), /check/i);
+    await assert.rejects(() => db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('invalid-role@example.invalid', 'Synthetic invalid role', 'h', 'admin')"), /invalid input value/);
   });
 });

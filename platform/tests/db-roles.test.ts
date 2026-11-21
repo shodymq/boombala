@@ -1,3 +1,4 @@
+// TEST FIXTURES: all identities, phone values, emails, and auth values below are synthetic and used only in isolated tests.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
@@ -18,8 +19,8 @@ import { changeRole, createUser, listUsers } from "../src/core/users.ts";
 import { listContacts } from "../src/core/crm.ts";
 import { makeUser, seedFromSite, startTestDb, submitConsentV, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
 
-const API_PW = "api-role-password-0123456789abc";
-const ADMIN_PW = "admin-role-password-0123456789";
+const API_PW = `${randomUUID()}${randomUUID()}`;
+const ADMIN_PW = `${randomUUID()}${randomUUID()}`;
 const FUTURE = (() => {
   const d = new Date(`${almatyToday()}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 45);
@@ -80,11 +81,17 @@ describe("Database roles: one per application, least privilege", () => {
 
   describe("the public API role", () => {
     it("does everything the public API does: intake (enquiry and QR), availability, public documents and news", async () => {
-      const lead = await submitLead(api, { idempotencyKey: randomUUID(), name: "Роль Апи", phone: "+77010000777", date: FUTURE, children: 5, consent: true });
+      const lead = await submitLead(api, { idempotencyKey: randomUUID(), name: "Synthetic API user", phone: "+70000000000", date: FUTURE, children: 5, consent: true });
       assert.equal(lead.duplicate, false);
-      assert.equal((await submitLead(api, { idempotencyKey: randomUUID(), name: "Роль Апи", phone: "+77010000777", date: FUTURE, consent: true })).duplicate, false, "same person, a second enquiry");
+      assert.equal((await submitLead(api, { idempotencyKey: randomUUID(), name: "Synthetic API user", phone: "+70000000000", date: FUTURE, consent: true })).duplicate, false, "same person, a second enquiry");
+      const legacyContact = (await api.query("SELECT bb.intake_upsert_contact('Legacy overload', 'legacy overload', NULL, 'qr') AS id")).rows[0].id;
+      const legacyLead = await api.query(
+        "SELECT id FROM bb.intake_insert_lead($1,$2,NULL,NULL,$3::date,NULL,NULL,NULL,NULL,NULL,NULL,2::smallint)",
+        [randomUUID(), legacyContact, FUTURE],
+      );
+      assert.equal(legacyLead.rowCount, 1, "the previous intake writer remains executable during rollback");
       const qr = await submitConsentV(api, { idempotencyKey: randomUUID(), name: "Роль Кьюар", childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.1", ipPepper: "p", userAgent: "UA" });
-      assert.equal((await submitConsentV(api, { idempotencyKey: randomUUID(), name: "Роль Кьюар Два", phone: "+7 701 000 07 78", childrenCount: 1, acceptRules: true, acceptPersonalData: true })).duplicate, false);
+      assert.equal((await submitConsentV(api, { idempotencyKey: randomUUID(), name: "Synthetic QR user", phone: "+7 701 000 07 78", childrenCount: 1, acceptRules: true, acceptPersonalData: true })).duplicate, false);
       const key = randomUUID();
       const burst = await Promise.all(Array.from({ length: 5 }, () => submitConsentV(api, { idempotencyKey: key, name: "Роль Гонка", childrenCount: 1, acceptRules: true, acceptPersonalData: true })));
       assert.equal(new Set(burst.map((b) => b.registrationId)).size, 1, "the per-key lock works for this role too");
@@ -135,14 +142,14 @@ describe("Database roles: one per application, least privilege", () => {
 
     it("the only doors to personal data are the intake functions: each returns one row or only non-personal columns, with no way to list or search", async () => {
       const fns = (await db.pool.query("SELECT p.oid, p.proname, pg_get_function_result(p.oid) result, p.prosecdef, p.proconfig FROM pg_proc p WHERE p.pronamespace = 'bb'::regnamespace AND p.proname LIKE 'intake\\_%' ORDER BY 2")).rows;
-      assert.equal(fns.length, 9);
+      assert.equal(fns.length, 10, "the additive preferred-time overload preserves the legacy writer");
       for (const f of fns) {
         assert.equal(f.prosecdef, true, `${f.proname} is SECURITY DEFINER`);
         assert.ok((f.proconfig ?? []).some((c: string) => c.startsWith("search_path=")), `${f.proname} pins its search_path`);
         assert.ok(!/(name|phone|ip_hash|user_agent|note|email)/i.test(f.result), `${f.proname} returns no personal column (${f.result})`);
         assert.ok(!/\bSETOF\b/i.test(f.result), `${f.proname} is not an open-ended row source`);
       }
-      // who may execute what: the API role runs exactly these nine and no other function of the schema
+      // who may execute what: the API role runs exactly these ten overloads and no other function of the schema
       const exec = (await db.pool.query("SELECT p.proname, has_function_privilege('bb_api', p.oid, 'EXECUTE') ok FROM pg_proc p WHERE p.pronamespace = 'bb'::regnamespace")).rows;
       for (const e of exec) assert.equal(e.ok, e.proname.startsWith("intake_"), e.proname);
       await denied(api, "SELECT bb.contacts_guard()");
@@ -152,8 +159,8 @@ describe("Database roles: one per application, least privilege", () => {
 
     it("the intake functions refuse what the public API must never do", async () => {
       const refused = (sql: string, params: unknown[] = []) => assert.rejects(() => api.query(sql, params), /unknown intake source|exactly one|not published|not an intake audit|unknown enquiry|invalid_parameter|violates|permission denied/i, sql);
-      await refused("SELECT bb.intake_upsert_contact('x', 'x', '+77010000999', 'manual')");
-      await refused("SELECT bb.intake_upsert_contact('x', 'x', '+77010000999', 'staff')");
+      await refused("SELECT bb.intake_upsert_contact('x', 'x', '+70000000000', 'manual')");
+      await refused("SELECT bb.intake_upsert_contact('x', 'x', '+70000000000', 'staff')");
       await refused("SELECT bb.intake_upsert_contact('x', 'x', 'not a phone', 'qr')");
       const doc = (await db.pool.query("SELECT id FROM bb.legal_documents WHERE status = 'published' LIMIT 1")).rows[0].id;
       const draft = await createDraft(admin, { id: owner.id, role: "owner" }, { kind: "privacy_policy", title: "черновик", body: "не опубликован" });
@@ -171,7 +178,7 @@ describe("Database roles: one per application, least privilege", () => {
 
     it("lookups need the unguessable handle: an unknown key finds nothing, a known one finds exactly its own row", async () => {
       const key = randomUUID();
-      const lead = await submitLead(api, { idempotencyKey: key, name: "Ключ Проверка", phone: "+77010000444", date: FUTURE, consent: true });
+      const lead = await submitLead(api, { idempotencyKey: key, name: "Synthetic key test", phone: "+70000000000", date: FUTURE, consent: true });
       assert.equal((await api.query("SELECT * FROM bb.intake_find_lead($1)", [randomUUID()])).rows.length, 0);
       assert.equal((await api.query("SELECT * FROM bb.intake_find_lead(NULL)")).rows.length, 0);
       const found = (await api.query("SELECT * FROM bb.intake_find_lead($1)", [key])).rows;
@@ -188,7 +195,7 @@ describe("Database roles: one per application, least privilege", () => {
       let pd: string;
       let rules: string;
       const contact = async (name: string) => String((await api.query("SELECT bb.intake_upsert_contact($1, $2, NULL, 'qr') AS id", [name, name.toLowerCase()])).rows[0].id);
-      const lead = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_lead($1, $2, NULL, NULL, $3::date, NULL, NULL, NULL, NULL, NULL, NULL, NULL)", [randomUUID(), contactId, FUTURE])).rows[0].id);
+      const lead = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_lead($1, $2, NULL, NULL, $3::date, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)", [randomUUID(), contactId, FUTURE])).rows[0].id);
       const registration = async (contactId: string) => String((await api.query("SELECT id FROM bb.intake_insert_registration($1, $2, 2::smallint)", [randomUUID(), contactId])).rows[0].id);
       const consents = async (where: string, id: string) => (await db.pool.query(`SELECT count(*)::int n FROM bb.consent_events WHERE ${where} = $1`, [id])).rows[0].n;
 
@@ -372,15 +379,15 @@ describe("Database roles: one per application, least privilege", () => {
         await denied(api, `SELECT last_value FROM bb.${q.relname}`);
       }
       // and the intake still works, because the functions run as their owner
-      assert.ok((await submitConsentV(api, { idempotencyKey: randomUUID(), name: "Последовательность Ок", childrenCount: 1, acceptRules: true, acceptPersonalData: true })).registrationId);
-      assert.ok((await submitLead(api, { idempotencyKey: randomUUID(), name: "Последовательность Ок", phone: "+77010000333", date: FUTURE, consent: true })).leadId);
+      assert.ok((await submitConsentV(api, { idempotencyKey: randomUUID(), name: "Synthetic sequence test", childrenCount: 1, acceptRules: true, acceptPersonalData: true })).registrationId);
+      assert.ok((await submitLead(api, { idempotencyKey: randomUUID(), name: "Synthetic sequence test", phone: "+70000000000", date: FUTURE, consent: true })).leadId);
     });
 
     it("KNOWN LIMIT, kept visible: whether an exact (name, phone) pair exists can be learned (an id comes back), never the data itself", async () => {
-      const a = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000555', 'birthday_form') AS id")).rows[0].id;
-      const b = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000555', 'birthday_form') AS id")).rows[0].id;
+      const a = (await api.query("SELECT bb.intake_upsert_contact('Synthetic contact', 'synthetic contact', '+70000000000', 'birthday_form') AS id")).rows[0].id;
+      const b = (await api.query("SELECT bb.intake_upsert_contact('Synthetic contact', 'synthetic contact', '+70000000000', 'birthday_form') AS id")).rows[0].id;
       assert.equal(a, b, "the same pair gives the same contact (and so confirms it exists)");
-      const other = (await api.query("SELECT bb.intake_upsert_contact('Оракул Один', 'оракул один', '+77010000556', 'birthday_form') AS id")).rows[0].id;
+      const other = (await api.query("SELECT bb.intake_upsert_contact('Synthetic contact', 'synthetic contact', '+70000000001', 'birthday_form') AS id")).rows[0].id;
       assert.notEqual(a, other);
     });
 
@@ -399,14 +406,14 @@ describe("Database roles: one per application, least privilege", () => {
     it("cannot change or delete anything directly, cannot anonymise, cannot touch history, cannot build or drop anything", async () => {
       for (const sql of [
         "UPDATE bb.contacts SET name = 'x'", "UPDATE bb.contacts SET anonymized_at = now()", "UPDATE bb.contacts SET last_activity_at = now()", "DELETE FROM bb.contacts",
-        "INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ('a', 'a', '+77010000001', 'qr')",
+        "INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ('a', 'a', '+70000000000', 'qr')",
         "INSERT INTO bb.lead_requests (idempotency_key, contact_id, requested_date) VALUES (gen_random_uuid(), gen_random_uuid(), current_date)",
         "DELETE FROM bb.lead_requests", "UPDATE bb.lead_requests SET status = 'cancelled'",
         "INSERT INTO bb.consent_events (contact_id, document_id, event, method) VALUES (gen_random_uuid(), gen_random_uuid(), 'revoked', 'staff')",
         "UPDATE bb.consent_events SET ip_hash = NULL", "DELETE FROM bb.consent_events",
         "INSERT INTO bb.outbox (topic, ref_id) VALUES ('telegram.lead', gen_random_uuid())",
         "INSERT INTO bb.audit_log (action) VALUES ('user.created')",
-        "INSERT INTO bb.users (email, name, password_hash, role) VALUES ('a@b.test', 'x', 'x', 'owner')",
+        "INSERT INTO bb.users (email, name, password_hash, role) VALUES ('synthetic@example.invalid', 'x', 'x', 'owner')",
         "UPDATE bb.legal_documents SET status = 'published'",
         "INSERT INTO bb.slot_reservations (kind, slot_date, slot_id, room_id, created_by) VALUES ('block', current_date + 90, 1, 'roblox-room', gen_random_uuid())",
         "UPDATE bb.news_posts SET status = 'published'",
@@ -440,7 +447,7 @@ describe("Database roles: one per application, least privilege", () => {
 
     it("runs the whole staff application: users, second factor, CRM, privacy, bookings, legal, news, export, notifications, retention", async () => {
       // users and the two-step login
-      const staff = await createUser(admin, owner2(), { email: "role.manager@example.test", name: "Менеджер", role: "manager", password: TEST_PASSWORD });
+      const staff = await createUser(admin, owner2(), { email: "synthetic@example.invalid", name: "Synthetic manager", role: "manager", password: TEST_PASSWORD });
       await changeRole(admin, owner2(), staff.id, "manager");
       assert.ok((await listUsers(admin, owner2())).length >= 2);
       const login = await authenticate(admin, { email: staff.email, password: TEST_PASSWORD, ip: "10.77.0.5", mfaRequired: true });
@@ -461,11 +468,11 @@ describe("Database roles: one per application, least privilege", () => {
       assert.ok((await exportContacts(admin, owner2(), { format: "csv", columns: ["name", "phone"] })).rowCount >= 1);
 
       // enquiry -> booking -> release, manual booking
-      const lead = await submitLead(api, { idempotencyKey: randomUUID(), name: "Заявка Роли", phone: "+77010000888", date: FUTURE, children: 4, consent: true });
+      const lead = await submitLead(api, { idempotencyKey: randomUUID(), name: "Synthetic role lead", phone: "+70000000000", date: FUTURE, children: 4, consent: true });
       const { reservationId } = await confirmLead(admin, owner2(), { leadId: lead.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party" });
-      await assert.rejects(() => createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Конфликт", phone: "+77010000889" }), /slot_taken|conflict/i);
+      await assert.rejects(() => createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Synthetic conflict", phone: "+70000000000" }), /slot_taken|conflict/i);
       await releaseReservation(admin, owner2(), reservationId, "ТЕСТ");
-      await createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Ручной Роли", phone: "+77010000890" });
+      await createManualBooking(admin, owner2(), { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Synthetic manual booking", phone: "+70000000000" });
 
       // notifications (the worker is part of the staff application)
       const sent: string[] = [];

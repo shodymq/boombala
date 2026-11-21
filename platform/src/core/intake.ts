@@ -22,6 +22,7 @@ export function hashIp(ip: string | null | undefined, pepper: string | undefined
 
 const optText = (max: number) => z.string().trim().max(max).optional().nullable().transform((v) => (v ? v : null));
 const idSchema = z.string().trim().regex(/^[a-z0-9-]{1,60}$/);
+const preferredStartTimeSchema = z.enum(["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00"]);
 
 const leadSchema = z.object({
   idempotencyKey: z.string().uuid("Некорректный ключ"),
@@ -31,6 +32,7 @@ const leadSchema = z.object({
   children: z.union([z.number().int().min(0).max(200), z.string().regex(/^\d{1,3}$/).transform(Number)]).optional().nullable(),
   packageId: idSchema.optional().nullable(),
   roomId: idSchema.optional().nullable(),
+  preferredStartTime: preferredStartTimeSchema.optional().nullable(),
   slotId: z.union([z.number().int().min(1).max(32767), z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(32767))]).optional().nullable(),
   consent: z.literal(true, "Необходимо согласие"),
   page: optText(200),
@@ -121,8 +123,8 @@ export async function submitLead(pool: Pool, raw: LeadInput, meta: IntakeMeta = 
 
     const contactId = await upsertContact(tx, name, phone, "birthday_form");
     const created = await tx.query<{ id: string; seq: string }>(
-      "SELECT id, seq FROM bb.intake_insert_lead($1, $2, $3, $4, $5::date, $6::smallint, $7, $8, $9, $10, $11, $12::smallint)",
-      [input.idempotencyKey, contactId, packageId, roomId, input.date, input.children ?? null, input.page, input.referrer, input.utmSource, input.utmMedium, input.utmCampaign, input.slotId ?? null],
+      "SELECT id, seq FROM bb.intake_insert_lead($1, $2, $3, $4, $5::date, $6::smallint, $7, $8, $9, $10, $11, $12::smallint, $13::time)",
+      [input.idempotencyKey, contactId, packageId, roomId, input.date, input.children ?? null, input.page, input.referrer, input.utmSource, input.utmMedium, input.utmCampaign, input.slotId ?? null, input.preferredStartTime ?? null],
     );
     if (!created.rows[0]) {
       // A parallel request with the same key committed first: return its result, create nothing.
