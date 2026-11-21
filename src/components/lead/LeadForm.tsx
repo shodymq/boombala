@@ -77,6 +77,7 @@ export function LeadForm({
     consent: false,
     room: initialRoom,
     slot: "",
+    preferredStartTime: "",
   });
   const { setRoom: rememberRoom, setSelected: rememberPackage } = useSelectedPackage();
   const [errors, setErrors] = useState<LeadErrors>({});
@@ -375,11 +376,13 @@ export function LeadForm({
             packageId={values.package}
             slot={values.slot}
             onSlot={(id) => set("slot", id)}
+            preferredStartTime={values.preferredStartTime}
+            onPreferredStartTime={(time) => set("preferredStartTime", time)}
             onPickDate={(d) => set("date", d)}
             minDate={minBookingDate()}
           />
         ) : (
-          <PreferredTime slot={values.slot} onSlot={(id) => set("slot", id)} locale={locale} />
+          <PreferredTime id={idOf("preferredStartTime")} value={values.preferredStartTime} onChange={(time) => set("preferredStartTime", time)} locale={locale} />
         )}
 
         <div className="grid gap-2">

@@ -122,6 +122,8 @@ export async function POST(request: Request) {
     }
 
     // CRM path (LEAD_PIPELINE=dual|strict). The default `telegram-only` skips this block entirely: today's behaviour.
+    // NOTE: the wished start time (preferredStartTime) is NOT carried into the platform or the FastAPI path yet: the platform
+    // intake has no field for it and a schema change is required first. Only the Telegram path below carries it.
     // Success is reported only after the platform has committed the enquiry; the platform then notifies Telegram itself
     // (with retries). In `dual` any platform failure falls through to the direct Telegram path below, so nothing is lost.
     const pipeline = leadPipeline();
@@ -175,7 +177,8 @@ export async function POST(request: Request) {
 
     // Path only: UTM parameters are reported separately.
     const page = clip(body.page, 200).split(/[?#]/)[0];
-    const dupKey = `${lead.phone}|${lead.date}|${lead.package}|${lead.room ?? ""}`;
+    // The wished start is part of the key: the same request with another start time is a new enquiry, not a duplicate.
+    const dupKey = `${lead.phone}|${lead.date}|${lead.package}|${lead.room ?? ""}|${lead.preferredStartTime ?? ""}`;
     try {
       // A repeat of a lead that WAS delivered (double tap, quick retry) is acknowledged without a second
       // message. A lead that failed is not remembered, so the parent's retry is sent for real.
@@ -192,6 +195,7 @@ export async function POST(request: Request) {
           packageLabel: PACKAGE_OPTIONS.find((o) => o.value === lead.package)?.label ?? lead.package,
           roomLabel: (lead.room && getRoomName(lead.room)) || "",
           slotLabel: BOOKING_SLOTS.find((x) => x.id === lead.slot)?.label ?? "",
+          preferredStartTime: lead.preferredStartTime ?? undefined,
           page: page.startsWith("/") ? page : "",
           referrer: clip(body.referrer, 300),
           utmSource: clip(body.utm_source, 100),

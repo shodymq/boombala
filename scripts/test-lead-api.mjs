@@ -196,6 +196,57 @@ await check("L. 29th and 30th delivered leads from one IP pass, the 31st gets 42
   assert.equal((await post({}, { "x-forwarded-for": "198.51.100.9" })).status, 200);
 });
 
+// ---- Wished start time (preferredStartTime): a wish, never a booking slot ----
+await check("W1. wished start 15:00 is accepted and sent as the exact wish, not as a slot", async (r, b) => {
+  const out = await post({ phone: "+77071110015", preferredStartTime: "15:00" });
+  assert.equal(out.status, 200, JSON.stringify(out.json));
+  assert.equal(r.length, b + 1);
+  const t = r.at(-1);
+  assert.equal(line(t, "Желаемое начало:"), "15:00");
+  assert.ok(!t.includes("Предпочитаемый слот:"), "no legacy slot line when only a wish was chosen");
+});
+await check("W2. wished start 19:00 is accepted, marked for separate manager agreement (4 h does not fit before 22:00)", async (r, b) => {
+  const out = await post({ phone: "+77071110019", preferredStartTime: "19:00" });
+  assert.equal(out.status, 200, JSON.stringify(out.json));
+  assert.match(r.at(-1), /Желаемое начало: 19:00 — согласовать отдельно/);
+});
+await check("W3. a minute that is not on the hour (15:30) is refused with a field error", async () => {
+  const out = await post({ phone: "+77071110030", preferredStartTime: "15:30" });
+  assert.equal(out.status, 400);
+  assert.ok(out.json.fieldErrors?.preferredStartTime, JSON.stringify(out.json));
+});
+await check("W4. 23:00 (after closing) and 09:00 (before opening) are refused", async () => {
+  for (const t of ["23:00", "09:00"]) {
+    const out = await post({ phone: `+7707111${t.replace(":", "")}`, preferredStartTime: t });
+    assert.equal(out.status, 400, t);
+    assert.ok(out.json.fieldErrors?.preferredStartTime, t);
+  }
+});
+await check("W5. the legacy booking slot still works and does not become a wished start", async (r, b) => {
+  const out = await post({ phone: "+77071110051", slot: "2" });
+  assert.equal(out.status, 200, JSON.stringify(out.json));
+  const t = r.at(-1);
+  assert.equal(line(t, "Предпочитаемый слот:"), "14:00–18:00");
+  assert.ok(!t.includes("Желаемое начало:"), "a legacy slot never produces a wished start line");
+});
+await check("W6. the same request with the same wished start is a duplicate: no second message", async (r, b) => {
+  const phone = "+77071110066";
+  const first = await post({ phone, preferredStartTime: "16:00" });
+  const again = await post({ phone, preferredStartTime: "16:00" });
+  assert.equal(first.status, 200);
+  assert.equal(again.json.duplicate, true);
+  assert.equal(r.length, b + 1, "one message for two identical requests");
+});
+await check("W7. the same request with ANOTHER wished start is a new enquiry (not swallowed as a duplicate)", async (r, b) => {
+  const phone = "+77071110077";
+  const first = await post({ phone, preferredStartTime: "12:00" });
+  const other = await post({ phone, preferredStartTime: "13:00" });
+  assert.equal(first.status, 200);
+  assert.ok(!other.json.duplicate, "a different wished time is delivered");
+  assert.equal(r.length, b + 2);
+  assert.equal(line(r.at(-1), "Желаемое начало:"), "13:00");
+});
+
 console.log(`\n${passed} checks passed${process.exitCode ? ", SOME FAILED" : ""}`);
 console.log("\nExample message received by the mock (first lead):\n" + "-".repeat(40) + "\n" + received[0] + "\n" + "-".repeat(40));
 mock.closeAllConnections?.();

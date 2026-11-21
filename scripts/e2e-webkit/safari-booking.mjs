@@ -72,6 +72,11 @@ try {
   await dialog.getByRole("option", { name: /STAR PARTY/i }).click();
   check("package picked in listbox", /STAR PARTY/i.test(await dialog.textContent()));
   await dialog.locator('input[name="consent"]').check();
+  // Wished start time: a native select with one-hour steps (not a booking slot).
+  const timeSelect = dialog.locator('select[name="preferredStartTime"]');
+  check("wished start select offers 10:00–22:00 hourly (13 values)", (await timeSelect.locator("option").count()) === 14, "13 times + placeholder");
+  await timeSelect.selectOption("15:00");
+  check("wished start 15:00 is selected", (await timeSelect.inputValue()) === "15:00");
   check("fields filled", (await dialog.locator('input[name="name"]').inputValue()) === "Айгуль Тестова");
   await page.screenshot({ path: `${OUT}/02-ru-form-filled.png` });
 
@@ -83,6 +88,8 @@ try {
   await page.waitForTimeout(3000);
   const header = sent.length ? sent.at(-1).split("\n")[0] : "";
   check("Telegram title names the chosen package (STAR PARTY), not the CTA", /НОВАЯ ЗАЯВКА — STAR PARTY$/.test(header), header);
+  check("Telegram carries the exact wish 'Желаемое начало: 15:00'", sent.some((t) => t.includes("Желаемое начало: 15:00")), sent.length ? "" : "no message");
+  check("Telegram does not show a legacy slot for a wish-only enquiry", !sent.some((t) => t.includes("Желаемое начало: 15:00") && t.includes("Предпочитаемый слот")));
   check("mock Telegram received the lead (package and name)", sent.some((t) => /STAR PARTY/i.test(t) && /Айгуль/.test(t)), sent.length ? sent[0].slice(0, 400).replace(/\n/g, " | ") : "no message");
 
   // 6. Error state: the lead API answers 502 (delivery failed)
