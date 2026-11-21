@@ -39,6 +39,16 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
   before(async () => {
     db = await startTestDb();
     await seedFromSite(db.pool);
+    await db.pool.query(
+      `INSERT INTO bb.packages (id,name,sort_order,is_active) VALUES
+         ('wow-party','WOW PARTY',10,false),('magic-party','MAGIC PARTY',11,false),('boom-party','BOOM PARTY',12,false)`,
+    );
+    await db.pool.query(
+      `INSERT INTO bb.price_rules (package_id,rule_type,amount_kzt,note) VALUES
+         ('wow-party','base',37900,'legacy fixture'),('wow-party','weekday',26530,'legacy fixture'),
+         ('magic-party','base',44900,'legacy fixture'),('magic-party','weekday',31430,'legacy fixture'),
+         ('boom-party','base',79990,'legacy fixture'),('boom-party','weekday',55930,'legacy fixture')`,
+    );
     owner = await makeUser(db.pool, "owner");
     manager = await makeUser(db.pool, "manager", "m1@example.test");
     manager2 = await makeUser(db.pool, "manager", "m2@example.test");
@@ -66,7 +76,7 @@ describe("Stage 3: bookings, blocks and double-booking protection", () => {
     assert.deepEqual(slots.map((x) => `${x.s}-${x.e}`), ["10:00-14:00", "11:00-15:00", "12:00-16:00", "13:00-17:00", "14:00-18:00", "15:00-19:00", "16:00-20:00", "17:00-21:00", "18:00-22:00"]);
   });
 
-  it("keeps the current public form's archived package IDs working without reopening them for CRM sales", async () => {
+  it("keeps legacy public IDs accepted during the staged site switch without listing them in the active catalog", async () => {
     const legacyIds = ["wow-party", "magic-party", "boom-party"];
     const activeIds = (await db.pool.query("SELECT id FROM bb.packages WHERE is_active ORDER BY sort_order, id")).rows.map((r) => r.id);
     assert.deepEqual(activeIds, ["happy-party", "star-party", "boom-bala-party"]);

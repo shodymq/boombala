@@ -1,6 +1,6 @@
 -- 018_birthday_crm_v2: Pricing V4.2 catalog (versioned), the booking card (Booking V2) and its change history.
--- Additive. Existing packages, reservations, prices and payment facts are not rewritten. The old packages are archived for new
--- sales only (is_active = false); their rows, price history and every reservation that references them stay.
+-- Additive. Existing packages, reservations, prices and payment facts are not rewritten. Legacy packages stay available until
+-- the new public site is live; the explicit catalog:retire-legacy step archives them after the site cutover.
 -- Runs with search_path = bb. Ends with harden_schema().
 
 -- ── Catalog: three V4.2 packages ───────────────────────────────────────────────────────────────────────────────
@@ -14,10 +14,10 @@ CREATE TABLE package_archive (
 );
 
 INSERT INTO packages (id, name, sort_order, is_active) VALUES
-  ('happy-party', 'Happy Party', 0, true),
-  ('star-party', 'Star Party', 1, true),
-  ('boom-bala-party', 'Boom Bala Party', 2, true)
-ON CONFLICT (id) DO NOTHING;
+  ('happy-party', 'HAPPY PARTY', 0, true),
+  ('star-party', 'STAR PARTY', 1, true),
+  ('boom-bala-party', 'BOOM BALA PARTY', 2, true)
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order;
 
 INSERT INTO price_rules (package_id, rule_type, amount_kzt, note)
 SELECT v.id, v.rule_type, v.amount, 'Pricing V4.2'
@@ -26,28 +26,22 @@ SELECT v.id, v.rule_type, v.amount, 'Pricing V4.2'
     ('star-party', 'base', 79900), ('star-party', 'weekday', 55930),
     ('boom-bala-party', 'base', 114900), ('boom-bala-party', 'weekday', 80430)
   ) AS v(id, rule_type, amount)
- WHERE NOT EXISTS (SELECT 1 FROM price_rules p WHERE p.package_id = v.id);
+ WHERE NOT EXISTS (
+   SELECT 1 FROM price_rules p
+    WHERE p.package_id = v.id AND p.rule_type = v.rule_type AND p.rule_date IS NULL
+ );
 
--- Old packages stay as history. A package listed here can never be sold again, also in a database that is seeded later.
-INSERT INTO package_archive (package_id, reason)
-SELECT id, 'replaced by Pricing V4.2' FROM packages WHERE id IN ('wow-party', 'magic-party', 'boom-party')
-ON CONFLICT DO NOTHING;
-UPDATE packages SET is_active = false, sort_order = sort_order + 10 WHERE id IN (SELECT package_id FROM package_archive) AND is_active;
-
--- BEFORE INSERT forces is_active = false; the archive row is written AFTER the package row exists (foreign key).
-CREATE FUNCTION packages_archive_after() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  INSERT INTO package_archive (package_id, reason) VALUES (NEW.id, 'replaced by Pricing V4.2') ON CONFLICT DO NOTHING;
-  RETURN NULL;
-END $$;
+-- Old package IDs can remain on sale during the staged switch. Once catalog:retire-legacy writes an archive record,
+-- this guard prevents a later seed or manual update from reopening that package. Rollback explicitly removes the marker first.
 CREATE FUNCTION packages_archive_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF NEW.id IN ('wow-party', 'magic-party', 'boom-party') THEN NEW.is_active := false; END IF;
+  IF NEW.id IN ('wow-party', 'magic-party', 'boom-party')
+     AND EXISTS (SELECT 1 FROM package_archive WHERE package_id = NEW.id) THEN
+    NEW.is_active := false;
+  END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER packages_archive_guard_trg BEFORE INSERT ON packages FOR EACH ROW EXECUTE FUNCTION packages_archive_guard();
-CREATE TRIGGER packages_archive_after_trg AFTER INSERT ON packages FOR EACH ROW
-  WHEN (NEW.id IN ('wow-party', 'magic-party', 'boom-party')) EXECUTE FUNCTION packages_archive_after();
+CREATE TRIGGER packages_archive_guard_trg BEFORE INSERT OR UPDATE OF is_active ON packages FOR EACH ROW EXECUTE FUNCTION packages_archive_guard();
 
 -- A version of the commercial terms of a package. A booking records the version it was agreed under.
 CREATE TABLE package_versions (

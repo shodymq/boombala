@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Locale } from "@/types";
+import { BIRTHDAYS_UI } from "@/data/birthdays-ui";
 import { flushSync } from "react-dom";
 import { ArrowRight, CaretLeft, CaretRight, Play, X } from "@phosphor-icons/react";
 import type { BirthdayRoom } from "@/types";
@@ -13,7 +15,8 @@ import { trackBirthday } from "@/lib/funnel";
 import { rememberScroll } from "@/lib/scroll-restore";
 
 /** Cover grid + a native <dialog> viewer. Nothing is loaded for a room until its dialog is opened. */
-export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
+export function RoomsGallery({ rooms, locale }: { rooms: BirthdayRoom[]; locale: Locale }) {
+  const ui = BIRTHDAYS_UI[locale];
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const pendingLead = useRef<string | null>(null);
@@ -94,8 +97,8 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
     // The booking form opens only after this dialog is gone (no stacked modals).
     const room = pendingLead.current;
     pendingLead.current = null;
-    if (room) window.setTimeout(() => openLead({ room, package: selectedPackage ?? undefined, source: "room-gallery" }), 0);
-  }, [openLead, selectedPackage, stopVideo]);
+    if (room) window.setTimeout(() => openLead({ room, package: selectedPackage ?? undefined, locale, source: "room-gallery" }), 0);
+  }, [openLead, selectedPackage, stopVideo, locale]);
 
   const close = useCallback(() => {
     const d = dialogRef.current;
@@ -165,7 +168,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
                 {r.name}
               </span>
               <span className="mt-0.5 inline-flex items-center gap-1.5 font-display text-sm font-extrabold text-grape-600 underline decoration-sun-400 decoration-2 underline-offset-4">
-                Посмотреть комнату
+                {ui.roomViewLabel}
                 <ArrowRight size={14} weight="bold" aria-hidden="true" className="transition-transform group-hover:translate-x-1" />
               </span>
             </button>
@@ -184,7 +187,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
                 <button
                   type="button"
                   onClick={close}
-                  aria-label="Закрыть"
+                  aria-label={ui.roomClose}
                   className="group -mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center"
                 >
                   <span className="flex h-8 w-8 items-center justify-center rounded-full bg-grape-100 text-grape-800 transition-colors group-hover:bg-grape-200">
@@ -218,7 +221,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
                     <button
                       type="button"
                       onClick={() => step(-1)}
-                      aria-label="Предыдущее фото"
+                      aria-label={ui.roomPrev}
                       className="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-grape-800 shadow-soft transition-transform active:scale-95"
                     >
                       <CaretLeft size={20} weight="bold" aria-hidden="true" />
@@ -226,7 +229,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
                     <button
                       type="button"
                       onClick={() => step(1)}
-                      aria-label="Следующее фото"
+                      aria-label={ui.roomNext}
                       className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-paper text-grape-800 shadow-soft transition-transform active:scale-95"
                     >
                       <CaretRight size={20} weight="bold" aria-hidden="true" />
@@ -239,13 +242,13 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
               </div>
 
               {room.images.length > 1 ? (
-                <ul className="mt-2 flex gap-2" aria-label="Фотографии комнаты">
+                <ul className="mt-2 flex gap-2" aria-label={ui.roomPhotosLabel(room.name)}>
                   {room.images.map((p, i) => (
                     <li key={p.src}>
                       <button
                         type="button"
                         onClick={() => setIndex(i)}
-                        aria-label={`Фото ${i + 1} из ${room.images.length}`}
+                        aria-label={ui.roomPhotoOf(i + 1, room.images.length)}
                         aria-current={i === index ? "true" : undefined}
                         className={`relative block h-14 w-[5.5rem] overflow-hidden rounded-xl border-2 transition-colors ${
                           i === index ? "border-grape-700" : "border-transparent opacity-80 hover:opacity-100"
@@ -274,17 +277,17 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
                       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sun-400 text-grape-900">
                         <Play size={16} weight="fill" aria-hidden="true" />
                       </span>
-                      Смотреть видео комнаты
+                      {ui.roomVideo}
                     </button>
                   ) : videoError ? (
                     <p role="alert" className="rounded-2xl bg-grape-50 px-4 py-4 text-sm leading-snug text-grape-800">
-                      Не удалось загрузить видео. Проверьте соединение и попробуйте ещё раз. Оставить заявку можно и без видео.
+                      {ui.roomVideoError}
                       <button
                         type="button"
                         onClick={startVideo}
                         className="mt-2 block font-display font-extrabold underline decoration-sun-400 decoration-2 underline-offset-4"
                       >
-                        Попробовать снова
+                        {ui.roomVideoRetry}
                       </button>
                     </p>
                   ) : (
@@ -297,7 +300,7 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
                       playsInline
                       muted
                       preload="none"
-                      aria-label={`Видео комнаты: ${room.name}`}
+                      aria-label={ui.roomVideoLabel(room.name)}
                       onError={() => setVideoError(true)}
                       className="block aspect-video w-full rounded-2xl bg-grape-900 object-contain"
                     />
@@ -308,10 +311,10 @@ export function RoomsGallery({ rooms }: { rooms: BirthdayRoom[] }) {
 
             <div className="shrink-0 border-t border-line bg-paper px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-6">
               <button type="button" onClick={askToBook} className={buttonClass("primary", "w-full sm:w-auto")}>
-                Узнать о бронировании
+                {ui.roomBook}
               </button>
               <p className="mt-2 text-[0.8125rem] leading-snug text-muted">
-                Выбор комнаты не гарантирует, что она свободна на вашу дату.
+                {ui.roomNotGuaranteed}
               </p>
             </div>
           </>

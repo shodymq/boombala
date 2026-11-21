@@ -226,7 +226,7 @@ try {
   ok(f3.entered === 3 && f3.entries === 2 && f3.adults === 1, `manual entry: entered 3, entries 2, adults still 1 (${JSON.stringify(f3)})`);
 
   console.log("## 6. CRM: a birthday enquiry from the site lands in /requests; Telegram gets no name and no phone");
-  const leadBody = { name: LEAD_NAME, phone: LEAD_PHONE, date: "2099-06-01", package: "wow-party", consent: true, idempotencyKey: crypto.randomUUID() };
+  const leadBody = { name: LEAD_NAME, phone: LEAD_PHONE, date: "2099-06-01", package: "star-party", consent: true, idempotencyKey: crypto.randomUUID() };
   const lead = await postJson(SITE.port, SITE.host, "/api/lead", leadBody, { "x-real-ip": "198.51.100.8" });
   if (lead.status !== 200) console.log("   site log:", (logs.get("site").join("").match(/\[lead\][^\n]*/g) ?? []).join(" | ").slice(0, 300), "| api log:", (logs.get("api").join("").match(/[^\n]*(error|Error|invalid)[^\n]{0,160}/g) ?? []).slice(-3).join(" | ").replace(/\d{9,}/g, "#"));
   ok(lead.status === 200, `the strict site saves the enquiry in the platform (${lead.status})`);

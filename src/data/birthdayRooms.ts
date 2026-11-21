@@ -37,6 +37,3 @@ export type RoomId = (typeof birthdayRooms)[number]["id"];
 export const ROOM_IDS: readonly string[] = birthdayRooms.map((r) => r.id);
 
 export const getRoomName = (id: string): string | null => birthdayRooms.find((r) => r.id === id)?.name ?? null;
-
-/** One note under the rooms section: the images are AI-enhanced, not documentary. */
-export const ROOM_PHOTO_NOTE = "Изображения интерьеров созданы на основе фотографий. Отдельные детали могут отличаться.";

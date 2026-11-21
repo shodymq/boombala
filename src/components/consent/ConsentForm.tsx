@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { formatNationalPhone, phoneDigits } from "@/lib/lead";
 import { buttonClass } from "@/components/ui/buttonStyles";
@@ -271,21 +271,6 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
   };
   const err = (k: string) => (errors[k] ? <p id={`${uid}-${k}-err`} className="mt-1.5 text-sm font-semibold text-[#b3261e]">{errText(k)}</p> : null);
   const inv = (k: string) => (errors[k] ? { "aria-invalid": true as const, "aria-describedby": `${uid}-${k}-err`, "data-consent-invalid": true } : {});
-  const docLabel = (d: Doc) => t.docLabel[d.kind] ?? d.title;
-  // A compact, collapsible row: the full text of the edition the visitor sees (and consents to) opens in place.
-  const docCard = (d: Doc, summary: string, extra?: ReactNode) => (
-    <details key={d.kind} className="rounded-xl border border-grape-200 bg-white" data-doc-kind={d.kind}>
-      <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-sm">
-        <span className="font-bold text-grape-800 underline decoration-grape-300 underline-offset-4">{summary}</span>
-        <span className="shrink-0 rounded-full bg-grape-50 px-2.5 py-0.5 text-xs font-bold text-grape-700">{t.edition} {d.version}</span>
-      </summary>
-      <div tabIndex={0} role="region" aria-label={`${docLabel(d)}, ${t.fullText}`} className="max-h-72 overflow-y-auto whitespace-pre-wrap border-t border-grape-100 px-3 py-3 text-sm leading-relaxed text-grape-900">
-        {d.body}
-      </div>
-      {extra}
-    </details>
-  );
-
   return (
     <div lang={lang}>
       {switcher}
@@ -351,29 +336,34 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
                 <p role="alert" className="rounded-2xl border border-sun-300 bg-sun-100 px-4 py-3 text-sm font-semibold text-grape-900">{t.stale}</p>
               ) : null}
               <div>
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-base text-grape-900">
+                <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
                   <input type="checkbox" name="acceptRules" checked={rules} onChange={(e) => setRulesSig(e.target.checked ? sig : null)} className="h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptRules")} />
-                  <span>{t.rules}</span>
+                  <span>
+                    {t.rules} — {(() => {
+                      const d = rulesDocs.find((item) => item.kind === "visit_rules");
+                      return d ? (
+                        <a href="/rules" target="_blank" rel="noopener noreferrer" data-testid="consent-rules-link" onClick={(event) => event.stopPropagation()} className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">
+                          {t.readRules} ({t.edition} {d.version})
+                        </a>
+                      ) : null;
+                    })()}
+                  </span>
                 </label>
-                <div className="ml-9 grid gap-2">{rulesDocs.map((d) => docCard(d, rulesDocs.length > 1 ? docLabel(d) : t.readRules))}</div>
                 {err("acceptRules")}
               </div>
               <div>
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-base text-grape-900">
+                <label className="flex min-h-11 cursor-pointer items-start gap-3 text-base text-grape-900">
                   <input type="checkbox" name="acceptPersonalData" checked={data} onChange={(e) => setDataSig(e.target.checked ? sig : null)} className="h-6 w-6 shrink-0 accent-grape-700" {...inv("acceptPersonalData")} />
-                  <span>{t.data}</span>
+                  <span>
+                    {t.data} — {dataDoc ? (
+                      <a href="/personal-data-consent" target="_blank" rel="noopener noreferrer" data-testid="consent-personal-data-link" onClick={(event) => event.stopPropagation()} className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">
+                        {t.readData} ({t.edition} {dataDoc.version})
+                      </a>
+                    ) : null}
+                    {dataDoc ? <span className="ml-1">· <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">{t.policy}</a></span> : null}
+                  </span>
                 </label>
-                {dataDoc ? (
-                  <div className="ml-9 grid gap-2">
-                    {docCard(
-                      dataDoc,
-                      t.readData,
-                      <p className="border-t border-grape-100 px-3 py-2 text-sm">
-                        <a href="/privacy" target="_blank" rel="noopener" className="inline-flex min-h-11 items-center font-semibold text-grape-700 underline decoration-sun-400 decoration-2 underline-offset-2">{t.policy}</a>
-                      </p>,
-                    )}
-                  </div>
-                ) : null}
+                {dataDoc ? <p className="ml-9 mt-1 text-xs text-muted" data-testid="consent-personal-data-version">{t.edition} {dataDoc.version}</p> : null}
                 {err("acceptPersonalData")}
               </div>
             </div>
@@ -390,6 +380,7 @@ export function ConsentForm({ documents }: { documents: Doc[] }) {
         </form>
       </div>
       <p className="mt-4 text-center text-xs leading-relaxed text-muted">{t.foot}</p>
+      <p className="mt-2 text-center text-xs leading-relaxed text-muted" data-testid="consent-operator">Оператор персональных данных: ИП «АМАНОВ» · Дербес деректер операторы: «АМАНОВ» ЖК</p>
     </div>
   );
 }

@@ -114,7 +114,7 @@ describe("migrations and DB-level guarantees", () => {
     await assert.rejects(() => db.pool.query("INSERT INTO slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block','2099-02-20',NULL,'exclusive-zone-test','two',$1,'2099-02-20 11:00:00+05','2099-02-20 15:00:00+05')", [actor.rows[0].id]), (error: { code?: string }) => error.code === "23P01");
   });
 
-  it("018 on top of a populated 017 database keeps every old package, price, reservation and payment; old packages leave sales only", async () => {
+  it("018 on top of populated 017 keeps every old package, price, reservation and payment; legacy sale flags wait for site cutover", async () => {
     const oldDir = mkdtempSync(join(tmpdir(), "bb-before-018-"));
     const pre018 = await startTestDb({ migrate: false });
     try {
@@ -140,17 +140,20 @@ describe("migrations and DB-level guarantees", () => {
       await migrate(pre018.pool, MIGRATIONS_DIR);
 
       assert.deepEqual((await q("SELECT id,is_active FROM packages ORDER BY id")).rows.map((r) => `${r.id}:${r.is_active}`), [
-        "boom-bala-party:true", "boom-party:false", "happy-party:true", "magic-party:false", "star-party:true", "wow-party:false",
+        "boom-bala-party:true", "boom-party:true", "happy-party:true", "magic-party:true", "star-party:true", "wow-party:true",
       ]);
+      assert.equal((await q("SELECT count(*)::int n FROM package_archive")).rows[0].n, 0, "the migration does not retire legacy IDs before the site switch");
       assert.equal((await q("SELECT count(*)::int n FROM price_rules WHERE package_id IN ('wow-party','boom-party')")).rows[0].n, before.prices, "price history is untouched");
       assert.deepEqual((await q("SELECT id,package_id,price_kzt,price_source,lead_request_id FROM slot_reservations WHERE id=$1", [reservation])).rows[0], before.reservation, "the booking and its agreed price are untouched");
       assert.equal((await q("SELECT count(*)::int n FROM manual_payment_facts WHERE lead_request_id=$1", [lead])).rows[0].n, 1, "the payment fact is untouched");
       assert.equal((await q("SELECT status FROM lead_requests WHERE id=$1", [lead])).rows[0].status, "confirmed");
       assert.equal((await q("SELECT count(*)::int n FROM booking_cards")).rows[0].n, 0, "no card is invented for an old booking");
-      // The three archived ids can never be sold again, even if a later seed or an import inserts them.
-      await q("DELETE FROM package_archive WHERE package_id = 'magic-party'");
+      // Once explicitly archived after cutover, a later seed/update cannot reopen the legacy ID.
+      await q("INSERT INTO package_archive (package_id, reason) VALUES ('magic-party','test retirement')");
+      await q("UPDATE packages SET is_active = false WHERE id = 'magic-party'");
+      await q("UPDATE packages SET is_active = true WHERE id = 'magic-party'");
       assert.equal((await q("SELECT is_active FROM packages WHERE id='magic-party'")).rows[0].is_active, false);
-      assert.equal((await q("SELECT count(*)::int n FROM package_archive")).rows[0].n, 2);
+      assert.equal((await q("SELECT count(*)::int n FROM package_archive")).rows[0].n, 1);
       // A booking card cannot reference a terms version that does not exist.
       await assert.rejects(() => q("INSERT INTO booking_cards (reservation_id,package_id,terms_version,created_by,updated_by) VALUES ($1,'wow-party','v9',$2,$2)", [reservation, user]), /foreign key/i);
     } finally {

@@ -6,6 +6,7 @@ import { applyRoles } from "../scripts/db-roles.ts";
 import { createPool, type Pool } from "../src/core/db.ts";
 import { almatyToday } from "../src/core/dates.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../src/core/errors.ts";
+import { retireLegacyPackages } from "../src/core/catalog-release.ts";
 import type { ValidSession } from "../src/core/session.ts";
 import { makeUser, seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
 
@@ -39,6 +40,17 @@ describe("Birthday CRM V2: the booking card", () => {
   before(async () => {
     db = await startTestDb();
     await seedFromSite(db.pool);
+    await db.pool.query(
+      `INSERT INTO bb.packages (id,name,sort_order,is_active) VALUES
+         ('wow-party','WOW PARTY',10,false),('magic-party','MAGIC PARTY',11,true),('boom-party','BOOM PARTY',12,true)`,
+    );
+    await db.pool.query(
+      `INSERT INTO bb.price_rules (package_id,rule_type,amount_kzt,note) VALUES
+         ('wow-party','base',37900,'legacy fixture'),('wow-party','weekday',26530,'legacy fixture'),
+         ('magic-party','base',44900,'legacy fixture'),('magic-party','weekday',31430,'legacy fixture'),
+         ('boom-party','base',79990,'legacy fixture'),('boom-party','weekday',55930,'legacy fixture')`,
+    );
+    await retireLegacyPackages(db.pool);
     await applyRoles(db.pool, { apiPassword: randomBytes(12).toString("hex") + "A1", adminPassword: "adm" + randomBytes(12).toString("hex") + "B2" });
     const password = "adm" + randomBytes(12).toString("hex");
     await db.pool.query(`ALTER ROLE bb_admin PASSWORD '${password}'`);

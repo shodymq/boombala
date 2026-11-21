@@ -5,9 +5,12 @@ import { useEffect, useState } from "react";
 import { useMenuState } from "@/components/layout/MenuState";
 import { useLeadForm } from "./LeadFormProvider";
 import { useSelectedPackage } from "./SelectedPackage";
+import type { Locale } from "@/types";
+import { shellUi } from "@/lib/nav";
 
 /** Mobile-only bottom bar. Appears after the first screen so it never competes with the hero CTAs. */
-export function StickyBookingCta() {
+export function StickyBookingCta({ locale = "ru" }: { locale?: Locale }) {
+  const ui = shellUi[locale];
   const { open, isOpen } = useLeadForm();
   const { selected, room } = useSelectedPackage();
   const { menuOpen } = useMenuState();
@@ -32,10 +35,10 @@ export function StickyBookingCta() {
       <button
         type="button"
         tabIndex={show ? 0 : -1}
-        onClick={() => open({ package: selected ?? undefined, room: room || undefined, source: "sticky-bar" })}
+        onClick={() => open({ package: selected ?? undefined, room: room || undefined, source: "sticky-bar", locale })}
         className="flex h-14 w-full items-center justify-center rounded-full bg-sun-400 font-display text-base font-extrabold text-grape-900 shadow-[0_5px_0_0_#b98600] transition-[transform,box-shadow] duration-150 active:translate-y-[3px] active:shadow-[0_2px_0_0_#b98600]"
       >
-        Забронировать праздник
+        {ui.bookCta}
       </button>
     </div>
   );

@@ -5,11 +5,14 @@ import { Sheet } from "@/components/ui/Sheet";
 import { LeadForm } from "./LeadForm";
 import { trackBirthday } from "@/lib/funnel";
 import type { LeadPackage } from "@/lib/lead";
+import type { Locale } from "@/types";
 import { rememberScroll } from "@/lib/scroll-restore";
 import { useSelectedPackage } from "./SelectedPackage";
 
 interface OpenOptions {
   package?: LeadPackage;
+  /** Language of the page that opened the form (the form's labels follow it). */
+  locale?: Locale;
   /** Preferred room id (from the room gallery). */
   room?: string;
   /** Where the click came from, for analytics (e.g. "hero", "package-row"). */
@@ -37,6 +40,7 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState(0); // remount the form on each open
   const [initialPackage, setInitialPackage] = useState<LeadPackage>("undecided");
   const [initialRoom, setInitialRoom] = useState("");
+  const [initialLocale, setInitialLocale] = useState<Locale>("ru");
   const { setSelected } = useSelectedPackage();
 
   const open = useCallback((options: OpenOptions = {}) => {
@@ -46,6 +50,7 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
     // Remember the package this visit asked for, so later CTAs (header, sticky bar) open with it.
     if (options.package) setSelected(options.package);
     setInitialRoom(options.room ?? "");
+    setInitialLocale(options.locale ?? "ru");
     setSession((n) => n + 1);
     setIsOpen(true);
     trackBirthday("birthday_lead_form_open", {
@@ -102,7 +107,7 @@ export function LeadFormProvider({ children }: { children: ReactNode }) {
     <LeadFormContext.Provider value={value}>
       {children}
       <Sheet ref={dialogRef} labelledBy="lead-title" onBackdrop={close}>
-        {isOpen ? <LeadForm key={session} initialPackage={initialPackage} initialRoom={initialRoom} onClose={close} /> : null}
+        {isOpen ? <LeadForm key={session} initialPackage={initialPackage} initialRoom={initialRoom} locale={initialLocale} onClose={close} /> : null}
       </Sheet>
     </LeadFormContext.Provider>
   );
