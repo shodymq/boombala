@@ -76,6 +76,8 @@ export interface LeadMessage {
   roomLabel: string;
   /** Preferred slot label, e.g. "10:00–14:00", or "" when none. */
   slotLabel?: string;
+  /** The visitor's wished START time, "HH:MM" (a wish, not a booking). Empty when none was chosen. */
+  preferredStartTime?: string;
   page: string;
   referrer: string;
   utmSource: string;
@@ -117,8 +119,10 @@ function almatyTimestamp(now = new Date()): string {
 
 /** Plain text on purpose: no parse_mode means no escaping pitfalls with user input. */
 export function buildLeadText(lead: LeadMessage): string {
+  // The title names the package the visitor CHOSE. The CTA the visitor clicked is analytics only (cta_source), never the title.
+  const chosen = lead.packageLabel && lead.packageLabel !== "Ещё не определились" ? lead.packageLabel : "пакет не выбран";
   return [
-    "🎂 НОВАЯ ЗАЯВКА — BOOM BALA",
+    `🎂 НОВАЯ ЗАЯВКА — ${chosen}`,
     ...(lead.crmNote ? ["", lead.crmNote] : []),
     "",
     `Имя: ${dash(lead.name)}`,
@@ -128,6 +132,14 @@ export function buildLeadText(lead: LeadMessage): string {
     `Пакет: ${dash(lead.packageLabel)}`,
     `Предпочитаемая комната: ${dash(lead.roomLabel)}`,
     ...(lead.slotLabel ? [`Предпочитаемый слот: ${lead.slotLabel}`] : []),
+    ...(lead.preferredStartTime
+      ? [
+          // A wish: exact time as chosen. From 19:00 a 4-hour programme does not fit before 22:00: the manager confirms it separately.
+          lead.preferredStartTime >= "19:00"
+            ? `Желаемое начало: ${lead.preferredStartTime} — согласовать отдельно (4 часа не помещаются до 22:00)`
+            : `Желаемое начало: ${lead.preferredStartTime}`,
+        ]
+      : []),
     "",
     "Согласие на обработку данных: да",
     "Источник: website",

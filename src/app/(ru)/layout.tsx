@@ -1,30 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Nunito, Onest } from "next/font/google";
-import "./globals.css";
-import { Header } from "@/components/layout/Header";
-import { Footer } from "@/components/layout/Footer";
-import { HashScroll } from "@/components/layout/HashScroll";
-import { MenuStateProvider } from "@/components/layout/MenuState";
-import { LeadFormProvider } from "@/components/lead/LeadFormProvider";
-import { StickyBookingCta } from "@/components/lead/StickyBookingCta";
-import { SelectedPackageProvider } from "@/components/lead/SelectedPackage";
+import "../globals.css";
+import { SiteShell } from "@/components/layout/SiteShell";
+import { nunito, onest } from "../fonts";
 import { Analytics } from "@/components/analytics/Analytics";
 import { getSiteUrl } from "@/lib/site-url";
 import { siteConfig } from "@/services/config";
-
-const nunito = Nunito({
-  subsets: ["latin", "cyrillic"],
-  weight: ["700", "800", "900"],
-  variable: "--font-nunito",
-  display: "swap",
-});
-
-const onest = Onest({
-  subsets: ["latin", "cyrillic"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-onest",
-  display: "swap",
-});
 
 const siteUrl = getSiteUrl();
 
@@ -78,7 +58,7 @@ export const viewport: Viewport = {
   interactiveWidget: "resizes-content",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RuLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru" className={`${nunito.variable} ${onest.variable}`}>
       <body className="min-h-dvh antialiased">
@@ -86,23 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessJsonLd).replace(/</g, "\\u003c") }}
         />
-        <a
-          href="#main"
-          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-full focus:bg-grape-700 focus:px-5 focus:py-3 focus:text-white"
-        >
-          К содержимому
-        </a>
-        <SelectedPackageProvider>
-        <MenuStateProvider>
-        <LeadFormProvider>
-          <HashScroll />
-          <Header />
-          <main id="main">{children}</main>
-          <Footer />
-          <StickyBookingCta />
-        </LeadFormProvider>
-        </MenuStateProvider>
-        </SelectedPackageProvider>
+        <SiteShell locale="ru">{children}</SiteShell>
         <Analytics />
       </body>
     </html>

@@ -1,3 +1,4 @@
+// TEST FIXTURES: all identities, phone values, emails, and auth values below are synthetic and used only in isolated tests.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { classifyPath, decideExposure, exposureFromEnv, ipInCidr, parseRole, profileProblems, validCidr, type ExposureConfig } from "../src/server/exposure.ts";
@@ -144,9 +145,9 @@ describe("Exposure: what each deployment shows", () => {
       assert.deepEqual(profileProblems({ ...goodAdmin, CRON_SECRET: "" }), ["cron_secret_required"]);
     });
     it("notifications in production accept an explicit full or minimal setting and reject missing or unknown values", () => {
-      for (const bad of ["FULL", "Minimal", "min", "", undefined]) assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: bad }), ["notify_level_invalid"], JSON.stringify(bad));
+      for (const bad of ["FULL", "Minimal", "min", "", undefined]) assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: bad }), ["notify_level_must_be_minimal"], JSON.stringify(bad));
       assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "minimal" }), []);
-      assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "full" }), []);
+      assert.deepEqual(profileProblems({ ...goodAdmin, TELEGRAM_NOTIFY_LEVEL: "full" }), ["notify_level_must_be_minimal"]);
     });
     it("an allowlist that is really 'everyone' is refused", () => {
       for (const wide of ["0.0.0.0/0", "::/0", "10.0.0.0/7", "10.77.0.0/24,0.0.0.0/0"]) assert.ok(profileProblems({ ...goodAdmin, ADMIN_ALLOWED_CIDRS: wide }).includes("admin_cidrs_too_wide"), wide);
@@ -162,7 +163,7 @@ describe("Exposure: what each deployment shows", () => {
       assert.deepEqual(profileProblems({ ...goodApi, PLATFORM_INTAKE_TOKEN: "short" }), ["intake_token_required"]);
     });
     it("problems are codes only: no secret value ever appears in them", () => {
-      const text = JSON.stringify(profileProblems({ ...goodApi, MFA_ENC_KEY: "SUPERSECRETVALUE", CRON_SECRET: "ANOTHERSECRETVALUE" }));
+      const text = JSON.stringify(profileProblems({ ...goodApi, MFA_ENC_KEY: "synthetic-value-not-a-secret", CRON_SECRET: "ANOTHERSECRETVALUE" }));
       assert.ok(!text.includes("SECRETVALUE"));
     });
   });

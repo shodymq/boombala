@@ -32,7 +32,7 @@ export function DayTimeline({
   hrefFor,
   selectedId,
 }: {
-  rooms: { id: string; name: string }[];
+  rooms: { id: string; name: string; occupancyMode?: "exclusive" | "shared" }[];
   reservations: BookingTimelineReservation[];
   axis: Axis;
   hours: WorkingWindow | null;
@@ -40,7 +40,8 @@ export function DayTimeline({
   selectedId?: string;
 }) {
   const active = reservations.filter((r) => r.status !== "released");
-  const flagged = overlappingIds(active.map((r) => ({ id: r.id, roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt })));
+  const exclusiveIds = new Set(rooms.filter((room) => room.occupancyMode !== "shared").map((room) => room.id));
+  const flagged = overlappingIds(active.filter((r) => exclusiveIds.has(r.roomId)).map((r) => ({ id: r.id, roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt })));
   const marks: number[] = [];
   for (let m = axis.startMin; m <= axis.endMin; m += 60) marks.push(m);
   const closed = hours ? [axisRange(axis, axis.startMin, hours.openMin), axisRange(axis, hours.closeMin, axis.endMin)].filter((x) => x !== null) : [];
@@ -92,7 +93,13 @@ export function DayTimeline({
                         className={`absolute z-10 ${topClass(span.top)} ${heightClass(span.height)} ${pos.left} ${pos.width} overflow-hidden rounded-lg border-2 px-2 py-1 text-xs leading-tight ${TONE_CLASS[tone]} ${selectedId === r.id ? "ring-4 ring-grape-600" : ""} hover:brightness-95`}
                       >
                         <span className="block truncate font-black">{clock(r.startsAt)}–{clock(r.endsAt)}{conflict ? " · конфликт" : ""}</span>
-                        {r.kind === "block" ? (
+                        {r.sourceManaged ? (
+                          <>
+                            <span className="block truncate font-bold">{r.packageName ?? "Мероприятие из таблицы"}</span>
+                            {short ? null : <span className="block truncate">{r.customerName ?? "Клиент"}</span>}
+                            <span className="block truncate font-bold">{r.sourceState === "source_missing" ? "Источник удалён · сверка" : r.sourceState === "manual_review" ? "Требуется сверка" : "Google Sheets · синхронизация"}</span>
+                          </>
+                        ) : r.kind === "block" ? (
                           <span className="block truncate font-bold">Блокировка{r.note ? `: ${r.note}` : ""}</span>
                         ) : (
                           <>

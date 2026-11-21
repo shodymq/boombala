@@ -53,7 +53,7 @@ export default async function Home() {
       <Hero />
       <Entertainment attractions={attractions} />
       <Prices pricing={pricing} membership={membership} />
-      <BirthdayShowcase packages={packages} />
+      <BirthdayShowcase packages={packages} locale="ru" />
       <MembershipSection membership={membership} contactHref={membershipHref} channel={contact.kind} />
       <CafeTeaser catalog={menu} />
       <Faq items={faq} />

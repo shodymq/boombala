@@ -14,7 +14,7 @@ import { migrate } from "../src/core/migrate.ts";
 import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeUser, MIGRATIONS_DIR, publishedVersions, startTestDb, submitConsentV, type TestDb } from "./helpers/db.ts";
+import { makeUser, MIGRATIONS_DIR, publishedVersions, startTestDb, submitConsentV, type TestDb, seedFromSite } from "./helpers/db.ts";
 
 const API_PW = "api-role-password-0123456789abc";
 const ADMIN_PW = "admin-role-password-0123456789";
@@ -484,8 +484,10 @@ describe("Attendance and the database roles", () => {
     assert.equal((await call(50)).rows.length, 1);
     assert.equal((await call(1)).rows.length, 1);
     await assert.rejects(() => api.query("SELECT id FROM bb.intake_insert_registration($1, $2)", [randomUUID(), c]), /does not exist|function/i, "no way to create a registration without the number");
-    const fns = (await api.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname LIKE 'intake\\_%'")).rows;
-    assert.equal(fns.length, 9);
+    const functions = (await api.query("SELECT p.proname, pg_get_function_identity_arguments(p.oid) args FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname LIKE 'intake\\_%'")).rows;
+    assert.equal(functions.length, 10, "the additive lead overload is available for rollback");
+    assert.equal(functions.filter((f: { proname: string }) => f.proname === "intake_insert_registration").length, 1,
+      "registration creation has only the child-count-required signature");
   });
 
   it("the staff role works with attendance but cannot delete, truncate or alter it", async () => {
@@ -552,6 +554,7 @@ describe("Deployment order: migrations -> roles -> verification", () => {
       }
       // the documented order: roles again, then verification, then start
       await applyRoles(db.pool, { apiPassword: API_PW, adminPassword: ADMIN_PW });
+      await seedFromSite(db.pool);
       const ok = await preflight(db.pool, MIGRATIONS_DIR);
       assert.deepEqual(ok, { ok: true, problems: [] });
       for (const table of ["booking_operations", "manual_payment_facts"]) {

@@ -37,15 +37,27 @@ export interface PreflightResult {
  * Full verification of a database before the applications start. `migrationsDir` lets it compare every migration file with
  * what was applied (names, order, checksums, nothing missing, nothing extra). Roles are checked only when they exist.
  */
-export async function preflight(db: Queryable, migrationsDir?: string): Promise<PreflightResult> {
+export const BIRTHDAY_PACKAGES_V4_2 = ["happy-party", "star-party", "boom-bala-party"] as const;
+const APPROVED_V4_2_CATALOG = [
+  { id: "happy-party", name: "HAPPY PARTY", base: 54900, weekday: 38430 },
+  { id: "star-party", name: "STAR PARTY", base: 79900, weekday: 55930 },
+  { id: "boom-bala-party", name: "BOOM BALA PARTY", base: 114900, weekday: 80430 },
+] as const;
+export const RETIRED_BIRTHDAY_PACKAGES = ["wow-party", "magic-party", "boom-party"] as const;
+
+/**
+ * "ready": the database can take the NEW site (the three Pricing V4 packages are active and priced; the retired ones may still be on sale).
+ * "final": after the switch, the retired packages must be off sale too.
+ */
+export async function preflight(db: Queryable, migrationsDir?: string, phase: "ready" | "final" = "ready"): Promise<PreflightResult> {
   try {
-    return await runPreflight(db, migrationsDir);
+    return await runPreflight(db, migrationsDir, phase);
   } catch (error) {
     return { ok: false, problems: [`preflight_failed: ${(error as { code?: string }).code ?? "database error"}`] };
   }
 }
 
-async function runPreflight(db: Queryable, migrationsDir?: string): Promise<PreflightResult> {
+async function runPreflight(db: Queryable, migrationsDir: string | undefined, phase: "ready" | "final"): Promise<PreflightResult> {
   const problems: string[] = [];
   const has = async (sql: string, params: unknown[] = []) => (await db.query<{ v: boolean }>(`SELECT (${sql}) AS v`, params)).rows[0].v === true;
 
@@ -65,6 +77,32 @@ async function runPreflight(db: Queryable, migrationsDir?: string): Promise<Pref
   }
 
   if (!(await attendanceSchemaReady(db))) problems.push("attendance_schema_missing: apply migration 013");
+  // Pricing V4.2 packages are seeded before the new site is released. Legacy packages remain on sale through the ready phase.
+  const v4 = await db.query<{ id: string; name: string; price: number | null; weekday: number | null; is_active: boolean }>(
+    `SELECT p.id, p.name, p.is_active,
+            (SELECT amount_kzt FROM bb.price_rules r WHERE r.package_id = p.id AND r.rule_type = 'base' ORDER BY r.id DESC LIMIT 1) AS price,
+            (SELECT amount_kzt FROM bb.price_rules r WHERE r.package_id = p.id AND r.rule_type = 'weekday' ORDER BY r.id DESC LIMIT 1) AS weekday
+       FROM bb.packages p WHERE p.id = ANY($1::text[])`,
+    [[...BIRTHDAY_PACKAGES_V4_2]],
+  );
+  const actual = new Map(v4.rows.map((r) => [r.id, r]));
+  for (const expected of APPROVED_V4_2_CATALOG) {
+    const row = actual.get(expected.id);
+    if (!row || !row.is_active || row.name !== expected.name || Number(row.price) !== expected.base || Number(row.weekday) !== expected.weekday) {
+      problems.push(`birthday_catalog_mismatch: ${expected.id}`);
+    }
+  }
+  if (phase === "final") {
+    const legacy = await db.query<{ id: string; is_active: boolean; archived: boolean }>(
+      `SELECT p.id, p.is_active, (a.package_id IS NOT NULL) AS archived
+         FROM bb.packages p LEFT JOIN bb.package_archive a ON a.package_id = p.id
+        WHERE p.id = ANY($1::text[])`,
+      [[...RETIRED_BIRTHDAY_PACKAGES]],
+    );
+    if (legacy.rows.some((r) => r.is_active || !r.archived)) {
+      problems.push("retired_birthday_package_on_sale: run npm run catalog:retire-legacy after the site switch");
+    }
+  }
   const fnArgs = (await db.query<{ args: string }>("SELECT pg_get_function_identity_arguments(p.oid) AS args FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'bb' AND p.proname = 'intake_insert_registration'")).rows.map((r) => r.args);
   if (!fnArgs.some((a) => /smallint/.test(a))) problems.push("intake_insert_registration_without_children_count_missing");
   if (fnArgs.some((a) => !/smallint/.test(a))) problems.push("old_intake_insert_registration_still_exists");

@@ -63,7 +63,7 @@ export async function startTestDb(opts: { migrate?: boolean } = {}): Promise<Tes
 /** The same catalog the public site shows: ids, names and prices come from the site's own data files. */
 export function seedFromSite(pool: Pool) {
   return seedCatalog(pool, {
-    packages: birthdayPackages.map((p) => ({ id: p.id, name: p.name, price: p.price, weekdayPrice: p.weekdayPrice })),
+    packages: birthdayPackages.map((p) => ({ id: p.id, name: p.copy.ru.name, price: p.weekendPrice, weekdayPrice: p.weekdayPrice })),
     rooms: birthdayRooms.map((r) => ({ id: r.id, name: r.name })),
   });
 }

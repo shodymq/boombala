@@ -24,6 +24,7 @@ const leadRow = z.object({
   phone: z.string(),
   requestedDate: z.string(),
   slotId: z.number().nullable(),
+  preferredStartTime: z.string().regex(/^\d{2}:00$/).nullable(),
   roomId: z.string().nullable(),
   packageId: z.string().nullable(),
   children: z.number().nullable(),

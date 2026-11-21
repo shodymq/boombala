@@ -37,7 +37,7 @@ describe("Kazakhstan production: an unsafe site configuration accepts no enquiry
   });
 
   it("the site must not hold anything that belongs to another process", () => {
-    for (const k of ["DATABASE_URL", "MFA_ENC_KEY", "CRON_SECRET", "PLATFORM_IP_PEPPER", "PLATFORM_ROLE", "PLATFORM_PROFILE", "ADMIN_ALLOWED_CIDRS", "SITE_REVALIDATE_URL", "TELEGRAM_NOTIFY_LEVEL"]) {
+    for (const k of ["DATABASE_URL", "MFA_ENC_KEY", "CRON_SECRET", "PLATFORM_IP_PEPPER", "PLATFORM_ROLE", "PLATFORM_PROFILE", "ADMIN_ALLOWED_CIDRS", "SITE_REVALIDATE_URL", "TELEGRAM_NOTIFY_LEVEL", "UNIFIED_FASTAPI_WEBSITE_LEADS"]) {
       assert.deepEqual(siteProfileProblems({ ...good, [k]: "x" }), [`site_must_not_have_${k.toLowerCase()}`], k);
     }
   });
@@ -75,20 +75,11 @@ describe("Kazakhstan production: an unsafe site configuration accepts no enquiry
     });
   });
 
-  it("honors the explicitly configured notification level in the production profile", () => {
-    const keep = { p: process.env.PLATFORM_PROFILE, l: process.env.TELEGRAM_NOTIFY_LEVEL };
-    try {
-      process.env.PLATFORM_PROFILE = "kz-production";
-      process.env.TELEGRAM_NOTIFY_LEVEL = "full";
-      assert.equal(notifyLevel(), "full");
-      process.env.TELEGRAM_NOTIFY_LEVEL = "minimal";
-      assert.equal(notifyLevel(), "minimal");
-      delete process.env.PLATFORM_PROFILE;
-      delete process.env.TELEGRAM_NOTIFY_LEVEL;
-      assert.equal(notifyLevel(), "full", "default remains the legacy detailed format outside a validated production profile");
-    } finally {
-      if (keep.p === undefined) delete process.env.PLATFORM_PROFILE; else process.env.PLATFORM_PROFILE = keep.p;
-      if (keep.l === undefined) delete process.env.TELEGRAM_NOTIFY_LEVEL; else process.env.TELEGRAM_NOTIFY_LEVEL = keep.l;
-    }
+  it("forces minimal non-personal notifications in the Kazakhstan production profile", () => {
+    assert.equal(notifyLevel({ PLATFORM_PROFILE: "kz-production", TELEGRAM_NOTIFY_LEVEL: "full" }), "minimal");
+    assert.equal(notifyLevel({ PLATFORM_PROFILE: "kz-production" }), "minimal");
+    assert.equal(notifyLevel({ VERCEL_ENV: "production", TELEGRAM_NOTIFY_LEVEL: "full" }), "minimal");
+    assert.equal(notifyLevel({ TELEGRAM_NOTIFY_LEVEL: "minimal" }), "minimal");
+    assert.equal(notifyLevel({}), "full", "detailed format remains available only outside production for legacy/local tests");
   });
 });

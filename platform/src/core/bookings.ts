@@ -5,7 +5,7 @@ import { almatyToday, isValidDate } from "./dates.ts";
 import { ConflictError, ValidationError } from "./errors.ts";
 import { cleanName, nameKey, normalizePhone } from "./phone.ts";
 import { assertCan, type Actor } from "./rbac.ts";
-import { resolvePrice, type PriceSource } from "./catalog.ts";
+import { LEGACY_PUBLIC_PACKAGE_IDS, resolvePrice, type PriceSource } from "./catalog.ts";
 import { almatyWindow } from "./booking-calendar.ts";
 import type { RequestMeta } from "./users.ts";
 
@@ -18,7 +18,7 @@ import type { RequestMeta } from "./users.ts";
  */
 
 const CELL_INDEX = "slot_reservations_active_cell_idx";
-const INTERVAL_INDEX = "slot_reservations_active_room_interval_excl";
+const INTERVAL_INDEX = "slot_reservations_active_occupancy_interval_excl";
 const LEAD_INDEX = "slot_reservations_active_lead_idx";
 
 function instant(value: string | Date): number {
@@ -68,7 +68,7 @@ export async function getGrid(db: Queryable, actor: Actor, date: string): Promis
   assertCan(actor, "bookings.manage");
   if (!isValidDate(date)) throw new ValidationError({ date: "Некорректная дата" });
   const [rooms, slots, res, leads] = await Promise.all([
-    db.query<{ id: string; name: string }>("SELECT id, name FROM bb.rooms WHERE is_active ORDER BY sort_order, id"),
+    db.query<{ id: string; name: string; occupancy_mode: string }>("SELECT id, name, occupancy_mode FROM bb.rooms WHERE is_active ORDER BY sort_order, id"),
     db.query<{ id: number; starts_at: string; ends_at: string }>(
       "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY starts_at, id",
     ),
@@ -113,7 +113,7 @@ export async function getGrid(db: Queryable, actor: Actor, date: string): Promis
   const unplaced = leads.rows.filter((x) => !(x.room_id && x.slot_id)).reduce((s, x) => s + x.n, 0);
   return {
     date,
-    rooms: rooms.rows,
+    rooms: rooms.rows.map(({ id, name }) => ({ id, name })),
     slots: slots.rows.map((s) => ({ id: s.id, startsAt: s.starts_at, endsAt: s.ends_at })),
     cells,
     unplacedLeads: unplaced,
@@ -292,6 +292,10 @@ export async function releaseReservation(pool: Pool, actor: Actor, reservationId
   const why = reason?.trim() || null;
   if (why && why.length > 300) throw new ValidationError({ reason: "Не больше 300 символов" });
   await withTx(pool, async (tx) => {
+    if (process.env.SHEETS_SYNC_ENABLED === "1") {
+      const managed = await tx.query("SELECT 1 FROM bb.sheet_sync_records WHERE reservation_id=$1 AND state <> 'crm_managed'", [reservationId]);
+      if (managed.rows[0]) throw new ConflictError("source_managed_read_only");
+    }
     const { rows } = await tx.query<{ kind: string; lead_request_id: string | null }>(
       `UPDATE bb.slot_reservations SET released_at = now(), released_by = $2, release_reason = $3
         WHERE id = $1 AND released_at IS NULL RETURNING kind, lead_request_id`,
@@ -321,6 +325,7 @@ export interface LeadRow {
   phone: string;
   requestedDate: string;
   slotId: number | null;
+  preferredStartTime: string | null;
   roomId: string | null;
   packageId: string | null;
   children: number | null;
@@ -337,7 +342,7 @@ export async function listLeads(pool: Pool, actor: Actor, filter: { status?: str
   }
   const { rows } = await pool.query(
     `SELECT l.id, l.seq, l.created_at, l.status, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS requested_date,
-            l.slot_id, l.room_id, l.package_id, l.children,
+            l.slot_id, to_char(l.preferred_start_time, 'HH24:MI') AS preferred_start_time, l.room_id, l.package_id, l.children,
             (SELECT r.id FROM bb.slot_reservations r WHERE r.lead_request_id = l.id AND r.released_at IS NULL) AS reservation_id
        FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id
        ${where} ORDER BY (l.status IN ('new', 'in_progress')) DESC, l.requested_date, l.seq DESC LIMIT ${Math.min(Math.max(limit, 1), 500)}`,
@@ -345,7 +350,7 @@ export async function listLeads(pool: Pool, actor: Actor, filter: { status?: str
   );
   return rows.map((r) => ({
     id: r.id, seq: Number(r.seq), createdAt: r.created_at, status: r.status, name: r.name, phone: r.phone_e164, requestedDate: r.requested_date,
-    slotId: r.slot_id, roomId: r.room_id, packageId: r.package_id, children: r.children, reservationId: r.reservation_id,
+    slotId: r.slot_id, preferredStartTime: r.preferred_start_time, roomId: r.room_id, packageId: r.package_id, children: r.children, reservationId: r.reservation_id,
   }));
 }
 
@@ -375,23 +380,28 @@ export interface DayAvailability {
 export async function dayAvailability(db: Queryable, date: string): Promise<DayAvailability> {
   if (!isValidDate(date)) throw new ValidationError({ date: "Некорректная дата" });
   const [rooms, slots, taken, packages] = await Promise.all([
-    db.query<{ id: string; name: string }>("SELECT id, name FROM bb.rooms WHERE is_active ORDER BY sort_order, id"),
+    db.query<{ id: string; name: string; occupancy_mode: string }>("SELECT id, name, occupancy_mode FROM bb.rooms WHERE is_active ORDER BY sort_order, id"),
     db.query<{ id: number; starts_at: string; ends_at: string }>(
       "SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at, to_char(ends_at, 'HH24:MI') AS ends_at FROM bb.time_slots ORDER BY starts_at, id",
     ),
     db.query<{ room_id: string; starts_at: string | Date; ends_at: string | Date }>("SELECT room_id, starts_at, ends_at FROM bb.slot_reservations WHERE slot_date = $1 AND released_at IS NULL", [date]),
-    db.query<{ id: string }>("SELECT id FROM bb.packages WHERE is_active ORDER BY sort_order, id"),
+    db.query<{ id: string }>(
+      "SELECT id FROM bb.packages WHERE is_active OR id = ANY($1::text[]) ORDER BY sort_order, id",
+      [[...LEGACY_PUBLIC_PACKAGE_IDS]],
+    ),
   ]);
   const prices: DayAvailability["prices"] = {};
   for (const p of packages.rows) prices[p.id] = await resolvePrice(db, p.id, date);
   return {
     date,
-    rooms: rooms.rows,
+    // Shared event zones belong to the internal CRM calendar, not public sellable room capacity.
+    rooms: rooms.rows.filter((room) => room.occupancy_mode !== "shared").map(({ id, name }) => ({ id, name })),
     slots: slots.rows.map((s) => ({
       id: s.id,
       startsAt: s.starts_at,
       endsAt: s.ends_at,
       freeRoomIds: rooms.rows.filter((r) => {
+        if (r.occupancy_mode === "shared") return false;
         const window = almatyWindow(date, s.starts_at);
         return !taken.rows.some((t) => t.room_id === r.id && overlaps(window.startIso, window.endIso, t.starts_at, t.ends_at));
       }).map((r) => r.id),
@@ -404,12 +414,13 @@ export async function dayAvailability(db: Queryable, date: string): Promise<DayA
 export async function monthAvailability(db: Queryable, month: string): Promise<{ month: string; roomCount: number; days: Record<string, Record<string, number>> }> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new ValidationError({ month: "Некорректный месяц" });
   const [rooms, slots, taken] = await Promise.all([
-    db.query<{ n: number }>("SELECT count(*)::int AS n FROM bb.rooms WHERE is_active"),
+    db.query<{ n: number }>("SELECT count(*)::int AS n FROM bb.rooms WHERE is_active AND occupancy_mode <> 'shared'"),
     db.query<{ id: number; starts_at: string }>("SELECT id, to_char(starts_at, 'HH24:MI') AS starts_at FROM bb.time_slots ORDER BY starts_at, id"),
-    db.query<{ d: string; room_id: string; starts_at: string | Date; ends_at: string | Date }>(
-      `SELECT to_char(slot_date, 'YYYY-MM-DD') AS d, room_id, starts_at, ends_at FROM bb.slot_reservations
-        WHERE released_at IS NULL AND slot_date >= ($1 || '-01')::date AND slot_date < (($1 || '-01')::date + interval '1 month')
-        ORDER BY slot_date, room_id, starts_at`,
+    db.query<{ d: string; room_id: string; starts_at: string | Date; ends_at: string | Date; occupancy_mode: string }>(
+      `SELECT to_char(r.slot_date, 'YYYY-MM-DD') AS d, r.room_id, r.starts_at, r.ends_at, room.occupancy_mode FROM bb.slot_reservations r
+        JOIN bb.rooms room ON room.id = r.room_id
+        WHERE r.released_at IS NULL AND r.slot_date >= ($1 || '-01')::date AND r.slot_date < (($1 || '-01')::date + interval '1 month')
+        ORDER BY r.slot_date, r.room_id, r.starts_at`,
       [month],
     ),
   ]);
@@ -417,6 +428,7 @@ export async function monthAvailability(db: Queryable, month: string): Promise<{
   const days: Record<string, Record<string, number>> = {};
   const occupiedByDay = new Map<string, Map<number, Set<string>>>();
   for (const t of taken.rows) {
+    if (t.occupancy_mode === "shared") continue;
     const bySlot = occupiedByDay.get(t.d) ?? new Map<number, Set<string>>();
     occupiedByDay.set(t.d, bySlot);
     for (const slot of slots.rows) {

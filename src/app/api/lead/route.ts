@@ -121,7 +121,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // CRM path (LEAD_PIPELINE=dual|strict). The default `telegram-only` skips this block entirely: today's behaviour.
+    // CRM path (LEAD_PIPELINE=dual|strict). The wished start time remains a separate HH:00 preference;
+    // it is never translated to the legacy slot IDs 1/2/3.
     // Success is reported only after the platform has committed the enquiry; the platform then notifies Telegram itself
     // (with retries). In `dual` any platform failure falls through to the direct Telegram path below, so nothing is lost.
     const pipeline = leadPipeline();
@@ -141,7 +142,7 @@ export async function POST(request: Request) {
           children: lead.children,
           packageId: lead.package,
           roomId: lead.room,
-          slotId: lead.slot ? Number(lead.slot) : null,
+          preferredStartTime: lead.preferredStartTime,
           page: pagePath.startsWith("/") ? pagePath : "",
           referrer: clip(body.referrer, 300),
           utmSource: clip(body.utm_source, 100),
@@ -155,6 +156,10 @@ export async function POST(request: Request) {
       } catch (error) {
         const kind = error instanceof PlatformError ? error.kind : "unavailable";
         console.warn(`[lead] platform path failed (${kind}); pipeline=${pipeline}`);
+        // The platform no longer sells this package: say so to the visitor, never silently pick another package.
+        if (error instanceof PlatformError && error.kind === "package_unavailable") {
+          return json({ ok: false, error: "validation", fieldErrors: { package: "Этот пакет больше не продаётся. Выберите один из актуальных пакетов." } }, 400);
+        }
         if (pipeline === "strict") return json({ ok: false, error: "delivery_failed" }, 502);
         // dual: continue with the direct Telegram path, and say so in the message (the lead is NOT in the CRM)
         crmNote = "⚠️ ТОЛЬКО В TELEGRAM: в CRM не сохранена (платформа была недоступна). Проверьте CRM по номеру, при отсутствии внесите вручную.";
@@ -171,7 +176,8 @@ export async function POST(request: Request) {
 
     // Path only: UTM parameters are reported separately.
     const page = clip(body.page, 200).split(/[?#]/)[0];
-    const dupKey = `${lead.phone}|${lead.date}|${lead.package}|${lead.room ?? ""}`;
+    // The wished start is part of the key: the same request with another start time is a new enquiry, not a duplicate.
+    const dupKey = `${lead.phone}|${lead.date}|${lead.package}|${lead.room ?? ""}|${lead.preferredStartTime ?? ""}`;
     try {
       // A repeat of a lead that WAS delivered (double tap, quick retry) is acknowledged without a second
       // message. A lead that failed is not remembered, so the parent's retry is sent for real.
@@ -188,6 +194,7 @@ export async function POST(request: Request) {
           packageLabel: PACKAGE_OPTIONS.find((o) => o.value === lead.package)?.label ?? lead.package,
           roomLabel: (lead.room && getRoomName(lead.room)) || "",
           slotLabel: BOOKING_SLOTS.find((x) => x.id === lead.slot)?.label ?? "",
+          preferredStartTime: lead.preferredStartTime ?? undefined,
           page: page.startsWith("/") ? page : "",
           referrer: clip(body.referrer, 300),
           utmSource: clip(body.utm_source, 100),
