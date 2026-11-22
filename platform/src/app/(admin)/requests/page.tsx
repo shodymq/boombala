@@ -77,6 +77,108 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
         <p className="crm-requests-count" aria-live="polite">ะ’ัะตะณะพ: <strong>{result.total}</strong></p>
       </header>
       <p className="crm-requests-note">ะ—ะฐัะฒะบะฐ ะฝะต ะทะฐะฝะธะผะฐะตั ัะปะพั. ะกะปะพั ะทะฐะฝะธะผะฐะตั ัะพะปัะบะพ ะฟะพะดัะฒะตั€ะถะดะตะฝะธะต. ะฆะตะฝะฐ ัะธะบัะธั€ัะตััั ะฒ ะผะพะผะตะฝั ะฟะพะดัะฒะตั€ะถะดะตะฝะธั.</p>
-      {sp.notice && NOTICES[sp.notice] ? <p role="status" className="crm-requests-message crm-requests-message-success">{NOTICES[sp.notice]}</p> : null}5๋mญขGงฒฺ๎ฦญyึ๖FUU$”6๖ื๖ๆV็Bยๆ–B—ึา6ฦ74ๆึSืถ'Fไv๗7Gำํ	ํ-ญฝ-ยญ-ํ}ญ3ย๔ฦ–ๆณเขถ๗Vโ๒€ขฦF—b6ฦ74ๆึSา&7&าื&WVW7G2ื7FGW2ึ7F–๖็2#เขถย็7FGW2ำำา&ๆWr"๒ฦf๗&า7F–๖ใืถฦVE7FGW47F–๖็ำใฦ–็WBG—Sา&–FFVโ"ๆึSา&–B"fวVSืถยๆ–Gา๓ใฦ–็WBG—Sา&–FFVโ"ๆึSา'7FGW2"fวVSา&–ๅ๗&๖w&W72"๓ใฦ'WGF๖โG—Sา'7V&ึ—B"6ฦ74ๆึSืถ'Fไv๗7Gำํ	"ํ-3ย๖'WGF๖ใใย๖f๗&ำโข็Vฦวะขฦf๗&า7F–๖ใืถฦVE7FGW47F–๖็ำใฦ–็WBG—Sา&–FFVโ"ๆึSา&–B"fวVSืถยๆ–Gา๓ใฦ–็WBG—Sา&–FFVโ"ๆึSา'7FGW2"fวVSา&6ๆ6VฦฦVB"๓ใฦ'WGF๖โG—Sา'7V&ึ—B"6ฦ74ๆึSืถ'Fไv๗7Gำํ	ํ-ญฝํÝ-รย๖'WGF๖ใใย๖f๗&ำเขย๖F—cเข’ข็Vฦวะขย๗FCเขย๗G#เข“ฐขา—ะขย๗F&๖G“เขย๗F&ฦSเขถฦVG2ๆฦVๆwFำำา๒€ขว6ฦ74ๆึSา&7&าื&WVW7G2ึVืG’"&๖ฦSา'7FGW2#เขฒ4f–วFW'2๒ฤ'&ๆD'B6ฦ74ๆึSา&ืึWF๒ึ"ำ2"6—ฆSืณา๓โข็Vฦวะขถ4f–วFW'2๒-	ýโÝ-ย=ฝํ-ýย}ý-ํขÝ]"โ	}อ]Ý-RMฝอ-ฒฝํอ-Rýํขโ"ข-	}ý-ํขýํญÝ]"โ	Ýํ-ฝRํ]Ý๒ýํý-ý-๒}M]ยโ'ะขย๗เข’ข็VฦวะขทvW2โ๒€ขฦๆb6ฦ74ๆึSา&7&าื&WVW7G2ืvW""&–ึฦ&Vรา-
--Ýmฒ}ý-ํข#เขท&W7VวB็vRโ๒ฤฦ–ๆฒ&Vcืท7FGW4&Vb7FGW2ย&W7VวB็vRา—า&Vรา'&Wb"6ฦ74ๆึSืถ'Fไv๗7Gำ๎(i	Ý}Cย๔ฦ–ๆณโข็Vฦวะขว7โ&–ึฦ—fSา'๖ฦ—FR#ํ
--Ýmท&W7VวB็vWาrทvW7ำย๗7ใเขท&W7VวB็vRยvW2๒ฤฦ–ๆฒ&Vcืท7FGW4&Vb7FGW2ย&W7VวB็vRฒ—า&Vรา&ๆWB"6ฦ74ๆึSืถ'Fไv๗7Gำํ	-ý]B(i#ย๔ฦ–ๆณโข็Vฦวะขย๖ๆcเข’ข็Vฦวะขย๗6V7F–๖ใเขย๖F—cเข“ฐงะ
+      {sp.notice && NOTICES[sp.notice] ? <p role="status" className="crm-requests-message crm-requests-message-success">{NOTICES[sp.notice]}</p> : null}
+      {sp.error ? <p role="alert" className="crm-requests-message crm-requests-message-error">{ERRORS[sp.error] ?? "ะะต ัะดะฐะปะพัั ะฒัะฟะพะปะฝะธัั ะดะตะนััะฒะธะต."}</p> : null}
+
+      <nav className="crm-requests-tabs" aria-label="ะคะธะปััั€ ะทะฐัะฒะพะบ ะฟะพ ััะฐัััั">
+        <Link href={statusHref()} aria-current={!status ? "page" : undefined}>ะ’ัะต</Link>
+        {Object.entries(STATUS).map(([k, v]) => <Link key={k} href={statusHref(k)} aria-current={status === k ? "page" : undefined}>{v}</Link>)}
+        <Link href={overdue ? "/requests" : "/requests?overdue=1"} aria-current={overdue ? "page" : undefined}>ะั€ะพัั€ะพัะตะฝะฝัะต ะดะตะนััะฒะธั</Link>
+      </nav>
+
+      <form method="get" className="crm-requests-filters">
+        {status ? <input type="hidden" name="status" value={status} /> : null}
+        {overdue ? <input type="hidden" name="overdue" value="1" /> : null}
+        <label className="crm-requests-search">
+          <span>ะะพะธัะบ</span>
+          <input name="q" defaultValue={q ?? ""} placeholder="ะะผั ะธะปะธ ัะตะปะตัะพะฝ" maxLength={80} className={input} />
+        </label>
+        <label>
+          <span>ะก ะดะฐัั ะทะฐัะฒะบะธ</span>
+          <DatePicker key={`${createdFrom ?? ""}:${createdTo ?? ""}`} name="createdFrom" label="ะก ะดะฐัั ะทะฐัะฒะบะธ" defaultValue={createdFrom ?? ""} />
+        </label>
+        <label>
+          <span>ะะพ ะดะฐัั ะทะฐัะฒะบะธ</span>
+          <DatePicker key={`${createdFrom ?? ""}:${createdTo ?? ""}`} name="createdTo" label="ะะพ ะดะฐัั ะทะฐัะฒะบะธ" defaultValue={createdTo ?? ""} />
+        </label>
+        <div className="crm-requests-filter-actions">
+          <button type="submit" className={`${btn} inline-flex items-center gap-2`}><Icon name="search" size={15} className="crm-action-icon" />ะะฐะนัะธ ะทะฐัะฒะบะธ</button>
+          <Link href="/requests" className={btnGhost}>ะกะฑั€ะพัะธัั</Link>
+        </div>
+      </form>
+
+      <section className="crm-requests-queue" aria-label="ะัะตั€ะตะดั ะทะฐัะฒะพะบ">
+        <table className="crm-requests-table">
+          <caption className="crm-requests-sr-only">ะกะฟะธัะพะบ ะทะฐัะฒะพะบ</caption>
+          <thead>
+            <tr>
+              <th scope="col">ะะปะธะตะฝั</th>
+              <th scope="col">ะ”ะตัะฐะปะธ ะทะฐัะฒะบะธ</th>
+              <th scope="col">ะกะพะทะดะฐะฝะฐ</th>
+              <th scope="col">ะกัะฐััั</th>
+              <th scope="col"><span className="crm-requests-sr-only">ะ”ะตะนััะฒะธั</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {leads.map((l) => {
+              const open = l.status === "new" || l.status === "in_progress";
+              return (
+                <tr key={l.id} data-lead={l.seq}>
+                  <td>
+                    <span className="crm-requests-mobile-label">ะะปะธะตะฝั</span>
+                    <div className="crm-requests-contact"><strong>{l.name}</strong><span>{l.phone}</span><small>โ–{l.seq}</small></div>
+                  </td>
+                  <td>
+                    <span className="crm-requests-mobile-label">ะ”ะตัะฐะปะธ ะทะฐัะฒะบะธ</span>
+                    <div className="crm-requests-details">
+                      <span>ะ”ะฐัะฐ: {l.requestedDate ?? "ะฝะต ัะบะฐะทะฐะฝะฐ"}</span>
+                      {l.preferredStartTime ? <span>ะ–ะตะปะฐะตะผะพะต ะฒั€ะตะผั: {l.preferredStartTime}</span> : null}
+                      <span>ะะฐะบะตั: {pkgName(l.packageId)}</span>
+                      {l.children != null ? <span>ะ”ะตัะตะน: {l.children}</span> : null}
+                      <span>ะัะฒะตัััะฒะตะฝะฝัะน: {l.assigneeName ?? "ะฝะต ะฝะฐะทะฝะฐัะตะฝ"}</span>
+                      {l.nextAction && l.followUpAt ? <span className={l.followUpOverdue ? "crm-requests-overdue" : undefined}>
+                        {LEAD_NEXT_ACTION_LABELS[l.nextAction]} ยท {fmt.format(l.followUpAt)}{l.followUpOverdue ? " ยท ะฟั€ะพัั€ะพัะตะฝะพ" : ""}
+                      </span> : null}
+                      {l.reservationId ? <Link href={`/bookings?date=${l.requestedDate}`}>ะะพะบะฐะทะฐัั ะฒ ะบะฐะปะตะฝะดะฐั€ะต</Link> : null}
+                    </div>
+                  </td>
+                  <td>
+                    <span className="crm-requests-mobile-label">ะกะพะทะดะฐะฝะฐ</span>
+                    <time dateTime={l.createdAt.toISOString()}>{fmt.format(l.createdAt)}</time>
+                  </td>
+                  <td>
+                    <span className="crm-requests-mobile-label">ะกัะฐััั</span>
+                    <span className="crm-requests-status" data-status={l.status}>{STATUS[l.status] ?? l.status}</span>
+                  </td>
+                  <td className="crm-requests-actions-cell">
+                    <span className="crm-requests-mobile-label">ะ”ะตะนััะฒะธั</span>
+                    <Link href={`/requests/${encodeURIComponent(l.id)}`} className={btnGhost}>ะัะบั€ััั ะบะฐั€ัะพัะบั</Link>
+                    {open ? (
+                      <div className="crm-requests-status-actions">
+                        {l.status === "new" ? <form action={leadStatusAction}><input type="hidden" name="id" value={l.id} /><input type="hidden" name="status" value="in_progress" /><button type="submit" className={btnGhost}>ะ’ ั€ะฐะฑะพัั</button></form> : null}
+                        <form action={leadStatusAction}><input type="hidden" name="id" value={l.id} /><input type="hidden" name="status" value="cancelled" /><button type="submit" className={btnGhost}>ะัะบะปะพะฝะธัั</button></form>
+                      </div>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {leads.length === 0 ? (
+          <p className="crm-requests-empty" role="status">
+            {!hasFilters ? <BrandArt className="mx-auto mb-3" size={88} /> : null}
+            {hasFilters ? "ะะพ ััะธะผ ััะปะพะฒะธัะผ ะทะฐัะฒะพะบ ะฝะตั. ะะทะผะตะฝะธัะต ัะธะปััั€ั ะธะปะธ ัะฑั€ะพัััะต ะฟะพะธัะบ." : "ะ—ะฐัะฒะพะบ ะฟะพะบะฐ ะฝะตั. ะะพะฒัะต ะพะฑั€ะฐัะตะฝะธั ะฟะพัะฒัััั ะทะดะตัั."}
+          </p>
+        ) : null}
+        {pages > 1 ? (
+          <nav className="crm-requests-pager" aria-label="ะกัั€ะฐะฝะธัั ะทะฐัะฒะพะบ">
+            {result.page > 1 ? <Link href={statusHref(status, result.page - 1)} rel="prev" className={btnGhost}>โ ะะฐะทะฐะด</Link> : null}
+            <span aria-live="polite">ะกัั€ะฐะฝะธัะฐ {result.page} ะธะท {pages}</span>
+            {result.page < pages ? <Link href={statusHref(status, result.page + 1)} rel="next" className={btnGhost}>ะ’ะฟะตั€ั‘ะด โ’</Link> : null}
+          </nav>
+        ) : null}
+      </section>
+    </div>
+  );
+}
