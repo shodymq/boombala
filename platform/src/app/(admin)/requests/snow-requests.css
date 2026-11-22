@@ -253,6 +253,79 @@
   color: #403a45;
 }
 
+.crm-requests-overdue {
+  color: #a02d27 !important;
+  font-weight: 800;
+}
+
+.crm-lead-workflow {
+  margin-top: 1.25rem;
+  border-top: 1px solid #eee9ef;
+  padding-top: 1rem;
+}
+
+.crm-lead-workflow h3 {
+  margin: 0 0 .75rem;
+  color: #3b1e78;
+  font-size: .95rem;
+  font-weight: 900;
+}
+
+.crm-lead-workflow-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: .75rem;
+}
+
+.crm-lead-workflow-form label {
+  display: grid;
+  min-width: 0;
+  gap: .35rem;
+  color: #756e78;
+  font-size: .72rem;
+  font-weight: 800;
+}
+
+.crm-lead-workflow-form button {
+  justify-self: start;
+}
+
+.crm-lead-claim-form {
+  margin-top: .65rem;
+}
+
+.crm-lead-history {
+  display: grid;
+  gap: .75rem;
+  margin: .8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crm-lead-history li {
+  border-top: 1px solid #eee9ef;
+  padding-top: .65rem;
+  color: #625b66;
+  font-size: .76rem;
+}
+
+.crm-lead-history li > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .4rem;
+  color: #302a32;
+}
+
+.crm-lead-history time {
+  color: #756e78;
+}
+
+.crm-lead-history p {
+  margin: .3rem 0 0;
+}
+
 .crm-requests-status {
   display: inline-flex;
   min-height: 1.65rem;
@@ -454,6 +527,10 @@
 
   .crm-requests-row-actions {
     min-width: 0;
+  }
+
+  .crm-lead-workflow-form {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

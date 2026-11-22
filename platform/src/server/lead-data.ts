@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import type { LeadDetail, LeadFilter, LeadPage } from "../core/lead-queue.ts";
 import { getLead, searchLeads } from "../core/lead-queue.ts";
+import { LEAD_NEXT_ACTIONS, type LeadWorkflowContext } from "../core/lead-workflow.ts";
 import type { CatalogItem, TimeSlot } from "../core/catalog.ts";
 import type { Actor } from "../core/rbac.ts";
 import { bridgeRpc, legacyBridgeEnabled, LegacyBridgeError } from "./bridge-client.ts";
@@ -29,6 +30,12 @@ const leadRow = z.object({
   packageId: z.string().nullable(),
   children: z.number().nullable(),
   reservationId: z.string().nullable(),
+  assignedTo: z.string().uuid().nullable(),
+  assigneeName: z.string().nullable(),
+  nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(),
+  followUpAt: z.string().datetime().transform((v) => new Date(v)).nullable(),
+  workflowVersion: z.number().int().positive(),
+  followUpOverdue: z.boolean(),
 });
 const leadPage = z.object({ items: z.array(leadRow), total: z.number(), page: z.number(), pageSize: z.number() });
 const leadDetail = leadRow.extend({ prepaymentKzt: z.number().nullable() });
@@ -62,6 +69,15 @@ const requestsIndex = z.object({ result: leadPage, packages: z.array(catalogItem
 const requestCard = z.object({
   lead: leadDetail,
   catalog: z.object({ packages: z.array(catalogItem), rooms: z.array(catalogItem), slots: z.array(z.object({ id: z.number() }).passthrough()) }),
+  workflowContext: z.object({
+    assignees: z.array(z.object({ id: z.string().uuid(), name: z.string(), role: z.enum(["owner", "manager"]) })),
+    history: z.array(z.object({
+      id: z.number(), at: z.string().datetime().transform((v) => new Date(v)), actorName: z.string().nullable(),
+      action: z.enum(["lead.claimed", "lead.workflow_updated"]),
+      before: z.object({ assignedTo: z.string().uuid().nullable(), assigneeName: z.string().nullable(), nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(), followUpAt: z.string().datetime().nullable() }),
+      after: z.object({ assignedTo: z.string().uuid().nullable(), assigneeName: z.string().nullable(), nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(), followUpAt: z.string().datetime().nullable() }),
+    })),
+  }),
 });
 
 /** Bridge mode only: the filtered request page and its package names in ONE round trip (`requests.index`). */
@@ -70,9 +86,9 @@ export async function loadRequestsIndex(filter: LeadFilter): Promise<{ result: L
 }
 
 /** Bridge mode only: one request and the catalog its card shows, in ONE round trip (`requests.card`). Null when it does not exist. */
-export async function loadRequestCard(id: string): Promise<{ lead: LeadDetail; catalog: { packages: CatalogItem[]; rooms: CatalogItem[]; slots: TimeSlot[] } } | null> {
+export async function loadRequestCard(id: string): Promise<{ lead: LeadDetail; catalog: { packages: CatalogItem[]; rooms: CatalogItem[]; slots: TimeSlot[] }; workflowContext: LeadWorkflowContext } | null> {
   try {
-    return requestCard.parse(await bridgeRpc<unknown>("requests.card", { id }, await token())) as unknown as { lead: LeadDetail; catalog: { packages: CatalogItem[]; rooms: CatalogItem[]; slots: TimeSlot[] } };
+    return requestCard.parse(await bridgeRpc<unknown>("requests.card", { id }, await token())) as unknown as { lead: LeadDetail; catalog: { packages: CatalogItem[]; rooms: CatalogItem[]; slots: TimeSlot[] }; workflowContext: LeadWorkflowContext };
   } catch (error) {
     if (error instanceof LegacyBridgeError && error.status === 404) return null;
     throw error;

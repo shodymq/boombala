@@ -18,6 +18,8 @@ import { MAX_UPLOAD_BYTES } from "../core/images.ts";
 import { validateSession, type ValidSession } from "../core/session.ts";
 import { listLeads, setLeadStatus } from "../core/bookings.ts";
 import { dashboardCounters, getLead, searchLeads, type LeadFilter } from "../core/lead-queue.ts";
+import { dashboardAnalytics } from "../core/analytics.ts";
+import { claimLead, getLeadWorkflowContext, updateLeadWorkflow } from "../core/lead-workflow.ts";
 import { getContact, listContacts } from "../core/crm.ts";
 import { assessContact, anonymizeContact, revokeConsent, retentionReport } from "../core/privacy.ts";
 import { adminImage, addImage, getPost, listImages, listPosts, createPost, updatePost, publishPost, unpublishPost, deletePost, deleteImage, type PostInput } from "../core/news.ts";
@@ -288,6 +290,7 @@ function leadFilter(input: Record<string, unknown>): LeadFilter {
     q: optional(input.q, 80),
     createdFrom: optional(input.createdFrom, 10),
     createdTo: optional(input.createdTo, 10),
+    overdue: input.overdue === true,
     page: typeof input.page === "number" ? input.page : undefined,
     pageSize: typeof input.pageSize === "number" ? input.pageSize : undefined,
   };
@@ -344,14 +347,15 @@ async function dashboard(pool: Pool, session: ValidSession) {
   const attendance = can(session.user.role, "attendance.manage")
     ? attendanceSchemaReady(pool).then((ok) => (ok ? dayFigures(pool, actor, almatyToday()) : null))
     : Promise.resolve(null);
-  const [migrations, summary, outbox, counters, figures] = await Promise.all([
+  const [migrations, summary, outbox, counters, analytics, figures] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(session.user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(session.user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
     dashboardCounters(pool, session.user.role),
+    dashboardAnalytics(pool, session.user.role),
     attendance,
   ]);
-  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, counters, attendance: figures };
+  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, counters, analytics, attendance: figures };
 }
 
 async function bookingCatalog(pool: Pool) {
@@ -379,6 +383,65 @@ async function bookingTimeline(pool: Pool, session: ValidSession, date: string) 
        LEFT JOIN bb.booking_cards bc ON bc.reservation_id=r.id LEFT JOIN bb.users cu ON cu.id=bc.created_by LEFT JOIN bb.users ru ON ru.id=bc.responsible_user_id
       WHERE r.slot_date=$1 ORDER BY r.starts_at`, [date]);
   return { branchId: "almaty", date, timezone: "Asia/Almaty", bufferMinutes: 0, rooms: rooms.rows.map((r) => ({ id: r.id, name: r.name, occupancyMode: r.occupancy_mode === "shared" ? "shared" : "exclusive" })), reservations: rows.rows.map((r) => ({ id: r.id, kind: r.kind, status: r.released_at ? "released" : r.kind === "block" ? "blocked" : "confirmed", roomId: r.room_id, startsAt: new Date(r.starts_at).toISOString(), endsAt: new Date(r.ends_at).toISOString(), occupiedEndsAt: new Date(r.ends_at).toISOString(), slotId: r.slot_id == null ? null : String(r.slot_id), packageName: r.sync_package ?? r.package_name, priceKzt: r.price_kzt, priceSource: r.price_source, paidKzt: r.paid_kzt ?? 0, paymentStatus: r.paid_kzt ? "prepaid" : "unpaid", note: r.sync_key && r.sync_state !== "crm_managed" ? "Импортировано из Google Sheets" : r.note, requestId: r.lead_request_id, customerName: r.sync_client ?? r.customer_name, customerPhone: r.sync_phone ?? r.customer_phone, createdByAdminId: r.card_created_by ?? r.created_by, createdByName: r.card_created_name ?? r.created_by_name, releasedAt: r.released_at ? new Date(r.released_at).toISOString() : null, sourceManaged: !!r.sync_key && r.sync_state !== "crm_managed", sourceHandedOver: r.sync_state === "crm_managed", sourceState: r.sync_state, sourceDetails: r.sync_details, card: r.card_id ? { programStatus: r.program_status, propsStatus: r.props_status, invitationStatus: r.invitation_status, totalKzt: r.card_total, pricingStatus: r.pricing_status, childName: r.child_name, childrenTotal: r.children_total, adultsTotal: r.adults_total, headcountMode: r.headcount_mode, responsibleName: r.responsible_name } : null })) };
+}
+
+/** Minimal, allowlisted read model for the upcoming operations page. Never select customer, child, comment, or raw sync payload fields. */
+async function operationsOverview(pool: Pool, session: ValidSession, rawDates: unknown) {
+  if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  if (!Array.isArray(rawDates) || rawDates.length !== 7) throw new ValidationError({ dates: "invalid_range" });
+  const dates = [...new Set(rawDates.map((value) => parseDate(value)))];
+  if (dates.length !== 7) throw new ValidationError({ dates: "invalid_range" });
+  const rows = await pool.query<{
+    id: string; date: string; kind: "booking" | "block"; status: "confirmed" | "blocked"; starts_at: Date;
+    room_name: string; package_name: string | null; paid_kzt: string | null; source_state: "active" | "manual_review" | "source_missing" | "crm_managed" | null;
+    payment_status: "prepaid" | "unpaid"; program_status: string | null; props_status: string | null; invitation_status: string | null; responsible_name: string | null;
+  }>(
+    `SELECT r.id, to_char(r.slot_date, 'YYYY-MM-DD') AS date, r.kind,
+            CASE WHEN r.kind='booking' THEN 'confirmed' ELSE 'blocked' END AS status,
+            r.starts_at, rm.name AS room_name,
+            COALESCE(p.name, CASE WHEN r.kind='block' AND ss.source_key IS NOT NULL
+              AND NULLIF(btrim(ss.source_payload->>'package'), '') IS NOT NULL THEN 'Пакет из таблицы — не проверен' END) AS package_name,
+            CASE WHEN r.kind='booking' THEN f.amount_kzt::text END AS paid_kzt,
+            CASE WHEN r.kind='block' THEN ss.state END AS source_state,
+            CASE WHEN f.amount_kzt IS NOT NULL THEN 'prepaid' ELSE 'unpaid' END AS payment_status,
+            CASE WHEN r.kind='booking' THEN bc.program_status END AS program_status,
+            CASE WHEN r.kind='booking' THEN bc.props_status END AS props_status,
+            CASE WHEN r.kind='booking' THEN bc.invitation_status END AS invitation_status,
+            CASE WHEN r.kind='booking' THEN ru.name END AS responsible_name
+       FROM bb.slot_reservations r
+       JOIN bb.rooms rm ON rm.id=r.room_id
+       LEFT JOIN bb.packages p ON p.id=r.package_id
+       LEFT JOIN bb.sheet_sync_records ss ON ss.reservation_id=r.id
+       LEFT JOIN bb.manual_payment_facts f ON f.lead_request_id=r.lead_request_id
+       LEFT JOIN bb.booking_cards bc ON bc.reservation_id=r.id
+       LEFT JOIN bb.users ru ON ru.id=bc.responsible_user_id
+      WHERE r.slot_date=ANY($1::date[]) AND r.released_at IS NULL
+        AND (r.kind='booking' OR (r.kind='block' AND ss.source_key IS NOT NULL))
+      ORDER BY r.starts_at, r.id`,
+    [dates],
+  );
+  return {
+    timezone: "Asia/Almaty" as const,
+    reservations: rows.rows.map((row) => {
+      const paidKzt = row.paid_kzt === null ? 0 : Number(row.paid_kzt);
+      if (!Number.isSafeInteger(paidKzt) || paidKzt < 0) throw new Error("operations_amount_invalid");
+      return {
+        id: row.id,
+        date: row.date,
+        kind: row.kind,
+        status: row.status,
+        startsAt: new Date(row.starts_at).toISOString(),
+        room: row.room_name,
+        packageName: row.package_name,
+        paymentStatus: row.payment_status,
+        paidKzt,
+        sourceState: row.source_state,
+        card: row.kind === "booking" && (row.program_status !== null || row.props_status !== null || row.invitation_status !== null || row.responsible_name !== null)
+          ? { programStatus: row.program_status, propsStatus: row.props_status, invitationStatus: row.invitation_status, responsibleName: row.responsible_name }
+          : null,
+      };
+    }),
+  };
 }
 
 type CalendarLeadState = { id: string; status: string; bookedAt: string | null; manualPaymentFactStatus: "prepaid" | "unpaid"; manualPaymentFactAmountKzt: number; customerName: string };
@@ -450,9 +513,21 @@ export async function requestsIndex(pool: Pool, session: ValidSession, input: Re
 /** One request card with the catalog it needs, in one round trip. Not found is a 404 like `requests.get`. */
 export async function requestCard(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session);
-  const [lead, packages, rooms, slots] = await Promise.all([getLead(pool, actor, text(input.id, 80)), listPackages(pool), listRooms(pool), listSlots(pool)]);
+  const id = text(input.id, 80);
+  const [lead, packages, rooms, slots, workflowContext] = await Promise.all([
+    getLead(pool, actor, id), listPackages(pool), listRooms(pool), listSlots(pool), getLeadWorkflowContext(pool, actor, id),
+  ]);
   if (!lead) throw new NotFoundError();
-  return { lead, catalog: { packages, rooms, slots } };
+  return { lead, catalog: { packages, rooms, slots }, workflowContext };
+}
+
+/** Typed lead-workflow writers; identity and role come only from the validated CRM session. */
+export async function bridgeUpdateLeadWorkflow(pool: Pool, session: ValidSession, input: Record<string, unknown>, meta: { ip?: string | null; userAgent?: string | null } = {}) {
+  return updateLeadWorkflow(pool, actorOf(session), input, meta);
+}
+
+export async function bridgeClaimLead(pool: Pool, session: ValidSession, input: Record<string, unknown>, meta: { ip?: string | null; userAgent?: string | null } = {}) {
+  return claimLead(pool, actorOf(session), input, meta);
 }
 
 async function ensureIdempotent<T>(pool: Pool, actor: Actor, key: string, operation: string, input: unknown, run: (tx: import("../core/db.ts").Client) => Promise<T>): Promise<T> {
@@ -681,12 +756,15 @@ async function rpcCore(request: NextRequest, marks: { op: string; sessionMs: num
       case "requests.search": return Response.json(await searchLeads(pool, actor, leadFilter(input)), { headers: { "Cache-Control": "no-store" } });
       case "requests.get": { const lead = await getLead(pool, actor, text(input.id, 80)); if (!lead) throw new NotFoundError(); return Response.json(lead, { headers: { "Cache-Control": "no-store" } }); }
       case "requests.status": await setLeadStatus(pool, actor, text(input.id, 80), text(input.status, 30) as "new" | "in_progress" | "cancelled", await requestMeta()); return Response.json({ ok: true });
+      case "requests.workflow.update": return Response.json(await bridgeUpdateLeadWorkflow(pool, session, input, await requestMeta()), { headers: { "Cache-Control": "no-store" } });
+      case "requests.workflow.claim": return Response.json(await bridgeClaimLead(pool, session, input, await requestMeta()), { headers: { "Cache-Control": "no-store" } });
       // The legacy slot-confirmation writer is deliberately unavailable in bridge mode.
       // Booking confirmation must go through payment -> interval reservation -> read-after-write.
       case "requests.confirm": throw new ConflictError("use_calendar_flow");
       case "catalog": return Response.json({ packages: await listPackages(pool), rooms: await listRooms(pool), slots: await listSlots(pool) });
       case "calendar.catalog": return Response.json(await bookingCatalog(pool), { headers: { "Cache-Control": "no-store" } });
       case "calendar.timeline": return Response.json(await bookingTimeline(pool, session, parseDate(input.date)), { headers: { "Cache-Control": "no-store" } });
+      case "operations.overview": return Response.json(await operationsOverview(pool, session, input.dates), { headers: { "Cache-Control": "no-store" } });
       case "calendar.leads": { const leads = await listLeads(pool, actor, {}); return Response.json({ items: leads.map((l) => ({ id: l.id, type: "birthday_request", status: l.status, phone: l.phone, customerName: l.name, createdAt: l.createdAt.toISOString(), requestedDate: l.requestedDate, branch: { id: "almaty" } })), total: leads.length }); }
       case "calendar.lead": { const state = await calendarLeadState(pool, text(input.id, 80)); if (!state) throw new NotFoundError(); return Response.json(state); }
       case "booking.request": return Response.json(await bridgeCreateRequest(pool, session, input));

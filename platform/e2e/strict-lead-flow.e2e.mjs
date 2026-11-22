@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { findFreePort, initCluster, startCluster, stopCluster } from "../scripts/lib/cluster.mjs";
+import { syntheticPhone } from "../tests/helpers/synthetic-data.ts";
 
 const platformDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = resolve(platformDir, "..");
@@ -154,7 +155,7 @@ try {
   const leadInput = {
     idempotencyKey: key,
     name: "SYNTHETIC STRICT E2E",
-    phone: "+77010000001",
+    phone: syntheticPhone(),
     date: "2099-03-04",
     children: "3",
     package: "star-party",
@@ -171,8 +172,10 @@ try {
   });
 
   const first = await submit(leadInput);
-  assert.equal(first.status, 200, "the site strict route must report committed intake success");
-  assert.deepEqual(await first.json(), { ok: true });
+  const firstBody = await first.json().catch(() => ({}));
+  const firstErrorCode = typeof firstBody.error === "string" && /^[a-z_]+$/.test(firstBody.error) ? firstBody.error : "unknown";
+  assert.equal(first.status, 200, `the site strict route must report committed intake success (safe_error=${firstErrorCode})`);
+  assert.deepEqual(firstBody, { ok: true });
   const repeated = await submit(leadInput);
   assert.equal(repeated.status, 200);
   assert.deepEqual(await repeated.json(), { ok: true, duplicate: true });
@@ -197,7 +200,7 @@ try {
   const { drainOutbox } = await import("../src/core/outbox.ts");
   const { sendTelegram } = await import("../src/core/telegram.ts");
   const { notifyLevel } = await import("../src/server/notify-level.ts");
-  const telegramConfig = { token: "123456:ISOLATED-TEST-ONLY", chatId: "-1000000000", apiBase: `http://127.0.0.1:${telegramPort}` };
+  const telegramConfig = { token: "synthetic-invalid-test-token", chatId: "synthetic-chat-id", apiBase: `http://127.0.0.1:${telegramPort}` };
   const delivered = await drainOutbox(adminPool, {
     level: notifyLevel({ PLATFORM_PROFILE: "kz-production", TELEGRAM_NOTIFY_LEVEL: "full" }),
     send: (text) => sendTelegram(telegramConfig, text, 3000),
@@ -210,7 +213,7 @@ try {
   assert.match(notification, /Дата: 04\.03\.2099/);
   assert.match(notification, /Пакет: STAR PARTY/);
   assert.ok(!notification.includes("SYNTHETIC STRICT E2E"));
-  assert.ok(!notification.includes("+7 701 000 00 01"));
+  assert.ok(!notification.includes(leadInput.phone));
   assert.ok(!notification.includes("15:00"), "all requested/customer details stay in the CRM");
   assert.equal((await ownerPool.query("SELECT status FROM bb.outbox WHERE ref_id=$1 AND topic='telegram.lead'", [persisted.id])).rows[0].status, "sent");
   await drainOutbox(adminPool, { level: "minimal", send: (text) => sendTelegram(telegramConfig, text, 3000), onlyRefId: persisted.id });

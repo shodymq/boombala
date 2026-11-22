@@ -3,13 +3,14 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { confirmLead, setLeadStatus } from "../../../core/bookings.ts";
+import { claimLead, updateLeadWorkflow } from "../../../core/lead-workflow.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../../../core/errors.ts";
 import { FastApiCrmConfigurationError, unifiedFastapiCrmEnabled } from "../../../server/fastapi-crm.ts";
 import { requirePermission } from "../../../server/dal.ts";
 import { getPool } from "../../../server/db.ts";
 import { requestMeta } from "../../../server/request.ts";
 import { cookies } from "next/headers";
-import { bridgeRpc, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
+import { bridgeRpc, LegacyBridgeError, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
 import { SESSION_COOKIE } from "../../../server/env.ts";
 
 const uuid = z.string().uuid();
@@ -61,4 +62,64 @@ export async function leadStatusAction(formData: FormData): Promise<void> {
     return failure(error);
   }
   redirect("/requests?notice=status");
+}
+
+function workflowFailure(error: unknown, leadId: string): never {
+  const remoteCode = error instanceof LegacyBridgeError ? error.code : undefined;
+  const code = remoteCode ?? (
+    error instanceof ConflictError ? error.message
+      : error instanceof ValidationError ? "invalid"
+        : error instanceof ForbiddenError ? "forbidden"
+          : error instanceof FastApiCrmConfigurationError ? "fastapi_unavailable"
+            : "failed"
+  );
+  redirect(`/requests/${encodeURIComponent(leadId)}?error=${encodeURIComponent(code)}`);
+}
+
+export async function updateLeadWorkflowAction(formData: FormData): Promise<void> {
+  const { user } = await requirePermission("requests.manage");
+  if (unifiedFastapiCrmEnabled() && !legacyBridgeEnabled()) return workflowFailure(new FastApiCrmConfigurationError("crm_actor_missing"), str(formData, "id"));
+  const leadId = uuid.safeParse(formData.get("id"));
+  const expectedVersion = Number(str(formData, "expectedVersion"));
+  if (!leadId.success) return workflowFailure(new ValidationError({ id: "invalid" }), "invalid");
+  const input = {
+    leadId: leadId.data,
+    expectedVersion,
+    assignedTo: str(formData, "assignedTo") || null,
+    nextAction: str(formData, "nextAction") || null,
+    followUpAtLocal: str(formData, "followUpAtLocal") || null,
+  };
+  try {
+    if (legacyBridgeEnabled()) {
+      const token = (await cookies()).get(SESSION_COOKIE)?.value;
+      if (!token) return workflowFailure(new FastApiCrmConfigurationError("crm_actor_missing"), leadId.data);
+      await bridgeRpc("requests.workflow.update", input, token);
+    } else {
+      await updateLeadWorkflow(getPool(), { id: user.id, role: user.role }, input, await requestMeta());
+    }
+  } catch (error) {
+    return workflowFailure(error, leadId.data);
+  }
+  redirect(`/requests/${encodeURIComponent(leadId.data)}?notice=workflow`);
+}
+
+export async function claimLeadAction(formData: FormData): Promise<void> {
+  const { user } = await requirePermission("requests.manage");
+  if (unifiedFastapiCrmEnabled() && !legacyBridgeEnabled()) return workflowFailure(new FastApiCrmConfigurationError("crm_actor_missing"), str(formData, "id"));
+  const leadId = uuid.safeParse(formData.get("id"));
+  const expectedVersion = Number(str(formData, "expectedVersion"));
+  if (!leadId.success) return workflowFailure(new ValidationError({ id: "invalid" }), "invalid");
+  const input = { leadId: leadId.data, expectedVersion };
+  try {
+    if (legacyBridgeEnabled()) {
+      const token = (await cookies()).get(SESSION_COOKIE)?.value;
+      if (!token) return workflowFailure(new FastApiCrmConfigurationError("crm_actor_missing"), leadId.data);
+      await bridgeRpc("requests.workflow.claim", input, token);
+    } else {
+      await claimLead(getPool(), { id: user.id, role: user.role }, input, await requestMeta());
+    }
+  } catch (error) {
+    return workflowFailure(error, leadId.data);
+  }
+  redirect(`/requests/${encodeURIComponent(leadId.data)}?notice=claimed`);
 }

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { migrate } from "../src/core/migrate.ts";
-import { MIGRATIONS_DIR, startTestDb, type TestDb } from "./helpers/db.ts";
+import { MIGRATIONS_DIR, startTestDb, syntheticPhone, type TestDb } from "./helpers/db.ts";
 
 describe("migrations and DB-level guarantees", () => {
   let db: TestDb;
@@ -126,7 +126,7 @@ describe("migrations and DB-level guarantees", () => {
       await q("INSERT INTO packages (id,name,sort_order) VALUES ('wow-party','WOW PARTY',0),('magic-party','MAGIC PARTY',1),('boom-party','BOOM PARTY',2)");
       await q("INSERT INTO price_rules (package_id,rule_type,amount_kzt) VALUES ('wow-party','base',37900),('wow-party','weekday',26530),('boom-party','base',79990)");
       const user = (await q("INSERT INTO users (email,name,password_hash,role) VALUES ('synthetic@example.invalid','M','x','manager') RETURNING id")).rows[0].id;
-      const contact = (await q("INSERT INTO contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical','историч','+70000000000','manual') RETURNING id")).rows[0].id;
+      const contact = (await q("INSERT INTO contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical','историч',$1,'manual') RETURNING id", [syntheticPhone()])).rows[0].id;
       const lead = (await q("INSERT INTO lead_requests (idempotency_key,contact_id,package_id,requested_date,children,status) VALUES (gen_random_uuid(),$1,'wow-party','2099-03-10',6,'confirmed') RETURNING id", [contact])).rows[0].id;
       const reservation = (await q(
         `INSERT INTO slot_reservations (kind,slot_date,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,created_by,starts_at,ends_at)
@@ -164,7 +164,7 @@ describe("migrations and DB-level guarantees", () => {
     }
   });
 
-  it("019 preserves historical leads and stores HH:00 preferences without slot IDs or rounding", async () => {
+  it("019 and 020 preserve historical leads while adding time preferences and follow-up fields", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bb-before-019-"));
     const prior = await startTestDb({ migrate: false });
     try {
@@ -172,11 +172,11 @@ describe("migrations and DB-level guarantees", () => {
         cpSync(join(MIGRATIONS_DIR, file), join(dir, file));
       }
       await migrate(prior.pool, dir);
-      const contact = (await prior.pool.query("INSERT INTO bb.contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical lead','historical lead','+70000000000','birthday_form') RETURNING id")).rows[0].id;
+      const contact = (await prior.pool.query("INSERT INTO bb.contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical lead','historical lead',$1,'birthday_form') RETURNING id", [syntheticPhone()])).rows[0].id;
       const oldLead = (await prior.pool.query("INSERT INTO bb.lead_requests (idempotency_key,contact_id,requested_date,slot_id,status) VALUES ($1,$2,'2099-02-03',2,'new') RETURNING id,seq,slot_id", [randomUUID(), contact])).rows[0];
 
       const applied = await migrate(prior.pool, MIGRATIONS_DIR);
-      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql"]);
+      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql", "020_lead_follow_up.sql"]);
       const after = (await prior.pool.query("SELECT id,seq,slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [oldLead.id])).rows[0];
       assert.deepEqual(after, { ...oldLead, preferred_start_time: null }, "old identity, slot and status are preserved; no preference is invented");
 

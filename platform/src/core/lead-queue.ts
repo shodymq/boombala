@@ -3,6 +3,7 @@ import { almatyToday, isValidDate } from "./dates.ts";
 import { ValidationError } from "./errors.ts";
 import { assertCan, can, type Actor } from "./rbac.ts";
 import type { LeadRow } from "./bookings.ts";
+import type { LeadNextAction } from "./lead-workflow.ts";
 
 /**
  * The request queue: server-side search, pagination, a single record by id and the dashboard counters.
@@ -19,27 +20,40 @@ export interface LeadFilter {
   /** Dates of creation, Asia/Almaty calendar days, inclusive. */
   createdFrom?: string;
   createdTo?: string;
+  /** Open requests whose planned follow-up time has passed. */
+  overdue?: boolean;
   page?: number;
   pageSize?: number;
 }
 
+export interface LeadQueueItem extends LeadRow {
+  assignedTo: string | null;
+  assigneeName: string | null;
+  nextAction: LeadNextAction | null;
+  followUpAt: Date | null;
+  workflowVersion: number;
+  followUpOverdue: boolean;
+}
+
 export interface LeadPage {
-  items: LeadRow[];
+  items: LeadQueueItem[];
   total: number;
   page: number;
   pageSize: number;
 }
 
-export interface LeadDetail extends LeadRow {
+export interface LeadDetail extends LeadQueueItem {
   /** Manual prepayment fact in tenge, or null when none is recorded. */
   prepaymentKzt: number | null;
 }
 
 const LEAD_COLUMNS = `l.id, l.seq, l.created_at, l.status, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS requested_date,
             l.slot_id, to_char(l.preferred_start_time, 'HH24:MI') AS preferred_start_time, l.room_id, l.package_id, l.children,
+            l.assigned_to, assignee.name AS assignee_name, l.next_action, l.follow_up_at, l.workflow_version,
+            (l.follow_up_at IS NOT NULL AND l.follow_up_at <= now() AND l.status IN ('new', 'in_progress')) AS follow_up_overdue,
             (SELECT r.id FROM bb.slot_reservations r WHERE r.lead_request_id = l.id AND r.released_at IS NULL) AS reservation_id`;
 
-function leadRow(r: Record<string, unknown>): LeadRow {
+function leadRow(r: Record<string, unknown>): LeadQueueItem {
   return {
     id: r.id as string,
     seq: Number(r.seq),
@@ -54,6 +68,12 @@ function leadRow(r: Record<string, unknown>): LeadRow {
     packageId: r.package_id as string | null,
     children: r.children as number | null,
     reservationId: r.reservation_id as string | null,
+    assignedTo: r.assigned_to as string | null,
+    assigneeName: r.assignee_name as string | null,
+    nextAction: r.next_action as LeadNextAction | null,
+    followUpAt: r.follow_up_at as Date | null,
+    workflowVersion: Number(r.workflow_version),
+    followUpOverdue: r.follow_up_overdue === true,
   };
 }
 
@@ -81,6 +101,7 @@ export async function searchLeads(pool: Pool, actor: Actor, filter: LeadFilter =
     if (!isValidDate(filter.createdTo)) throw new ValidationError({ createdTo: "invalid" });
     where.push(`(l.created_at AT TIME ZONE 'Asia/Almaty')::date <= ${add(filter.createdTo)}::date`);
   }
+  if (filter.overdue === true) where.push("l.follow_up_at IS NOT NULL AND l.follow_up_at <= now() AND l.status IN ('new', 'in_progress')");
   const q = filter.q?.trim().slice(0, 80);
   if (q) {
     const digits = q.replace(NON_DIGITS, "");
@@ -100,8 +121,9 @@ export async function searchLeads(pool: Pool, actor: Actor, filter: LeadFilter =
   const page = Math.min(requested, Math.max(Math.ceil(total / pageSize), 1));
   const { rows } = await pool.query(
     `SELECT ${LEAD_COLUMNS}
-       FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id
-       ${clause} ORDER BY (l.status IN ('new', 'in_progress')) DESC, l.requested_date, l.seq DESC
+       FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id LEFT JOIN bb.users assignee ON assignee.id = l.assigned_to
+       ${clause} ORDER BY (l.follow_up_at IS NOT NULL AND l.follow_up_at <= now() AND l.status IN ('new', 'in_progress')) DESC,
+         (l.status IN ('new', 'in_progress')) DESC, l.requested_date, l.seq DESC
        LIMIT ${add(pageSize)} OFFSET ${add((page - 1) * pageSize)}`,
     params,
   );
@@ -116,7 +138,7 @@ export async function getLead(pool: Pool, actor: Actor, id: string): Promise<Lea
   if (!UUID.test(id)) return null;
   const { rows } = await pool.query(
     `SELECT ${LEAD_COLUMNS}, (SELECT p.amount_kzt FROM bb.manual_payment_facts p WHERE p.lead_request_id = l.id ORDER BY p.created_at LIMIT 1) AS prepayment_kzt
-       FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id WHERE l.id = $1`,
+       FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id LEFT JOIN bb.users assignee ON assignee.id = l.assigned_to WHERE l.id = $1`,
     [id],
   );
   if (!rows[0]) return null;

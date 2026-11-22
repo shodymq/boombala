@@ -18,7 +18,7 @@ import {
   runRetention,
   updateRetentionSettings,
 } from "../src/core/privacy.ts";
-import { makeUser, seedFromSite, startTestDb, submitConsentV, type TestDb } from "./helpers/db.ts";
+import { makeUser, seedFromSite, startTestDb, submitConsentV, syntheticPhone, type TestDb } from "./helpers/db.ts";
 
 const FUTURE = (() => {
   const d = new Date(`${almatyToday()}T00:00:00Z`);
@@ -34,12 +34,38 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
   const meta = { ip: "198.51.100.9", userAgent: "TestBrowser/1.0" };
   const q = (sql: string, p: unknown[] = []) => db.pool.query(sql, p);
   const scalar = async (sql: string, p: unknown[] = []) => (await q(sql, p)).rows[0].v;
+  const visitorPhoneFragments = new Set<string>();
+  const visitorNames = new Set<string>();
+  const rememberName = (name: string | null | undefined) => {
+    const value = (name ?? "").trim();
+    if (value) visitorNames.add(value);
+  };
+  const rememberPhone = (phone: string | null | undefined) => {
+    const digits = (phone ?? "").replace(/\D/g, "");
+    if (phone && digits.length >= 8) {
+      visitorPhoneFragments.add(phone);
+      visitorPhoneFragments.add(digits);
+      visitorPhoneFragments.add(digits.slice(-8));
+    }
+  };
 
   /** A QR registration with an IP hash and a browser string, as the real route records them. */
-  const register = (name: string, phone?: string | null) =>
-    submitConsentV(db.pool, { idempotencyKey: randomUUID(), name, phone, childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.5", ipPepper: "pepper", userAgent: "Mozilla/5.0 (Test)" });
+  const register = (name: string, phone?: string | null) => {
+    rememberName(name);
+    rememberPhone(phone);
+    return submitConsentV(db.pool, { idempotencyKey: randomUUID(), name, phone, childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.5", ipPepper: "pepper", userAgent: "Mozilla/5.0 (Test)" });
+  };
   const contactOf = async (registrationId: string) => String(await scalar("SELECT contact_id v FROM bb.consent_registrations WHERE id = $1", [registrationId]));
-  const lead = (name: string, phone: string) => ({ idempotencyKey: randomUUID(), name, phone, date: FUTURE, children: 5, consent: true as const });
+  const lead = (name: string, phone: string) => {
+    rememberName(name);
+    rememberPhone(phone);
+    return { idempotencyKey: randomUUID(), name, phone, date: FUTURE, children: 5, consent: true as const };
+  };
+  const manualBooking = (input: Parameters<typeof createManualBooking>[2]) => {
+    rememberName(input.name);
+    rememberPhone(input.phone);
+    return createManualBooking(db.pool, owner, input);
+  };
   const events = async (contactId: string) => (await q("SELECT event, note, ip_hash, user_agent, document_id FROM bb.consent_events WHERE contact_id = $1 ORDER BY id", [contactId])).rows;
   const auditText = async () => JSON.stringify((await q("SELECT action, entity_type, entity_id, before, after, ip, user_agent FROM bb.audit_log")).rows);
 
@@ -109,18 +135,21 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
     });
 
     it("with a phone: the number is removed too, and a later registration with the same number is a NEW contact", async () => {
-      const r = await register("Серик Сномером", "+7 701 222 33 44");
+      const phone = syntheticPhone();
+      const formattedPhone = phone.replace(/(\+\d)(\d{3})(\d{3})(\d{4})/, "$1 $2 $3 $4");
+      const digits = phone.replace(/\D/g, "");
+      const r = await register("Серик Сномером", formattedPhone);
       const c = await contactOf(r.registrationId);
       await revokeConsent(db.pool, owner, c);
       await anonymizeContact(db.pool, owner, c);
       assert.equal(await scalar("SELECT phone_e164 IS NULL v FROM bb.contacts WHERE id = $1", [c]), true);
-      assert.equal(await scalar("SELECT count(*)::int v FROM bb.contacts WHERE phone_e164 = '+77012223344'", []), 0);
-      const again = await register("Серик Сномером", "+7 701 222 33 44");
+      assert.equal(await scalar("SELECT count(*)::int v FROM bb.contacts WHERE phone_e164 = $1", [phone]), 0);
+      const again = await register("Серик Сномером", formattedPhone);
       const c2 = await contactOf(again.registrationId);
       assert.notEqual(c2, c, "the anonymised contact is not brought back to life");
-      assert.equal(await scalar("SELECT phone_e164 v FROM bb.contacts WHERE id = $1", [c2]), "+77012223344");
+      assert.equal(await scalar("SELECT phone_e164 v FROM bb.contacts WHERE id = $1", [c2]), phone);
       const audit = await auditText();
-      assert.ok(!audit.includes("77012223344") && !audit.includes("Серик"));
+      assert.ok(!audit.includes(digits) && !audit.includes("Серик"));
     });
 
     it("a repeated withdrawal changes nothing; a repeated anonymisation is reported as already done; parallel calls make one change", async () => {
@@ -150,7 +179,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
   describe("QR + birthday enquiry on one contact", () => {
     it("the consent can be withdrawn, but the contact is kept while the enquiry exists (open, then closed)", async () => {
       const name = "Мадина Сзаявкой";
-      const phone = "+77015556677";
+      const phone = syntheticPhone();
       const c = await contactOf((await register(name, phone)).registrationId);
       const l = await submitLead(db.pool, lead(name, phone));
       assert.equal(String(await scalar("SELECT contact_id v FROM bb.lead_requests WHERE id = $1", [l.leadId])), c, "same phone and name: one contact");
@@ -174,7 +203,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
   describe("bookings", () => {
     it("an active booking blocks anonymisation, also at the database level; after release the booking record still blocks; the double-booking guard is intact", async () => {
       const name = "Бахыт Сбронью";
-      const phone = "+77019998877";
+      const phone = syntheticPhone();
       const c = await contactOf((await register(name, phone)).registrationId);
       const l = await submitLead(db.pool, lead(name, phone));
       const { reservationId } = await confirmLead(db.pool, owner, { leadId: l.leadId, date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party" });
@@ -191,7 +220,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
 
       // the cell stays protected against a second active reservation
       await assert.rejects(
-        () => createManualBooking(db.pool, owner, { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Другой Гость", phone: "+77010000123" }),
+        () => manualBooking({ date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Другой Гость", phone: syntheticPhone() }),
         (e: unknown) => e instanceof ConflictError,
       );
 
@@ -201,12 +230,13 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       const r = (await q("SELECT price_kzt, contact_id, released_at FROM bb.slot_reservations WHERE id = $1", [reservationId])).rows[0];
       assert.ok(r.price_kzt > 0 && String(r.contact_id) === c && r.released_at, "the booking row and its price snapshot are untouched");
       // the freed cell can be booked again (protection intact in both directions)
-      await createManualBooking(db.pool, owner, { date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Следующий Гость", phone: "+77010000124" });
+      await manualBooking({ date: FUTURE, slotId: 1, roomId: "roblox-room", packageId: "happy-party", name: "Следующий Гость", phone: syntheticPhone() });
     });
 
     it("a contact created from a manual booking (not QR) is never anonymised by this mechanism while the booking exists", async () => {
-      await createManualBooking(db.pool, owner, { date: FUTURE, slotId: 2, roomId: "ice-room", packageId: "happy-party", name: "Ручной Клиент", phone: "+77010000555" });
-      const c = String(await scalar("SELECT id v FROM bb.contacts WHERE phone_e164 = '+77010000555'"));
+      const phone = syntheticPhone();
+      await manualBooking({ date: FUTURE, slotId: 2, roomId: "ice-room", packageId: "happy-party", name: "Ручной Клиент", phone });
+      const c = String(await scalar("SELECT id v FROM bb.contacts WHERE phone_e164 = $1", [phone]));
       await revokeConsent(db.pool, owner, c);
       await assert.rejects(() => anonymizeContact(db.pool, owner, c), ConflictError);
     });
@@ -227,11 +257,11 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       await assert.rejects(() => q("DELETE FROM bb.consent_events WHERE contact_id = $1", [live]), /append-only/);
       await assert.rejects(() => q("UPDATE bb.contacts SET name = 'Вернули' WHERE id = $1", [live]), /cannot be changed or restored/);
       await assert.rejects(() => q("UPDATE bb.contacts SET anonymized_at = NULL WHERE id = $1", [live]), /cannot be changed or restored/);
-      await assert.rejects(() => q("UPDATE bb.contacts SET phone_e164 = '+77010000999' WHERE id = $1", [live]), /cannot be changed or restored/);
+      await assert.rejects(() => q("UPDATE bb.contacts SET phone_e164 = $1 WHERE id = $2", [syntheticPhone(), live]), /cannot be changed or restored/);
     });
 
     it("anonymisation cannot leave a phone or a marketing consent behind; other sources still need a phone", async () => {
-      const c = await contactOf((await register("Хвост Номера", "+77011110000")).registrationId);
+      const c = await contactOf((await register("Хвост Номера", syntheticPhone())).registrationId);
       await assert.rejects(() => q("UPDATE bb.contacts SET anonymized_at = now() WHERE id = $1", [c]), /keeps no phone/);
       await assert.rejects(() => q("INSERT INTO bb.contacts (name, name_key, phone_e164, source) VALUES ('x', 'x', NULL, 'birthday_form')"), /contacts_phone_required_unless_qr/);
     });
@@ -249,10 +279,12 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
     });
 
     it("dry run reports who would be processed and who must be left alone, changes nothing and shows no names or phones", async () => {
-      const qrOnly = await contactOf((await register("Срок Одиночный", "+77013334455")).registrationId);
+      const qrOnlyPhone = syntheticPhone();
+      const withLeadPhone = syntheticPhone();
+      const qrOnly = await contactOf((await register("Срок Одиночный", qrOnlyPhone)).registrationId);
       const qrNoPhone = await contactOf((await register("Срок Безномера")).registrationId);
-      const withLead = await contactOf((await register("Срок Сзаявкой", "+77016667788")).registrationId);
-      await submitLead(db.pool, lead("Срок Сзаявкой", "+77016667788"));
+      const withLead = await contactOf((await register("Срок Сзаявкой", withLeadPhone)).registrationId);
+      await submitLead(db.pool, lead("Срок Сзаявкой", withLeadPhone));
       const reg = (await q("SELECT max(created_at) v FROM bb.consent_registrations WHERE contact_id = $1", [qrOnly])).rows[0].v as Date;
       const anonymisedBefore = Number(await scalar("SELECT count(*) v FROM bb.contacts WHERE anonymized_at IS NOT NULL"));
 
@@ -274,7 +306,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       assert.ok(late.totals.outsideQrRule >= 1, "enquiry/booking-only contacts are outside the QR rule");
 
       const text = JSON.stringify(late);
-      for (const secret of ["Срок", "77013334455", "77016667788", "Одиночный"]) assert.ok(!text.includes(secret), `the report must not contain ${secret}`);
+      for (const secret of ["Срок", qrOnlyPhone, withLeadPhone, "Одиночный"]) assert.ok(!text.includes(secret), `the report must not contain ${secret}`);
 
       const dry = await runRetention(db.pool, owner, { now: plusMonths(reg, 12, 1000) });
       assert.deepEqual({ dryRun: dry.dryRun, processed: dry.processed }, { dryRun: true, processed: 0 });
@@ -292,10 +324,13 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
     });
 
     it("after the Owner records the confirmation and enables it, a run processes only eligible QR contacts and is repeatable", async () => {
-      const keep = await contactOf((await register("Срок Свежий", "+77018889900")).registrationId); // registered "today"
-      const gone = await contactOf((await register("Срок Истёк", "+77018880011")).registrationId);
-      const tied = await contactOf((await register("Срок Связан", "+77018881122")).registrationId);
-      await submitLead(db.pool, lead("Срок Связан", "+77018881122"));
+      const keepPhone = syntheticPhone();
+      const gonePhone = syntheticPhone();
+      const tiedPhone = syntheticPhone();
+      const keep = await contactOf((await register("Срок Свежий", keepPhone)).registrationId); // registered "today"
+      const gone = await contactOf((await register("Срок Истёк", gonePhone)).registrationId);
+      const tied = await contactOf((await register("Срок Связан", tiedPhone)).registrationId);
+      await submitLead(db.pool, lead("Срок Связан", tiedPhone));
       const settings = await updateRetentionSettings(db.pool, owner, { legalConfirmed: true, autoEnabled: true, qrMonths: 12 }, meta);
       assert.equal(settings.autoEnabled, true);
       assert.ok(settings.legalConfirmedAt);
@@ -316,13 +351,13 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
         assert.ok(ev.every((e) => e.ip_hash === null && e.user_agent === null));
       }
       assert.equal(await scalar("SELECT anonymized_at IS NULL v FROM bb.contacts WHERE id = $1", [tied]), true, "the contact with an enquiry was left alone");
-      assert.equal(await scalar("SELECT phone_e164 v FROM bb.contacts WHERE id = $1", [tied]), "+77018881122");
+      assert.equal(await scalar("SELECT phone_e164 v FROM bb.contacts WHERE id = $1", [tied]), tiedPhone);
 
       const again = await runRetention(db.pool, owner, { dryRun: false, now }, meta);
       assert.equal(again.processed, 0, "repeatable: nothing left to do");
       const audit = await auditText();
       assert.ok(audit.includes("retention.run") && audit.includes("retention.settings_changed"));
-      for (const secret of ["Срок Истёк", "77018880011", "Срок Связан"]) assert.ok(!audit.includes(secret));
+      for (const secret of ["Срок Истёк", gonePhone, "Срок Связан", tiedPhone]) assert.ok(!audit.includes(secret));
 
       // withdrawing the confirmation switches automatic processing off again
       const off = await updateRetentionSettings(db.pool, owner, { legalConfirmed: false });
@@ -334,7 +369,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
   describe("what a withdrawal covers, and what is left afterwards", () => {
     it("one button withdraws EVERY personal-data consent of the contact: the QR one and the one given with the enquiry, also under another document version", async () => {
       const name = "Раиса Обаесогласия";
-      const phone = "+77013141516";
+      const phone = syntheticPhone();
       const c = await contactOf((await register(name, phone)).registrationId); // QR under the current version
       const oldDoc = String(await scalar("SELECT id v FROM bb.legal_documents WHERE kind = 'personal_data_consent' AND status = 'published'"));
       const next = await createDraft(db.pool, owner, { kind: "personal_data_consent", title: "новая редакция", body: "Текст personal_data_consent 2" });
@@ -364,8 +399,9 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
 
     it("after anonymisation no table of the schema still holds the name, the phone, the address or the browser of the visitor", async () => {
       const name = "Реидент Проверкин";
+      const phone = syntheticPhone();
       // values that exist nowhere else in this database, so the search below can only find this visitor's traces
-      const reg = await submitConsentV(db.pool, { idempotencyKey: randomUUID(), name, phone: "+7 701 909 08 07", childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.77", ipPepper: "pepper-reident", userAgent: "UniqueBrowser/9.99-reident" });
+      const reg = await submitConsentV(db.pool, { idempotencyKey: randomUUID(), name, phone, childrenCount: 1, acceptRules: true, acceptPersonalData: true }, { ip: "203.0.113.77", ipPepper: "pepper-reident", userAgent: "UniqueBrowser/9.99-reident" });
       const c = await contactOf(reg.registrationId);
       const ipHash = hashIp("203.0.113.77", "pepper-reident")!;
       assert.ok(JSON.stringify((await q("SELECT ip_hash, user_agent FROM bb.consent_events WHERE contact_id = $1", [c])).rows).includes(ipHash), "before: the hash and the browser string are stored");
@@ -375,7 +411,7 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       assert.ok(tables.includes("consent_events") && tables.includes("audit_log") && tables.includes("export_log"));
       let dump = "";
       for (const t of tables) dump += JSON.stringify((await q(`SELECT x::text AS row FROM bb."${t}" x`)).rows);
-      for (const needle of ["Реидент", "Проверкин", "7019090807", "701 909", "203.0.113.77", ipHash, "UniqueBrowser"]) {
+      for (const needle of ["Реидент", "Проверкин", phone, phone.replace(/\D/g, ""), "203.0.113.77", ipHash, "UniqueBrowser"]) {
         assert.ok(!dump.includes(needle), `no table may contain ${needle}`);
       }
       // what remains about the contact: an id, the times of its registrations and the document versions, nothing that names a person
@@ -386,7 +422,8 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
 
   describe("where personal data may remain", () => {
     it("the CRM and exports show an anonymised contact without its old name or phone", async () => {
-      const c = await contactOf((await register("Видимость Проверка", "+77012345001")).registrationId);
+      const phone = syntheticPhone();
+      const c = await contactOf((await register("Видимость Проверка", phone)).registrationId);
       await revokeConsent(db.pool, owner, c);
       await anonymizeContact(db.pool, owner, c);
       const list = await listContacts(db.pool, owner, { q: "Видимость" });
@@ -395,21 +432,29 @@ describe("Privacy: withdrawal of consent, anonymisation, retention", () => {
       assert.equal(card!.contact.name, ANONYMIZED_NAME);
       assert.equal(card!.contact.phone, null);
       const csv = (await exportContacts(db.pool, owner, { format: "csv", columns: ["name", "phone"] })).body.toString("utf8");
-      assert.ok(!csv.includes("Видимость") && !csv.includes("77012345001"));
+      assert.ok(!csv.includes("Видимость") && !csv.includes(phone));
     });
 
     it("the export log keeps the fact that a search was used, not what was typed (it is append-only)", async () => {
-      await exportContacts(db.pool, owner, { format: "csv", columns: ["name"], filters: { q: "7016667788" } });
+      const searchPhone = syntheticPhone();
+      await exportContacts(db.pool, owner, { format: "csv", columns: ["name"], filters: { q: searchPhone } });
       const row = (await q("SELECT filters FROM bb.export_log ORDER BY id DESC LIMIT 1")).rows[0];
       assert.equal(row.filters.q, "[redacted]");
-      assert.ok(!JSON.stringify((await q("SELECT filters, columns FROM bb.export_log")).rows).includes("7016667788"));
+      assert.ok(!JSON.stringify((await q("SELECT filters, columns FROM bb.export_log")).rows).includes(searchPhone));
     });
 
     it("nothing in the audit log or the Telegram outbox names a visitor", async () => {
-      const audit = await auditText();
-      for (const secret of ["Айдана", "Серик", "Мадина", "Бахыт", "Ручной Клиент", "+7701", "7701"]) assert.ok(!audit.includes(secret), `audit must not contain ${secret}`);
-      const outbox = JSON.stringify((await q("SELECT * FROM bb.outbox")).rows);
-      assert.ok(!outbox.includes("Мадина") && !outbox.includes("7701"));
+      // Opaque UUIDs may coincidentally contain a short phone fragment. Inspect content fields, not entity/ref IDs.
+      const audit = JSON.stringify((await q("SELECT action, entity_type, before, after, ip, user_agent FROM bb.audit_log")).rows);
+      const outbox = JSON.stringify((await q("SELECT to_jsonb(o) - 'id' - 'ref_id' AS content FROM bb.outbox o")).rows);
+      for (const secret of visitorNames) {
+        assert.ok(!audit.includes(secret), "audit content must not contain a visitor name");
+        assert.ok(!outbox.includes(secret), "outbox content must not contain a visitor name");
+      }
+      for (const fragment of visitorPhoneFragments) {
+        assert.ok(!audit.includes(fragment), "audit content must not contain a visitor phone or its 8-digit suffix");
+        assert.ok(!outbox.includes(fragment), "outbox content must not contain a visitor phone or its 8-digit suffix");
+      }
     });
   });
 });

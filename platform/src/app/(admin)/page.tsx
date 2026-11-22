@@ -9,6 +9,7 @@ import { BUSINESS_TIME_ZONE, catalogSummary } from "@/core/catalog";
 import { almatyToday } from "@/core/dates";
 import { outboxStats } from "@/core/outbox";
 import { dashboardCounters, type DashboardCounters } from "@/core/lead-queue";
+import { dashboardAnalytics, type DashboardAnalytics } from "@/core/analytics";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermissionAnd } from "@/server/dal";
@@ -40,6 +41,7 @@ type Data = {
   attendance: Awaited<ReturnType<typeof dayFigures>> | "outdated" | null;
   /** Real counters from the database; null when the role may not see them or they are unavailable. Never invented. */
   counters: DashboardCounters | null;
+  analytics: DashboardAnalytics | null;
 };
 
 export default async function DashboardPage() {
@@ -47,15 +49,15 @@ export default async function DashboardPage() {
   const { session, data: remote } = await requirePermissionAnd("dashboard.view", async () => {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    return bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters }>("dashboard", {}, token);
+    return bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters; analytics?: DashboardAnalytics }>("dashboard", {}, token);
   });
   const { user } = session;
   if (remote) {
-    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null }} />;
+    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null, analytics: remote.analytics ?? null }} />;
   }
   const pool = getPool();
   const today = almatyToday();
-  const [migrations, summary, outbox, attendance, counters] = await Promise.all([
+  const [migrations, summary, outbox, attendance, counters, analytics] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
@@ -65,11 +67,12 @@ export default async function DashboardPage() {
           (await attendanceSchemaReady(pool)) ? dayFigures(pool, { id: user.id, role: user.role }, today) : "outdated")()
       : Promise.resolve(null),
     dashboardCounters(pool, user.role),
+    dashboardAnalytics(pool, user.role),
   ]);
   return (
     <DashboardView data={{
       user, migration: migrations.rows[0]?.name ?? null, summary, outbox, attendance,
-      counters,
+      counters, analytics,
     }} />
   );
 }
@@ -78,6 +81,7 @@ function DashboardView({ data }: { data: Data }) {
   const { user, summary, outbox, attendance } = data;
   const requests = data.counters?.requests ?? null;
   const todayBookings = data.counters?.bookings ?? null;
+  const analytics = data.analytics;
   const migrations = { rows: [{ name: data.migration }] };
   const timestamp = new Date();
   const activePackages = summary?.packages.filter((item) => item.isActive) ?? [];
@@ -183,6 +187,39 @@ function DashboardView({ data }: { data: Data }) {
         ) : null}
 
         <div className="so-side-panels">
+          {analytics && (analytics.leads || analytics.upcoming || analytics.manualPrepayments) ? (
+            <section aria-labelledby="analytics-title" className="so-panel" data-testid="dash-analytics">
+              <div className="so-panel-heading">
+                <div><p className="so-section-eyebrow">CRM показатели</p><h2 id="analytics-title">Заявки и предстоящие праздники</h2></div>
+              </div>
+              {analytics.leads ? (
+                <>
+                  <p className="so-panel-caption">Заявки за {analytics.historyFrom}–{analytics.historyThrough}, по текущему статусу</p>
+                  <div className="so-system-list">
+                    <div className="so-system-row"><span>Всего поступило</span><strong>{analytics.leads.total}</strong></div>
+                    <div className="so-system-row"><span>Новые · в работе</span><strong>{analytics.leads.new} · {analytics.leads.inProgress}</strong></div>
+                    <div className="so-system-row"><span>Подтверждены · завершены</span><strong>{analytics.leads.confirmed} · {analytics.leads.completed}</strong></div>
+                    <div className="so-system-row"><span>Отменены</span><strong>{analytics.leads.cancelled}</strong></div>
+                  </div>
+                </>
+              ) : null}
+              {analytics.upcoming ? (
+                <div className="so-system-list">
+                  <p className="so-panel-caption">Активные резервации на ближайшие 30 дней</p>
+                  <div className="so-system-row"><span>Подтверждённые брони</span><strong>{analytics.upcoming.bookings}</strong></div>
+                  <div className="so-system-row"><span>Блокировки комнат</span><strong>{analytics.upcoming.blocks}</strong></div>
+                </div>
+              ) : null}
+              {analytics.manualPrepayments ? (
+                <div className="so-system-list">
+                  <div className="so-system-row"><span>Записано вручную предоплат</span><strong>{analytics.manualPrepayments.count}</strong></div>
+                  <div className="so-system-row"><span>Сумма этих фактов</span><strong>{kzt.format(BigInt(analytics.manualPrepayments.amountKzt))} ₸</strong></div>
+                  <p className="so-panel-caption">По записям менеджеров за период выше; не является выручкой.</p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           {attendance === "outdated" ? (
             <section aria-labelledby="attendance-title" className="so-panel" data-testid="dash-attendance-outdated">
               <div className="so-panel-heading">

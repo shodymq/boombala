@@ -3,6 +3,7 @@ import { BrandArt } from "@/components/brand-art";
 import Link from "next/link";
 import { listPackages } from "@/core/catalog";
 import { isValidDate } from "@/core/dates";
+import { LEAD_NEXT_ACTION_LABELS } from "@/core/lead-workflow";
 import { DatePicker } from "@/components/date-picker";
 import { Icon } from "@/components/icon";
 import { requirePermissionAnd } from "@/server/dal";
@@ -13,25 +14,27 @@ import { leadStatusAction } from "./actions";
 export const metadata: Metadata = { title: "Заявки" };
 
 const STATUS: Record<string, string> = { new: "Новая", in_progress: "В работе", confirmed: "Подтверждена", cancelled: "Отменена", completed: "Завершена" };
-const NOTICES: Record<string, string> = { status: "Статус изменён." };
+const NOTICES: Record<string, string> = { status: "Статус изменён.", workflow: "План обработки сохранён.", claimed: "Заявка назначена вам." };
 const ERRORS: Record<string, string> = {
   slot_taken: "Этот слот уже занят. Выберите другую комнату или время.",
   invalid: "Проверьте дату, слот, комнату и пакет (у пакета должна быть цена; прошедший слот занять нельзя).",
-  conflict: "Заявка уже обработана.", forbidden: "Недостаточно прав.",
+  conflict: "Заявка уже обработана.", forbidden: "Недостаточно прав.", stale_update: "Заявку уже изменил другой сотрудник. Обновите страницу и повторите действие.",
+  lead_not_open: "План обработки можно менять только у новой заявки или заявки в работе.", lead_already_assigned: "Заявка уже назначена другому сотруднику.",
 };
 const input = "crm-requests-control";
 const btn = "crm-requests-action";
 const btnGhost = "crm-requests-action crm-requests-action-secondary";
 
-export default async function RequestsPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; createdFrom?: string; createdTo?: string; page?: string; notice?: string; error?: string }> }) {
+export default async function RequestsPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; createdFrom?: string; createdTo?: string; overdue?: string; page?: string; notice?: string; error?: string }> }) {
   const sp = await searchParams;
   const status = sp.status && STATUS[sp.status] ? sp.status : undefined;
   const q = sp.q?.trim().slice(0, 80) || undefined;
   const createdFrom = sp.createdFrom && isValidDate(sp.createdFrom) ? sp.createdFrom : undefined;
   const createdTo = sp.createdTo && isValidDate(sp.createdTo) ? sp.createdTo : undefined;
-  const hasFilters = Boolean(status || q || createdFrom || createdTo);
+  const overdue = sp.overdue === "1";
+  const hasFilters = Boolean(status || q || createdFrom || createdTo || overdue);
   const page = Math.max(Math.trunc(Number(sp.page)) || 1, 1);
-  const filter = { status, q, createdFrom, createdTo, page };
+  const filter = { status, q, createdFrom, createdTo, overdue, page };
   // Bridge mode: the page and the package names are ONE round trip that starts together with the session check.
   const { session, data: indexed } = await requirePermissionAnd("requests.manage", () => loadRequestsIndex(filter));
   const { user } = session;
@@ -56,6 +59,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
     if (q) params.set("q", q);
     if (createdFrom) params.set("createdFrom", createdFrom);
     if (createdTo) params.set("createdTo", createdTo);
+    if (overdue) params.set("overdue", "1");
     if (next) params.set("status", next);
     if (toPage && toPage > 1) params.set("page", String(toPage));
     const query = params.toString();
@@ -79,10 +83,12 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
       <nav className="crm-requests-tabs" aria-label="Фильтр заявок по статусу">
         <Link href={statusHref()} aria-current={!status ? "page" : undefined}>Все</Link>
         {Object.entries(STATUS).map(([k, v]) => <Link key={k} href={statusHref(k)} aria-current={status === k ? "page" : undefined}>{v}</Link>)}
+        <Link href={overdue ? "/requests" : "/requests?overdue=1"} aria-current={overdue ? "page" : undefined}>Просроченные действия</Link>
       </nav>
 
       <form method="get" className="crm-requests-filters">
         {status ? <input type="hidden" name="status" value={status} /> : null}
+        {overdue ? <input type="hidden" name="overdue" value="1" /> : null}
         <label className="crm-requests-search">
           <span>Поиск</span>
           <input name="q" defaultValue={q ?? ""} placeholder="Имя или телефон" maxLength={80} className={input} />
@@ -129,6 +135,10 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                       {l.preferredStartTime ? <span>Желаемое время: {l.preferredStartTime}</span> : null}
                       <span>Пакет: {pkgName(l.packageId)}</span>
                       {l.children != null ? <span>Детей: {l.children}</span> : null}
+                      <span>Ответственный: {l.assigneeName ?? "не назначен"}</span>
+                      {l.nextAction && l.followUpAt ? <span className={l.followUpOverdue ? "crm-requests-overdue" : undefined}>
+                        {LEAD_NEXT_ACTION_LABELS[l.nextAction]} · {fmt.format(l.followUpAt)}{l.followUpOverdue ? " · просрочено" : ""}
+                      </span> : null}
                       {l.reservationId ? <Link href={`/bookings?date=${l.requestedDate}`}>Показать в календаре</Link> : null}
                     </div>
                   </td>
