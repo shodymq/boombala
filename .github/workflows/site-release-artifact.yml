@@ -40,6 +40,9 @@ jobs:
           mkdir -p "$WORK/site" dist
           cp -R .next public node_modules package.json package-lock.json next.config.ts "$WORK/site/"
           rm -rf "$WORK/site/.next/cache" "$WORK/site/.next/dev"
+          # bb-site.service binds this path into its writable systemd namespace.
+          # Keep the empty directory in the archive so systemd can start before Next recreates it.
+          mkdir -p "$WORK/site/.next/cache"
           printf '{"commit":"%s","built_at":"%s","node_build":"%s","platform":"Linux-x86_64","public_site_url":"%s","booking_calendar":"0","news":"0","site_profile":"kz-production","artifact_scope":"site-only"}\n' \
             "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(node -v)" "$PUBLIC_SITE_URL" > "$WORK/RELEASE.json"
           (cd "$WORK" && tar -czf "$GITHUB_WORKSPACE/dist/boombala-site-${SHA:0:12}-linux-x64.tar.gz" site RELEASE.json)
