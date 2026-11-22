@@ -46,8 +46,12 @@ export function NavLinks({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
   const [menu, setMenu] = useState({ pathname, open: false });
   const menuOpen = menu.pathname === pathname && menu.open;
-  const primary = items.filter((item) => PRIMARY_HREFS.has(item.href));
-  const management = items.filter((item) => !PRIMARY_HREFS.has(item.href));
+  // /bookings is present only for roles allowed to manage bookings. The destination also enforces that permission server-side.
+  const visibleItems = items.some((item) => item.href === "/bookings")
+    ? [...items, { href: "/operations", label: "Ближайшие праздники" }]
+    : items;
+  const primary = visibleItems.filter((item) => PRIMARY_HREFS.has(item.href));
+  const management = visibleItems.filter((item) => !PRIMARY_HREFS.has(item.href));
 
   const closeMenu = () => setMenu({ pathname, open: false });
 

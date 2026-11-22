@@ -9,6 +9,7 @@ import { BUSINESS_TIME_ZONE, catalogSummary } from "@/core/catalog";
 import { almatyToday } from "@/core/dates";
 import { outboxStats } from "@/core/outbox";
 import { dashboardCounters, type DashboardCounters } from "@/core/lead-queue";
+import { dashboardAnalytics, type DashboardAnalytics } from "@/core/analytics";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermissionAnd } from "@/server/dal";
@@ -40,6 +41,7 @@ type Data = {
   attendance: Awaited<ReturnType<typeof dayFigures>> | "outdated" | null;
   /** Real counters from the database; null when the role may not see them or they are unavailable. Never invented. */
   counters: DashboardCounters | null;
+  analytics: DashboardAnalytics | null;
 };
 
 export default async function DashboardPage() {
@@ -47,208 +49,104 @@ export default async function DashboardPage() {
   const { session, data: remote } = await requirePermissionAnd("dashboard.view", async () => {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    return bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters }>("dashboard", {}, token);
+    return bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters; analytics?: DashboardAnalytics }>("dashboard", {}, token);
   });
   const { user } = session;
   if (remote) {
-    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null }} />;
+    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null, analytics: remote.analytics ?? null }} />;
   }
   const pool = getPool();
   const today = almatyToday();
-  const [migrations, summary, outbox, attendance, counters] = await Promise.all([
-    pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
-    can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
-    can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
-    // Preflight: without migration 013 the card is replaced by a clear notice instead of a failing page.
-    can(user.role, "attendance.manage")
-      ? (async (): Promise<Awaited<ReturnType<typeof dayFigures>> | "outdated"> =>
-          (await attendanceSchemaReady(pool)) ? dayFigures(pool, { id: user.id, role: user.role }, today) : "outdated")()
-      : Promise.resolve(null),
-    dashboardCounters(pool, user.role),
-  ]);
-  return (
-    <DashboardView data={{
-      user, migration: migrations.rows[0]?.name ?? null, summary, outbox, attendance,
-      counters,
-    }} />
-  );
-}
+  const [migrations, summary, outbox, attendance, counters, analytics] = await Promise.all([
+    pool.query<{ name: string }>("SELECT name FROçMy¶‰ËkºwµçKˆ‹›Ü˜šY[ˆ´'t-t-4/´`t`´,4`´/´aô/t/ˆ4/ô`4,4,‹ˆ‹İ[Wİ\]Nˆ´%ô,4cô,´.´`È4`ô-´-H4.4-ô/4-t/t.4.È4-4`4`ô,ô/´.H4`t/´`´`4`ô-4/t.4.‹ˆ4'´,t/t/´,´.4`´-H4`t`´`4,4/t.4a´`È4.4/ô/´,´`´/´`4.4`´-H4-4-t.t`t`´,´.4-Kˆ‹ˆXYÛ›İÛÜ[ˆ´'ô.ô,4/H4/´,t`4,4,t/´`´.´.4/4/´-´/t/ˆ4/4-t/tcô`´c4`´/´.ôc4.´/ˆ4`È4/t/´,´/´.H4-ô,4cô,´.´.4.4.ô.4-ô,4cô,´.´.4,ˆ4`4,4,t/´`´-Kˆ‹XYØ[™XYWØ\ÜÚYÛ™Yˆ´%ô,4cô,´.´,4`ô-´-H4/t,4-ô/t,4aô-t/t,4-4`4`ô,ô/´/4`È4`t/´`´`4`ô-4/t.4.´`Ëˆ‹ŸNÂ˜ÛÛœİ“ÕPÑTÎˆ™XÛÜ™İš[™Ëİš[™ÏˆHÈİ]\Îˆ´(t`´,4`´`ô`H4.4-ô/4-t/tdt/Kˆ‹ÛÜšÙ›İÎˆ´'ô.ô,4/H4/´,t`4,4,t/´`´.´.4`t/´at`4,4/tdt/Kˆ‹ÛZ[YYˆ´%ô,4cô,´.´,4/t,4-ô/t,4aô-t/t,4,´,4/ˆˆNÂ˜ÛÛœİ[œ]H˜Ü›K\™\]Y\İËXÛÛ›ÛÂ˜ÛÛœİˆH˜Ü›K\™\]Y\İËXXİ[ÛˆÂ˜ÛÛœİ‘ÚÜİH˜Ü›K\™\]Y\İËXXİ[ÛˆÜ›K\™\]Y\İËXXİ[Û‹\ÙXÛÛ™\HÂ˜ÛÛœİ[™[Hœ›İ[™YL›Ü™\ˆ›Ü™\‹[[™H™Ë]Ú]HMHÚYİË\ÛHÂ‚\HØ][ÙÈHÈXÚØYÙ\Îˆ]ØZ]Y™]\›•\O\[Ùˆ\İXÚØYÙ\ÏÈ›ÛÛ\Îˆ]ØZ]Y™]\›•\O\[Ùˆ\İ›ÛÛ\ÏÈÛİÎˆ]ØZ]Y™]\›•\O\[Ùˆ\İÛİÏˆNÂ‚‹ÊŠ‚ˆ
+ˆ™\]Y\İØ\™ÛˆHİ\œ™[›ÙXİ[ÛˆÛÛ˜XİˆH\İ”È
+œšYÙJHÜˆH]X˜\ÙH
+\™Xİ[ÙJK‚ˆ
+ˆH™XÛÜ™\È™XYHYˆ^[Y[È[™™Y[™È\™H[X™\˜][HXœÙ[ˆ›ÙXİ[Ûˆ\È›Èİ\ÜYÜ\˜][Ûˆ›Ü‚ˆ
+ˆ[HÛˆ\È]ÈH™XÛÜ™YX[X[™\^[Y[\ÈÚİÛˆ™XY[Û›K‚ˆ
+‹Â™^ÜY˜][\Ş[˜È[˜İ[Ûˆ™\]Y\İØ\™YÙJÈ\˜[\ËÙX\˜Ú\˜[\ÈNˆÈ\˜[\Îˆ›ÛZ\ÙOÈYˆİš[™ÈOÈÙX\˜Ú\˜[\Îˆ›ÛZ\ÙOÈ›İXÙOÎˆİš[™ÎÈ\œ›ÜÎˆİš[™ÈOˆJHÂˆÛÛœİÈYHH]ØZ]\˜[\ÎÂˆÛÛœİÜH]ØZ]ÙX\˜Ú\˜[\ÎÂˆÛÛœİœšYÙHHYØXŞPœšYÙQ[˜X›Y
 
-function DashboardView({ data }: { data: Data }) {
-  const { user, summary, outbox, attendance } = data;
-  const requests = data.counters?.requests ?? null;
-  const todayBookings = data.counters?.bookings ?? null;
-  const migrations = { rows: [{ name: data.migration }] };
-  const timestamp = new Date();
-  const activePackages = summary?.packages.filter((item) => item.isActive) ?? [];
-  const activeRooms = summary?.rooms.filter((room) => room.isActive) ?? [];
-  const pricePackages = activePackages.filter((item) => item.basePrice != null);
-  const maxPrice = Math.max(1, ...pricePackages.map((item) => item.basePrice ?? 0));
-  const now = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short", timeZone: BUSINESS_TIME_ZONE }).format(timestamp);
-  const metrics: Array<{ label: string; value: number; suffix?: string; note: string; href: string; icon: IconName }> = [];
-  if (requests) {
-    metrics.push({ label: "ĞĞ¾Ğ²Ñ‹Ğµ Ğ·Ğ°ÑĞ²ĞºĞ¸", value: requests.new, note: "Ğ–Ğ´ÑƒÑ‚ Ğ¾Ñ‚Ğ²ĞµÑ‚Ğ°", href: "/requests?status=new", icon: "inbox" });
-    metrics.push({ label: "Ğ’ Ñ€Ğ°Ğ±Ğ¾Ñ‚Ğµ", value: requests.inProgress, note: "ĞÑ‚ĞºÑ€Ñ‹Ñ‚Ñ‹Ğµ Ğ¾Ğ±Ñ€Ğ°Ñ‰ĞµĞ½Ğ¸Ñ", href: "/requests?status=in_progress", icon: "ticket" });
-  }
-  if (todayBookings) {
-    metrics.push({ label: "Ğ‘Ñ€Ğ¾Ğ½Ğ¸ ÑĞµĞ³Ğ¾Ğ´Ğ½Ñ", value: todayBookings.booked, note: "ĞŸĞ¾Ğ´Ñ‚Ğ²ĞµÑ€Ğ¶Ğ´Ñ‘Ğ½Ğ½Ñ‹Ğµ Ğ±Ñ€Ğ¾Ğ½Ğ¸", href: "/bookings", icon: "calendar" });
-    metrics.push({ label: "Ğ‘Ğ»Ğ¾ĞºĞ¸Ñ€Ğ¾Ğ²ĞºĞ¸ ÑĞµĞ³Ğ¾Ğ´Ğ½Ñ", value: todayBookings.blocked, note: "ĞšĞ¾Ğ¼Ğ½Ğ°Ñ‚Ñ‹ Ğ·Ğ°ĞºÑ€Ñ‹Ñ‚Ñ‹ Ğ²Ñ€ÑƒÑ‡Ğ½ÑƒÑ", href: "/bookings", icon: "settings" });
-  }
-  if (attendance && attendance !== "outdated") {
-    metrics.push({ label: "Ğ”ĞµÑ‚Ğ¸ Ğ²Ğ¾ÑˆĞ»Ğ¸ ÑĞµĞ³Ğ¾Ğ´Ğ½Ñ", value: attendance.childrenEntered, note: `ĞĞ¶Ğ¸Ğ´Ğ°ĞµÑ‚ÑÑ: ${attendance.childrenExpected}`, href: "/attendance", icon: "check" });
-  }
+NÂˆËÈœšYÙH[ÙNˆH™XÛÜ™HY[™HØ][ÙÈ\™HÓ‘H›İ[™š\
+™\]Y\İË˜Ø\™
+H]İ\ÈÙÙ]\ˆÚ]HÙ\ÜÚ[ÛˆÚXÚË‚ˆÛÛœİÈÙ\ÜÚ[Û‹]NˆØ\™HH]ØZ]™\]Z\™T\›Z\ÜÚ[Û[™
+œ™\]Y\İË›X[˜YÙH‹
 
-  return (
-    <div className="snow-overview">
-      <header className="so-heading">
-        <div className="so-intro">
-          <p className="so-eyebrow">ĞĞ±Ğ·Ğ¾Ñ€ CRM <span aria-hidden="true">Â·</span> ĞĞ»Ğ¼Ğ°Ñ‚Ñ‹</p>
-          <h1>
-            Ğ”Ğ¾Ğ±Ñ€Ñ‹Ğ¹ Ğ´ĞµĞ½ÑŒ, {user.name}
-            <span className="so-greeting-art">
-              <BrandArt size={48} />
-            </span>
-          </h1>
-          <p>Ğ—Ğ°ÑĞ²ĞºĞ¸, Ğ±Ñ€Ğ¾Ğ½Ğ¸Ñ€Ğ¾Ğ²Ğ°Ğ½Ğ¸Ñ Ğ¸ Ğ¿Ğ¾ÑĞµÑ‰Ğ°ĞµĞ¼Ğ¾ÑÑ‚ÑŒ Ñ„Ğ¸Ğ»Ğ¸Ğ°Ğ»Ğ° â€” Ğ½Ğ° Ğ¾Ğ´Ğ½Ğ¾Ğ¼ ÑĞºÑ€Ğ°Ğ½Ğµ.</p>
-          <time className="so-date" dateTime={timestamp.toISOString()}>{now}</time>
-        </div>
-        <div className="so-actions">
-          {can(user.role as never, "bookings.manage") ? <Link className="so-button so-button-primary" href="/bookings">ĞÑ‚ĞºÑ€Ñ‹Ñ‚ÑŒ ĞºĞ°Ğ»ĞµĞ½Ğ´Ğ°Ñ€ÑŒ <span aria-hidden="true">â†—</span></Link> : null}
-          {can(user.role as never, "requests.manage") ? <Link className="so-button so-button-secondary" href="/requests">Ğ’ÑĞµ Ğ·Ğ°ÑĞ²ĞºĞ¸</Link> : null}
-        </div>
-      </header>
+HOˆØY™\]Y\İØ\™
+Y
+JNÂˆÛÛœİÈ\Ù\ˆHHÙ\ÜÚ[ÛÂˆÛÛœİXİÜˆHÈYˆ\Ù\‹šY›ÛNˆ\Ù\‹œ›ÛHNÂˆ]XYˆ›Û“[X›O]ØZ]Y™]\›•\O\[ÙˆØYXYˆ[Âˆ]Ø]ˆØ][ÙÎÂˆ]ÛÜšÙ›İĞÛÛ^ˆXYÛÜšÙ›İĞÛÛ^ÂˆYˆ
+œšYÙJHÂˆXYHØ\™Ë›XYÏÈ[ÂˆYˆ
+[XYXØ\™
+H›İ›İ[™
 
-      {metrics.length > 0 ? (
-        <section className="so-metrics-section" aria-label="ĞŸĞ¾ĞºĞ°Ğ·Ğ°Ñ‚ĞµĞ»Ğ¸ Ğ½Ğ° ÑĞµĞ³Ğ¾Ğ´Ğ½Ñ">
-          <p className="so-section-eyebrow">ĞŸĞ¾ĞºĞ°Ğ·Ğ°Ñ‚ĞµĞ»Ğ¸ ÑĞµĞ³Ğ¾Ğ´Ğ½Ñ</p>
-          <div className="so-metrics">
-            {metrics.map((metric) => (
-              <Link className="so-metric" href={metric.href} key={metric.label}>
-                <span className="so-metric-icon" aria-hidden="true"><Icon name={metric.icon} size={16} /></span>
-                <span className="so-metric-label">{metric.label}</span>
-                <strong className="so-metric-value">{metric.value}{metric.suffix ? <span>{metric.suffix}</span> : null}</strong>
-                <span className="so-metric-note">{metric.note}</span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
-      
-      <div className="so-dashboard-grid">
-        {summary ? (
-          <section aria-labelledby="catalog-title" className="so-panel">
-            <div className="so-panel-heading">
-              <div>
-                <p className="so-section-eyebrow">ĞšĞ°Ñ‚Ğ°Ğ»Ğ¾Ğ³</p>
-                <h2 id="catalog-title">Ğ¦ĞµĞ½Ñ‹ Ğ°ĞºÑ‚Ğ¸Ğ²Ğ½Ñ‹Ñ… Ğ¿Ğ°ĞºĞµÑ‚Ğ¾Ğ²</h2>
-              </div>
-              <span className="so-panel-caption">{pricePackages.length} Ñ Ğ±Ğ°Ğ·Ğ¾Ğ²Ğ¾Ğ¹ Ñ†ĞµĞ½Ğ¾Ğ¹</span>
-            </div>
-            {pricePackages.length > 0 ? (
-              <ul className="so-price-list">
-                {pricePackages.map((item) => (
-                  <li key={item.id} className="so-price-row">
-                    <span className="so-price-name">{item.name}</span>
-                    <span
-                      className="so-price-track"
-                      role="meter"
-                      aria-label={"Ğ‘Ğ°Ğ·Ğ¾Ğ²Ğ°Ñ Ñ†ĞµĞ½Ğ° Ğ¿Ğ°ĞºĞµÑ‚Ğ° " + item.name}
-                      aria-valuemin={0}
-                      aria-valuemax={maxPrice}
-                      aria-valuenow={item.basePrice ?? 0}
-                    >
-                      <span className={`so-price-fill so-w-${Math.min(100, Math.max(0, Math.round(((item.basePrice ?? 0) / maxPrice) * 100)))}`} />
-                    </span>
-                    <strong className="so-price-value">{kzt.format(item.basePrice ?? 0)} â‚¸</strong>
-                    <span className="so-price-note">
-                      Ğ‘ÑƒĞ´Ğ½Ğ¸: {item.weekdayPrice == null ? "Ğ½Ğµ Ğ·Ğ°Ğ´Ğ°Ğ½Ğ¾" : kzt.format(item.weekdayPrice) + " â‚¸"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="so-empty">Ğ’ Ğ°ĞºÑ‚Ğ¸Ğ²Ğ½Ğ¾Ğ¼ ĞºĞ°Ñ‚Ğ°Ğ»Ğ¾Ğ³Ğµ Ğ¿Ğ¾ĞºĞ° Ğ½ĞµÑ‚ Ğ±Ğ°Ğ·Ğ¾Ğ²Ñ‹Ñ… Ñ†ĞµĞ½.</p>
-            )}
-            <dl className="so-catalog-meta">
-              <div>
-                <dt>ĞšĞ¾Ğ¼Ğ½Ğ°Ñ‚Ñ‹</dt>
-                <dd>{activeRooms.map((room) => room.name).join(", ") || "â€”"}</dd>
-              </div>
-              <div>
-                <dt>Ğ¡Ğ»Ğ¾Ñ‚Ñ‹</dt>
-                <dd>{summary.slots.map((slot) => slot.startsAt + "â€“" + slot.endsAt).join(", ") || "â€”"}</dd>
-              </div>
-            </dl>
-          </section>
-        ) : null}
+NÂˆØ]HØ\™˜Ø][ÙÎÂˆÛÜšÙ›İĞÛÛ^HØ\™ÛÜšÙ›İĞÛÛ^ÂˆH[ÙHÂˆXYH]ØZ]ØYXY
+XİÜ‹Y
+NÂˆYˆ
+[XY
+H›İ›İ[™
 
-        <div className="so-side-panels">
-          {attendance === "outdated" ? (
-            <section aria-labelledby="attendance-title" className="so-panel" data-testid="dash-attendance-outdated">
-              <div className="so-panel-heading">
-                <div><p className="so-section-eyebrow">Ğ¡ĞµĞ³Ğ¾Ğ´Ğ½Ñ</p><h2 id="attendance-title">ĞŸĞ¾ÑĞµÑ‰Ğ°ĞµĞ¼Ğ¾ÑÑ‚ÑŒ</h2></div>
-              </div>
-              <p role="alert" className="so-alert">Ğ¡Ñ…ĞµĞ¼Ğ° Ğ±Ğ°Ğ·Ñ‹ Ğ´Ğ°Ğ½Ğ½Ñ‹Ñ… ÑƒÑÑ‚Ğ°Ñ€ĞµĞ»Ğ°. ĞÑƒĞ¶Ğ½Ğ° Ğ¼Ğ¸Ğ³Ñ€Ğ°Ñ†Ğ¸Ñ 013.</p>
-            </section>
-          ) : attendance ? (
-            <section aria-labelledby="attendance-title" className="so-panel" data-testid="dash-attendance">
-              <div className="so-panel-heading">
-                <div><p className="so-section-eyebrow">Ğ¡ĞµĞ³Ğ¾Ğ´Ğ½Ñ</p><h2 id="attendance-title">ĞŸĞ¾ÑĞµÑ‰Ğ°ĞµĞ¼Ğ¾ÑÑ‚ÑŒ</h2></div>
-                <span className="so-panel-caption">ĞĞ»Ğ¼Ğ°Ñ‚Ñ‹</span>
-              </div>
-              <dl className="so-attendance-grid">
-                <div className="so-attendance-stat">
-                  <dt><span>Ğ”ĞµÑ‚ĞµĞ¹ Ğ²Ğ¾ÑˆĞ»Ğ¾</span></dt>
-                  <dd><strong>{attendance.childrenEntered}</strong></dd>
-                </div>
-                <div className="so-attendance-stat">
-                  <dt><span>Ğ’Ğ·Ñ€Ğ¾ÑĞ»Ñ‹Ñ… Ğ¾Ñ‚Ğ¼ĞµÑ‚Ğ¸Ğ»Ğ¸ Ğ¿Ğ¾ QR</span></dt>
-                  <dd><strong>{attendance.adultsRegistered}</strong></dd>
-                </div>
-                <div className="so-attendance-stat">
-                  <dt><span>Ğ”ĞµÑ‚ĞµĞ¹ Ğ¾Ğ¶Ğ¸Ğ´Ğ°ĞµÑ‚ÑÑ</span></dt>
-                  <dd><strong>{attendance.childrenExpected}</strong></dd>
-                </div>
-              </dl>
-              <Link href="/attendance" className="so-panel-link">ĞÑ‚ĞºÑ€Ñ‹Ñ‚ÑŒ Ğ¿Ğ¾ÑĞµÑ‰Ğ°ĞµĞ¼Ğ¾ÑÑ‚ÑŒ <span aria-hidden="true">â†—</span></Link>
-            </section>
-          ) : null}
+NÂˆÛÛœİÛÛHÙ]ÛÛ
 
-          {outbox ? (
-            <section aria-labelledby="outbox-title" className="so-panel">
-              <div className="so-panel-heading">
-                <div><p className="so-section-eyebrow">Ğ”Ğ¾ÑÑ‚Ğ°Ğ²ĞºĞ°</p><h2 id="outbox-title">Ğ£Ğ²ĞµĞ´Ğ¾Ğ¼Ğ»ĞµĞ½Ğ¸Ñ</h2></div>
-              </div>
-              <div className="so-system-list">
-                <div className="so-system-row"><span>ĞĞ¶Ğ¸Ğ´Ğ°ÑÑ‚ Ğ¾Ñ‚Ğ¿Ñ€Ğ°Ğ²ĞºĞ¸</span><strong>{outbox.pending}</strong></div>
-                <div className="so-system-row"><span>ĞĞµ Ğ´Ğ¾ÑÑ‚Ğ°Ğ²Ğ»ĞµĞ½Ñ‹</span><strong className={outbox.dead ? "so-status-error" : "so-status-ok"}>{outbox.dead}</strong></div>
-              </div>
-              {outbox.dead ? <p role="alert" className="so-alert">Ğ—Ğ°ÑĞ²ĞºĞ¸ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹, Ğ½Ğ¾ ÑƒĞ²ĞµĞ´Ğ¾Ğ¼Ğ»ĞµĞ½Ğ¸Ñ Ğ½Ğµ Ğ´Ğ¾ÑÑ‚Ğ°Ğ²Ğ»ĞµĞ½Ñ‹.</p> : null}
-            </section>
-          ) : null}
+NÂˆÛÛœİÜXÚØYÙ\Ë›ÛÛ\ËÛİ×HH]ØZ]›ÛZ\ÙK˜[
+Û\İXÚØYÙ\ÊÛÛ
+K\İ›ÛÛ\ÊÛÛ
+K\İÛİÊÛÛ
+WJNÂˆØ]HÈXÚØYÙ\Ë›ÛÛ\ËÛİÈNÂˆÛÜšÙ›İĞÛÛ^H]ØZ]Ù]XYÛÜšÙ›İĞÛÛ^
+ÛÛXİÜ‹Y
+NÂˆBˆÛÛœİ›]H™]È[‘]U[YQ›Ü›X]
+œKT•H‹È]Tİ[Nˆ›Û™È‹[YTİ[NˆœÚÜ‹[YV›Û™Nˆ\ÚXKĞ[X]HˆJNÂˆÛÛœİÜ[ˆHXYœİ]\ÈOOH›™]ÈˆXYœİ]\ÈOOHš[—Ü›ÙÜ™\ÜÈÂˆÛÛœİÙÈHØ]œXÚØYÙ\Ë™š[™
 
-          <section aria-labelledby="system-title" className="so-panel">
-            <div className="so-panel-heading">
-              <div><p className="so-section-eyebrow">Ğ¡Ğ¾ÑÑ‚Ğ¾ÑĞ½Ğ¸Ğµ</p><h2 id="system-title">Ğ¡Ğ¸ÑÑ‚ĞµĞ¼Ğ°</h2></div>
-            </div>
-            <div className="so-system-list">
-              <div className="so-system-row"><span>Ğ‘Ğ°Ğ·Ğ° Ğ´Ğ°Ğ½Ğ½Ñ‹Ñ…</span><strong className="so-status-ok">ĞŸĞ¾Ğ´ĞºĞ»ÑÑ‡ĞµĞ½Ğ°</strong></div>
-              <div className="so-system-row"><span>Ğ’ĞµÑ€ÑĞ¸Ñ ÑÑ…ĞµĞ¼Ñ‹</span><strong>{migrations.rows[0]?.name ?? "â€”"}</strong></div>
-            </div>
-            <div className="so-access">
-              <p className="so-section-eyebrow">Ğ£Ñ‡ĞµÑ‚Ğ½Ğ°Ñ Ğ·Ğ°Ğ¿Ğ¸ÑÑŒ</p>
-              <h3 id="access-title">Ğ’Ğ°Ñˆ Ğ´Ğ¾ÑÑ‚ÑƒĞ¿</h3>
-              <ul className="so-access-list">
-                {ACCESS.map((item) => (
-                  <li key={item.permission} aria-disabled={!can(user.role as never, item.permission) || undefined}>
-                    {item.label}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
-        </div>
-      </div>
-    </div>
-  );
-}
+
+HOˆšYOOHXYœXÚØYÙRY
+OË›˜[YHÏÈ´/t-H4,´bô,t`4,4/HÂˆÛÛœİ›ÛÛHHØ]œ›ÛÛ\Ë™š[™
+
+ŠHOˆ‹šYOOHXYœ›ÛÛRY
+OË›˜[YHÏÈ´/t-H4,´bô,t`4,4/t,ÂˆÛÛœİXİ[Û•[YHH
+˜[YNˆ]H[
+HOˆ˜[YHÈ›]™›Ü›X]
+˜[YJHˆ´/t-H4-ô,4/ô.ô,4/t.4`4/´,´,4/t/ˆÂˆÛÛœİ]Y]İ[[X\HH
+˜[YNˆXYÛÜšÙ›İĞÛÛ^Èš\İÜH—VÛ[X™\—VÈ˜Y\ˆ—JHOˆÂˆÛÛœİ\ÜÚYÛ™YH˜[YK˜\ÜÚYÛ™YS˜[YHÏÈ
+˜[YK˜\ÜÚYÛ™YÈÈ´(t/´`´`4`ô-4/t.4.ˆˆˆ´'t-H4/t,4-ô/t,4aô-t/HŠNÂˆÛÛœİ™^H˜[YK›™^Xİ[ÛˆÈ	ÓPQÓ‘VĞPÕSÓ—ÓP‘SÖİ˜[YK›™^Xİ[Û—_H0­È	ØXİ[Û•[YJ˜[YK™›ÛİÕ\]È™]È]J˜[YK™›ÛİÕ\]
+Hˆ[
+_Xˆ´%4-t.t`t`´,´.4.H4/t-H4-ô,4/ô.ô,4/t.4`4/´,´,4/t/ˆÂˆ™]\›ˆ4'´`´,´-t`´`t`´,´-t/t/tbô.Nˆ	Ø\ÜÚYÛ™YKˆ	Û™^K˜ÂˆNÂ‚ˆ™]\›ˆ
+ˆ]ˆÛ\ÜÓ˜[YOH˜Ü›K\YÙHÜ›K\™\]Y\İË\YÙH‚ˆ˜]ˆ\šXK[X™[H´'t,4-ô,4-[šÈ™YH‹Ü™\]Y\İÈˆÛ\ÜÓ˜[YOH^\ÛH›ÛY^˜X›Û^YÜ˜\KMÌ[™\›[™H¸¡¤4$´`t-H4-ô,4cô,´.´.Ó[šÏÛ˜]‚ˆXY\ˆÛ\ÜÓ˜[YOH˜Ü›K\™\]Y\İËZXY[™È‚ˆ]‚ˆÛ\ÜÓ˜[YOH˜Ü›KY^YXœ›İÈ´%ô,4cô,´.´,8¡%ÛXYœÙ\_OÜ‚ˆHÛ\ÜÓ˜[YOH˜Ü›K\YÙK]]HÛXY›˜[Y_OÚO‚ˆÛ\ÜÓ˜[YOH˜Ü›K\YÙK\İX]H´(t/´-ô-4,4/t,Ù›]™›Ü›X]
+XY˜Ü™X]Y]
+_H
+4$4.ô/4,4`´bÊOÜ‚ˆÙ]‚ˆÜ[ˆÛ\ÜÓ˜[YOH˜Ü›K\™\]Y\İË\İ]\Èˆ]K\İ]\Ï^ÛXYœİ]\ßOÔÕUTÖÛXYœİ]\×HÏÈXYœİ]\ßOÜÜ[‚ˆÚXY\‚ˆÜÜ››İXÙH	‰ˆ“ÕPÑTÖÜÜ››İXÙWHÈ›ÛOHœİ]\ÈˆÛ\ÜÓ˜[YOH˜Ü›K\™\]Y\İË[Y\ÜØYÙHÜ›K\™\]Y\İË[Y\ÜØYÙK\İXØÙ\ÜÈÓ“ÕPÑTÖÜÜ››İXÙW_OÜˆˆ[BˆÜÜ™\œ›ÜˆÈ›ÛOH˜[\ˆÛ\ÜÓ˜[YOH˜Ü›K\™\]Y\İË[Y\ÜØYÙHÜ›K\™\]Y\İË[Y\ÜØYÙKY\œ›ÜˆÑT”“Ô”ÖÜÜ™\œ›Ü—HÏÈ´'t-H4`ô-4,4.ô/´`tc4,´bô/ô/´.ô/t.4`´c4-4-t.t`t`´,´.4-KˆŸOÜˆˆ[B‚ˆÙXİ[ÛˆÛ\ÜÓ˜[YO^Ü[™[H\šXK[X™[YOHœ™\KZ[™›È‚ˆˆYHœ™\KZ[™›ÈˆÛ\ÜÓ˜[YOH^[È›ÛX›XÚÈ^YÜ˜\KN´%4,4/t/tbô-H4-ô,4cô,´.´.Ú‚ˆÛ\ÜÓ˜[YOH›]LÈÜšYØ\LÈ^\ÛHÛN™ÜšYXÛÛËLˆ‚ˆ]Û\ÜÓ˜[YOH^[]]Y´(´-t.ô-ta4/´/OÙÛ\ÜÓ˜[YOH™›ÛX›ÛÛXYœÛ™_OÙÙ]‚ˆ]Û\ÜÓ˜[YOH^[]]Y´%´-t.ô,4-t/4,4cÈ4-4,4`´,ÙÛ\ÜÓ˜[YOH™›ÛX›ÛÛXYœ™\]Y\İY]HÏÈ´/t-H4`ô.´,4-ô,4/t,ŸOÙÙ]‚ˆ]Û\ÜÓ˜[YOH^[]]Y´'ô/´-´-t.ô,4/t.4-H4/ô/ˆ4,´`4-t/4-t/t.ÙÛ\ÜÓ˜[YOH™›ÛX›ÛÛXYœ™Y™\œ™Yİ\[YHÏÈ´/t-H4`ô.´,4-ô,4/t/ˆŸOÙÙ]‚ˆ]Û\ÜÓ˜[YOH^[]]Y´'ô,4.´-t`ÙÛ\ÜÓ˜[YOH™›ÛX›ÛÜÙßOÙÙ]‚ˆ]Û\ÜÓ˜[YOH^[]]Y´&´/´/4/t,4`´,ÙÛ\ÜÓ˜[YOH™›ÛX›ÛÜ›ÛÛ_OÙÙ]‚ˆ]Û\ÜÓ˜[YOH^[]]Y´%4-t`´-t.OÙÛ\ÜÓ˜[YOH™›ÛX›ÛÛXY˜Ú[™[ˆÏÈ¸ %ŸOÙÙ]‚ˆ]Û\ÜÓ˜[YOH^[]]Y´'ô`4-t-4/´/ô.ô,4`´,ÙÛ\ÜÓ˜[YOH™›ÛX›ÛÛXYœ™\^[Y[ŞOOH[È´/t-H4-ô,4/ô.4`t,4/t,ˆˆ	ÛXYœ™\^[Y[ŞÓØØ[Tİš[™ÊœKT•HŠ_H8 ®
+4`4`ôaô/t,4cÊXOÙÙ]‚ˆÙ‚ˆÛXYœ™\Ù\˜][Û’YÈÛ\ÜÓ˜[YOH›]M^\ÛH[šÈ™Y^ØØ›ÛÚÚ[™ÜÏÙ]OIÛXYœ™\]Y\İY]_XHÛ\ÜÓ˜[YOH™›ÛY^˜X›Û^YÜ˜\KMÌ[™\›[™H´'ô/´.´,4-ô,4`´c4,t`4/´/tc4,ˆ4.´,4.ô-t/t-4,4`4-OÓ[šÏÜˆˆ[BˆÜÙXİ[Û‚‚ˆÛÜ[ˆÈ
+ˆÙXİ[ÛˆÛ\ÜÓ˜[YO^Ü[™[H\šXK[X™[YOHœ™\KXXİ[ÛœÈ‚ˆˆYHœ™\KXXİ[ÛœÈˆÛ\ÜÓ˜[YOH^[È›ÛX›XÚÈ^YÜ˜\KN´%4-t.t`t`´,´.4cÏÚ‚ˆØœšYÙHÈ
+ˆÛ\ÜÓ˜[YOH›]LÈ^\ÛH›ÛX›Û^[]]Y´'ô/´-4`´,´-t`4-´-4-t/t.4-H4,´bô/ô/´.ô/tcô-t`´`tcÈ4,ˆ4.´,4.ô-t/t-4,4`4-H4/ô/´`t.ô-H4a4.4.´`t,4a´.4.4`4`ôaô/t/´.H4/ô`4-t-4/´/ô.ô,4`´bËˆ[šÈ™Y^ØØ›ÛÚÚ[™ÜÏÙ]OIÛXYœ™\]Y\İY]_I˜ÛÛ[YOIÙ[˜ÛÙUT’PÛÛ\Û™[
+XYšY
+_XHÛ\ÜÓ˜[YOH^YÜ˜\KMÌ[™\›[™Hˆ]K]\İYH˜ÛÛ[YKZ[‹XØ[[™\ˆ´'ô`4/´-4/´.ô-´.4`´c4,ˆ4.´,4.ô-t/t-4,4`4-OÓ[šÏÜ‚ˆ
+Hˆ
+ˆ›Ü›HXİ[Û^ØÛÛ™š\›SXYXİ[ÛŸHÛ\ÜÓ˜[YOH˜Ü›K\™\]Y\İËXÛÛ™š\›H]LÈ‚ˆ[œ]\OHšY[ˆˆ˜[YOHšYˆ˜[YO^ÛXYšYHÏ‚ˆ[œ]\OH™]Hˆ˜[YOH™]HˆY˜][˜[YO^ÛXYœ™\]Y\İY]_H™\]Z\™YÛ\ÜÓ˜[YO^Ú[œ]H\šXK[X™[H´%4,4`´,ˆÏ‚ˆÙ[Xİ˜[YOHœÛİYˆY˜][˜[YO^ÛXYœÛİYÏÈˆŸH™\]Z\™YÛ\ÜÓ˜[YO^Ú[œ]H\šXK[X™[H´(t.ô/´`ˆ‚ˆÜ[Ûˆ˜[YOHˆˆ\ØX›Y´(t.ô/´`ÛÜ[Û‚ˆØØ]œÛİË›X\
+
+ÊHOˆÜ[ÛˆÙ^O^ÜËšYH˜[YO^ÜËšYOÜËœİ\Ğ]x $ŞÜË™[™Ğ]OÛÜ[ÛŠ_BˆÜÙ[Xİ‚ˆÙ[Xİ˜[YOHœ›ÛÛRYˆY˜][˜[YO^ÛXYœ›ÛÛRYÏÈˆŸH™\]Z\™YÛ\ÜÓ˜[YO^Ú[œ]H\šXK[X™[H´&´/´/4/t,4`´,‚ˆÜ[Ûˆ˜[YOHˆˆ\ØX›Y´&´/´/4/t,4`´,ÛÜ[Û‚ˆØØ]œ›ÛÛ\Ë™š[\Š
+ŠHOˆ‹š\ĞXİ]™JK›X\
+
+ŠHOˆÜ[ÛˆÙ^O^Ü‹šYH˜[YO^Ü‹šYOÜ‹›˜[Y_OÛÜ[ÛŠ_BˆÜÙ[Xİ‚ˆÙ[Xİ˜[YOHœXÚØYÙRYˆY˜][˜[YO^ÛXYœXÚØYÙRYÏÈˆŸH™\]Z\™YÛ\ÜÓ˜[YO^Ú[œ]H\šXK[X™[H´'ô,4.´-t`ˆ‚ˆÜ[Ûˆ˜[YOHˆˆ\ØX›Y´'ô,4.´-t`ÛÜ[Û‚ˆØØ]œXÚØYÙ\Ë™š[\Š
+
+HOˆš\ĞXİ]™HšYOOHXYœXÚØYÙRY
+K›X\
+
+
+HOˆÜ[ÛˆÙ^O^ÜšYH˜[YO^ÜšYOÜš\ĞXİ]™HÈ›˜[YHˆ	Ü›˜[Y_H
+4`t/tcô`ˆ4`H4/ô`4/´-4,4-´.
+XOÛÜ[ÛŠ_BˆÜÙ[Xİ‚ˆ]Ûˆ\OHœİX›Z]ˆÛ\ÜÓ˜[YO^ØŸO´'ô/´-4`´,´-t`4-4.4`´c4,t`4/´/tcØ]Û‚ˆÙ›Ü›O‚ˆ
+_BˆÙXİ[ÛˆÛ\ÜÓ˜[YOH˜Ü›K[XY]ÛÜšÙ›İÈˆ\šXK[X™[YOH›XY]ÛÜšÙ›İË]]H‚ˆÈYH›XY]ÛÜšÙ›İË]]H´(t.ô-t-4`ôc´bt-t-H4-4-t.t`t`´,´.4-OÚÏ‚ˆ›Ü›HXİ[Û^İ\]SXYÛÜšÙ›İĞXİ[ÛŸHÛ\ÜÓ˜[YOH˜Ü›K[XY]ÛÜšÙ›İËY›Ü›H‚ˆ[œ]\OHšY[ˆˆ˜[YOHšYˆ˜[YO^ÛXYšYHÏ‚ˆ[œ]\OHšY[ˆˆ˜[YOH™^XİY™\œÚ[Ûˆˆ˜[YO^ÛXYÛÜšÙ›İÕ™\œÚ[ÛŸHÏ‚ˆX™[‚ˆÜ[´'´`´,´-t`´`t`´,´-t/t/tbô.OÜÜ[‚ˆÙ[Xİ˜[YOH˜\ÜÚYÛ™YÈˆY˜][˜[YO^ÛXY˜\ÜÚYÛ™YÈÏÈˆŸHÛ\ÜÓ˜[YO^Ú[œ]O‚ˆÜ[Ûˆ˜[YOHˆ´'t-H4/t,4-ô/t,4aô-t/OÛÜ[Û‚ˆÛXY˜\ÜÚYÛ™YÈ	‰ˆ]ÛÜšÙ›İĞÛÛ^˜\ÜÚYÛ™Y\ËœÛÛYJ
+\ÜÚYÛ™YJHOˆ\ÜÚYÛ™YKšYOOHXY˜\ÜÚYÛ™YÊHÈÜ[Ûˆ˜[YO^ÛXY˜\ÜÚYÛ™YßOÛXY˜\ÜÚYÛ™YS˜[YHÏÈ´(t/´`´`4`ô-4/t.4.ˆŸH
+4/t-t,4.´`´.4,´-t/JOÛÜ[Ûˆˆ[BˆİÛÜšÙ›İĞÛÛ^˜\ÜÚYÛ™Y\Ë›X\
+
+\ÜÚYÛ™YJHOˆÜ[ÛˆÙ^O^Ø\ÜÚYÛ™YKšYH˜[YO^Ø\ÜÚYÛ™YKšYOØ\ÜÚYÛ™YK›˜[Y_^Ø\ÜÚYÛ™YKšYOOH\Ù\‹šYÈˆ
+4,´bÊHˆˆˆŸOÛÜ[ÛŠ_BˆÜÙ[Xİ‚ˆÛX™[‚ˆX™[‚ˆÜ[´&´/´/t.´`4-t`´/t,4cÈ4-ô,4-4,4aô,ÜÜ[‚ˆÙ[Xİ˜[YOH›™^Xİ[ÛˆˆY˜][˜[YO^ÛXY›™^Xİ[ÛˆÏÈˆŸHÛ\ÜÓ˜[YO^Ú[œ]O‚ˆÜ[Ûˆ˜[YOHˆ´'t-H4/ô.ô,4/t.4`4/´,´,4`´cÛÜ[Û‚ˆÓPQÓ‘VĞPÕSÓ”Ë›X\
+
+Xİ[ÛŠHOˆÜ[ÛˆÙ^O^ØXİ[ÛŸH˜[YO^ØXİ[ÛŸOÓPQÓ‘VĞPÕSÓ—ÓP‘SÖØXİ[Û—_OÛÜ[ÛŠ_BˆÜÙ[Xİ‚ˆÛX™[‚ˆX™[‚ˆÜ[´(t,´cô-ô,4`´c4`tcÈ4-4/ˆ
+4$4.ô/4,4`´bÊOÜÜ[‚ˆ[œ]\OH™]][YK[ØØ[ˆ˜[YOH™›ÛİÕ\]ØØ[ˆY˜][˜[YO^Ú[œİ[Ğ[X]SØØ[]U[YJXY™›ÛİÕ\]
+_HÛ\ÜÓ˜[YO^Ú[œ]HÏ‚ˆÛX™[‚ˆ]Ûˆ\OHœİX›Z]ˆÛ\ÜÓ˜[YO^ØŸO´(t/´at`4,4/t.4`´c4/ô.ô,4/OØ]Û‚ˆÙ›Ü›O‚ˆÛ\ÜÓ˜[YOH˜Ü›K\™\]Y\İË[›İH´'ô.ô,4/H4`t/´at`4,4/tcô-t`´`tcÈ4,ˆÔ“H4.4-´`ô`4/t,4.ô-H4-4-t.t`t`´,´.4.Kˆ4(t/´/´,tbt-t/t.4cÈ4.´.ô.4-t/t`´`È4,4,´`´/´/4,4`´.4aô-t`t.´.4/t-H4/´`´/ô`4,4,´.ôcôc´`´`tcËÜ‚ˆÈ[XY˜\ÜÚYÛ™YÈÈ›Ü›HXİ[Û^ØÛZ[SXYXİ[ÛŸHÛ\ÜÓ˜[YOH˜Ü›K[XYXÛZ[KY›Ü›H‚ˆ[œ]\OHšY[ˆˆ˜[YOHšYˆ˜[YO^ÛXYšYHÏ‚ˆ[œ]\OHšY[ˆˆ˜[YOH™^XİY™\œÚ[Ûˆˆ˜[YO^ÛXYÛÜšÙ›İÕ™\œÚ[ÛŸHÏ‚ˆ]Ûˆ\OHœİX›Z]ˆÛ\ÜÓ˜[YO^Ø‘ÚÜİO´$´-ôcô`´c4-ô,4cô,´.´`È4`t-t,t-OØ]Û‚ˆÙ›Ü›Oˆˆ[BˆÜÙXİ[Û‚ˆ]ˆÛ\ÜÓ˜[YOH›]LÈ›^›^]Ü˜\Ø\Lˆ‚ˆÛXYœİ]\ÈOOH›™]ÈˆÈ›Ü›HXİ[Û^ÛXYİ]\ĞXİ[ÛŸO[œ]\OHšY[ˆˆ˜[YOHšYˆ˜[YO^ÛXYšYHÏ[œ]\OHšY[ˆˆ˜[YOHœİ]\Èˆ˜[YOHš[—Ü›ÙÜ™\ÜÈˆÏ]Ûˆ\OHœİX›Z]ˆÛ\ÜÓ˜[YO^Ø‘ÚÜİO´$ˆ4`4,4,t/´`´`ÏØ]ÛÙ›Ü›Oˆˆ[Bˆ›Ü›HXİ[Û^ÛXYİ]\ĞXİ[ÛŸO[œ]\OHšY[ˆˆ˜[YOHšYˆ˜[YO^ÛXYšYHÏ[œ]\OHšY[ˆˆ˜[YOHœİ]\Èˆ˜[YOH˜Ø[˜Ù[YˆÏ]Ûˆ\OHœİX›Z]ˆÛ\ÜÓ˜[YO^Ø‘ÚÜİO´'´`´.´.ô/´/t.4`´cØ]ÛÙ›Ü›O‚ˆÙ]‚ˆÜÙXİ[Û‚ˆ
+Hˆ[BˆÙXİ[ÛˆÛ\ÜÓ˜[YO^Ü[™[H\šXK[X™[YOH›XYZ\İÜK]]H‚ˆˆYH›XYZ\İÜK]]HˆÛ\ÜÓ˜[YOH^[È›ÛX›XÚÈ^YÜ˜\KN´&4`t`´/´`4.4cÈ4/´,t`4,4,t/´`´.´.Ú‚ˆİÛÜšÙ›İĞÛÛ^š\İÜK›[™İÈÛÛ\ÜÓ˜[YOH˜Ü›K[XYZ\İÜH‚ˆİÛÜšÙ›İĞÛÛ^š\İÜK›X\
+
+]™[
+HOˆHÙ^O^Ù]™[šYO‚ˆ]İ›Û™ÏÙ]™[˜XİÜ“˜[YHÏÈ´(t/´`´`4`ô-4/t.4.ˆŸOÜİ›Û™Ï[YH]U[YO^Ù]™[˜]ÒTÓÔİš[™Ê
+_OÙ›]™›Ü›X]
+]™[˜]
+_Oİ[YOÙ]‚ˆ´$tbô.ô/ˆØ]Y]İ[[X\J]™[˜™Y›Ü™J_OÜ‚ˆ´(t`´,4.ô/ˆØ]Y]İ[[X\J]™[˜Y\Š_OÜ‚ˆÛOŠ_BˆÛÛˆˆÛ\ÜÓ˜[YOH›]LÈ^\ÛH^[]]Y´%4-t.t`t`´,´.4.H4/ô/ˆ4/ô.ô,4/t`È4/´,t`4,4,t/´`´.´.4/ô/´.´,4/t-t`‹ÜŸBˆÜÙXİ[Û‚ˆÙ]‚ˆ
+NÂŸB

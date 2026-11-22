@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { migrate } from "../src/core/migrate.ts";
-import { MIGRATIONS_DIR, startTestDb, type TestDb } from "./helpers/db.ts";
+import { MIGRATIONS_DIR, startTestDb, syntheticPhone, type TestDb } from "./helpers/db.ts";
 
 describe("migrations and DB-level guarantees", () => {
   let db: TestDb;
@@ -126,7 +126,7 @@ describe("migrations and DB-level guarantees", () => {
       await q("INSERT INTO packages (id,name,sort_order) VALUES ('wow-party','WOW PARTY',0),('magic-party','MAGIC PARTY',1),('boom-party','BOOM PARTY',2)");
       await q("INSERT INTO price_rules (package_id,rule_type,amount_kzt) VALUES ('wow-party','base',37900),('wow-party','weekday',26530),('boom-party','base',79990)");
       const user = (await q("INSERT INTO users (email,name,password_hash,role) VALUES ('synthetic@example.invalid','M','x','manager') RETURNING id")).rows[0].id;
-      const contact = (await q("INSERT INTO contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical','историч','+70000000000','manual') RETURNING id")).rows[0].id;
+      const contact = (await q("INSERT INTO contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical','историч',$1,'manual') RETURNING id", [syntheticPhone()])).rows[0].id;
       const lead = (await q("INSERT INTO lead_requests (idempotency_key,contact_id,package_id,requested_date,children,status) VALUES (gen_random_uuid(),$1,'wow-party','2099-03-10',6,'confirmed') RETURNING id", [contact])).rows[0].id;
       const reservation = (await q(
         `INSERT INTO slot_reservations (kind,slot_date,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,created_by,starts_at,ends_at)
@@ -155,90 +155,163 @@ describe("migrations and DB-level guarantees", () => {
       await q("UPDATE packages SET is_active = false WHERE id = 'magic-party'");
       await q("UPDATE packages SET is_active = true WHERE id = 'magic-party'");
       assert.equal((await q("SELECT is_active FROM packages WHERE id='magic-party'")).rows[0].is_active, false);
-      assert.equal((await q("SELECT count(*)::int n FROM package_archive")).rows[0].n, 1);
-      // A booking card cannot reference a terms version that does not exist.
-      await assert.rejects(() => q("INSERT INTO booking_cards (reservation_id,package_id,terms_version,created_by,updated_by) VALUES ($1,'wow-party','v9',$2,$2)", [reservation, user]), /foreign key/i);
-    } finally {
-      await pre018.stop();
-      rmSync(oldDir, { recursive: true, force: true });
-    }
+      assert.equal((await q("SELECT count(*)::int n FROM package_archive")).rows[0].n, 1);z��$z{-���jם;
+  owner = createPool(databaseUrl, { max: 8 });
+  await owner.query("CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS");
+  await migrate(owner, join(root, "migrations"));
+  await seedCatalog(owner, {
+    packages: birthdayPackages.map((item) => ({ id: item.id, name: item.copy.ru.name, price: item.weekendPrice, weekdayPrice: item.weekdayPrice })),
+    rooms: birthdayRooms.map((item) => ({ id: item.id, name: item.name })),
   });
+  const apiPassword = `api-${randomBytes(24).toString("hex")}A1`;
+  const adminPassword = `admin-${randomBytes(24).toString("hex")}B2`;
+  await applyRoles(owner, { apiPassword, adminPassword });
+  const managerPassword = `Ops-E2E-${randomBytes(24).toString("hex")}aA1!`;
+  const manager = await createUser(owner, null, { email: "ops-manager@e2e.invalid", name: "Synthetic Manager", role: "manager", password: managerPassword });
+  const editorPassword = `Ops-E2E-${randomBytes(24).toString("hex")}bB2!`;
+  await createUser(owner, null, { email: "ops-editor@e2e.invalid", name: "Synthetic Editor", role: "editor", password: editorPassword });
+  process.env.E2E_MANAGER_ID = manager.id;
 
-  it("019 preserves historical leads and stores HH:00 preferences without slot IDs or rounding", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "bb-before-019-"));
-    const prior = await startTestDb({ migrate: false });
-    try {
-      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name < "019_lead_preferred_start_time.sql")) {
-        cpSync(join(MIGRATIONS_DIR, file), join(dir, file));
-      }
-      await migrate(prior.pool, dir);
-      const contact = (await prior.pool.query("INSERT INTO bb.contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical lead','historical lead','+70000000000','birthday_form') RETURNING id")).rows[0].id;
-      const oldLead = (await prior.pool.query("INSERT INTO bb.lead_requests (idempotency_key,contact_id,requested_date,slot_id,status) VALUES ($1,$2,'2099-02-03',2,'new') RETURNING id,seq,slot_id", [randomUUID(), contact])).rows[0];
-
-      const applied = await migrate(prior.pool, MIGRATIONS_DIR);
-      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql"]);
-      const after = (await prior.pool.query("SELECT id,seq,slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [oldLead.id])).rows[0];
-      assert.deepEqual(after, { ...oldLead, preferred_start_time: null }, "old identity, slot and status are preserved; no preference is invented");
-
-      const legacy = (await prior.pool.query(
-        "SELECT id,seq FROM bb.intake_insert_lead($1,$2,NULL,NULL,'2099-02-04',NULL,NULL,NULL,NULL,NULL,NULL,2::smallint)",
-        [randomUUID(), contact],
-      )).rows[0];
-      assert.equal((await prior.pool.query("SELECT slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [legacy.id])).rows[0].slot_id, 2,
-        "the old writer remains available for a safe application rollback");
-
-      const preferred = "15:00";
-      const inserted = (await prior.pool.query(
-        "SELECT id,seq FROM bb.intake_insert_lead($1,$2,NULL,NULL,'2099-02-04',NULL,NULL,NULL,NULL,NULL,NULL,NULL,$3::time)",
-        [randomUUID(), contact, preferred],
-      )).rows[0];
-      const exact = (await prior.pool.query("SELECT slot_id,to_char(preferred_start_time,'HH24:MI') preference FROM bb.lead_requests WHERE id=$1", [inserted.id])).rows[0];
-      assert.deepEqual(exact, { slot_id: null, preference: preferred });
-      await assert.rejects(
-        () => prior.pool.query("SELECT * FROM bb.intake_insert_lead($1,$2,NULL,NULL,'2099-02-05',NULL,NULL,NULL,NULL,NULL,NULL,NULL,'15:30'::time)", [randomUUID(), contact]),
-        (error: { code?: string; constraint?: string }) => error.code === "23514" && error.constraint === "lead_requests_preferred_start_time_check",
-      );
-    } finally {
-      await prior.stop();
-      rmSync(dir, { recursive: true, force: true });
-    }
+  const roomIds = (await owner.query("SELECT id FROM bb.rooms WHERE is_active ORDER BY sort_order,id LIMIT 2")).rows.map((row) => row.id);
+  assert.equal(roomIds.length, 2, "isolated catalog has two rooms");
+  await addBooking({
+    date: datesAfterToday(2), time: "14:00", roomId: roomIds[0], packageId: "boom-bala-party", label: "PAID",
+    paymentAmount: 10000, card: { programStatus: "approved", propsStatus: "ready", invitationStatus: "sent" },
   });
-
-  it("audit_log and price_rules are append-only", async () => {
-    await db.pool.query("INSERT INTO audit_log (action) VALUES ('test.created')");
-    await assert.rejects(() => db.pool.query("UPDATE audit_log SET action = 'test.changed'"), /append-only/);
-    await assert.rejects(() => db.pool.query("DELETE FROM audit_log"), /append-only/);
-    await assert.rejects(() => db.pool.query("TRUNCATE audit_log"), /append-only/);
-    await db.pool.query("INSERT INTO packages (id, name) VALUES ('p1', 'P1')");
-    await db.pool.query("INSERT INTO price_rules (package_id, rule_type, amount_kzt) VALUES ('p1', 'base', 1000)");
-    await assert.rejects(() => db.pool.query("UPDATE price_rules SET amount_kzt = 1"), /append-only/);
-    await assert.rejects(() => db.pool.query("DELETE FROM price_rules"), /append-only/);
+  await addBooking({
+    date: datesAfterToday(3), time: "15:00", roomId: roomIds[1], packageId: "star-party", label: "NO_FACT",
+    paymentAmount: 0, card: { programStatus: "draft", propsStatus: "preparing", invitationStatus: "not_applicable" },
   });
+  const importedDate = datesAfterToday(4);
+  const importedBlock = (await owner.query(
+    `INSERT INTO bb.slot_reservations
+       (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at)
+     VALUES ('block',$1,NULL,$2,'SYNTHETIC_PRIVATE_NOTE',$3,
+       (($1::date + '13:00'::time) AT TIME ZONE 'Asia/Almaty'),
+       (($1::date + '13:00'::time) AT TIME ZONE 'Asia/Almaty') + interval '4 hours')
+     RETURNING id`,
+    [importedDate, roomIds[0], manager.id],
+  )).rows[0].id;
+  const sourceKey = randomBytes(32).toString("hex");
+  const sheetPhoneCanary = syntheticPhone();
+  await owner.query(
+    `INSERT INTO bb.sheet_sync_records
+       (source_key,fingerprint,legacy_key_prefix,reservation_id,state,source_row_number,source_payload)
+     VALUES ($1,$2,$3,$4,'active',10,$5::jsonb)`,
+    [sourceKey, randomBytes(32).toString("hex"), sourceKey.slice(0, 20), importedBlock, JSON.stringify({
+      date: importedDate, time: "13:00", room: "Ice Room", package: "SYNTHETIC_SHEET_PACKAGE",
+      client: "SYNTHETIC_SHEET_CUSTOMER", phone: sheetPhoneCanary, child: "SYNTHETIC_SHEET_CHILD", comment: "SYNTHETIC_SHEET_COMMENT",
+    })],
+  );
 
-  it("packages and rooms can never be deleted", async () => {
-    await db.pool.query("INSERT INTO rooms (id, name) VALUES ('r1', 'R1')");
-    await assert.rejects(() => db.pool.query("DELETE FROM rooms WHERE id = 'r1'"), /cannot be deleted/);
-    await assert.rejects(() => db.pool.query("DELETE FROM packages WHERE id = 'p1'"), /cannot be deleted/);
+  const adminUrl = new URL(databaseUrl);
+  adminUrl.username = "bb_admin";
+  adminUrl.password = adminPassword;
+  const serviceToken = randomBytes(32).toString("hex");
+  start("bridge", bridgePort, {
+    DATABASE_URL: adminUrl.toString(), CRM_SERVICE_TOKEN: serviceToken, PLATFORM_ROLE: "admin",
+    CRM_PERF_LOG: "1", DATABASE_POOL_MAX: "5",
   });
+  start("frontend", frontPort, {
+    CRM_BRIDGE_MODE: "legacy", CRM_BRIDGE_URL: `http://127.0.0.1:${bridgePort}`,
+    CRM_SERVICE_TOKEN: serviceToken, UNIFIED_FASTAPI_CRM_ENABLED: "1", DATABASE_URL: "", MFA_MODE: "off",
+  });
+  await waitForServer(bridgePort);
+  await waitForServer(frontPort);
 
-  it("price_rules enforces its shape", async () => {
-    await assert.rejects(() => db.pool.query("INSERT INTO price_rules (package_id, rule_type, amount_kzt) VALUES ('p1', 'date', 5000)"), /check/i); // date rule needs a date
-    await assert.rejects(() => db.pool.query("INSERT INTO price_rules (package_id, rule_type, rule_date, amount_kzt) VALUES ('p1', 'base', '2027-01-01', 5000)"), /check/i);
-    await assert.rejects(() => db.pool.query("INSERT INTO price_rules (package_id, rule_type, amount_kzt) VALUES ('p1', 'base', NULL)"), /check/i); // only a date rule may clear
-    await assert.rejects(() => db.pool.query("INSERT INTO price_rules (package_id, rule_type, amount_kzt) VALUES ('p1', 'base', 0)"), /check/i);
-    await db.pool.query("INSERT INTO price_rules (package_id, rule_type, rule_date, amount_kzt) VALUES ('p1', 'date', '2027-01-01', NULL)");
-  });
+  async function rpcAs(email, password, op, input) {
+    const headers = { "Content-Type": "application/json", "X-CRM-Service-Token": serviceToken };
+    const login = await fetch(`http://127.0.0.1:${bridgePort}/api/bridge/auth/login`, {
+      method: "POST", headers,
+      body: JSON.stringify({ email, password, mfaRequired: false, ip: "127.0.0.1", userAgent: "isolated-e2e" }),
+    });
+    const loginBody = await login.json();
+    assert.equal(login.status, 200, "synthetic isolated test account authenticates through bridge auth");
+    assert.equal(loginBody.ok, true);
+    const response = await fetch(`http://127.0.0.1:${bridgePort}/api/bridge/rpc`, {
+      method: "POST",
+      headers: { ...headers, Authorization: `Bearer ${loginBody.token}`, "X-CRM-Op": op },
+      body: JSON.stringify({ op, input }),
+    });
+    return { response, body: await response.json() };
+  }
 
-  it("a user referenced by the audit log or price history cannot be deleted (deactivate instead)", async () => {
-    const { rows } = await db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('history-owner@example.invalid', 'Synthetic history owner', 'h', 'owner') RETURNING id");
-    await db.pool.query("INSERT INTO audit_log (action, actor_user_id) VALUES ('test.acted', $1)", [rows[0].id]);
-    await assert.rejects(() => db.pool.query("DELETE FROM users WHERE id = $1", [rows[0].id]), /foreign key|violates/i);
-    const { rows: free } = await db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('free-editor@example.invalid', 'Synthetic free editor', 'h', 'editor') RETURNING id");
-    await db.pool.query("DELETE FROM users WHERE id = $1", [free[0].id]); // no history: deletable
+  const rawOperations = await rpcAs("ops-manager@e2e.invalid", managerPassword, "operations.overview", {
+    dates: Array.from({ length: 7 }, (_, offset) => datesAfterToday(offset)),
   });
+  check(rawOperations.response.status === 200, "allowlisted operations RPC returns successfully for manager");
+  const rawReservations = rawOperations.body.reservations;
+  const rawBlock = rawReservations.find((item) => item.id === importedBlock);
+  check(Boolean(rawBlock) && rawBlock.kind === "block" && rawBlock.sourceState === "active", "linked imported block is returned as an unconfirmed block");
+  const rpcText = JSON.stringify(rawOperations.body);
+  for (const canary of ["SYNTHETIC_SHEET_CUSTOMER", sheetPhoneCanary, "SYNTHETIC_SHEET_CHILD", "SYNTHETIC_SHEET_COMMENT", "SYNTHETIC_PRIVATE_NOTE", "SYNTHETIC_SHEET_PACKAGE"]) {
+    check(!rpcText.includes(canary), `operations RPC excludes private source data (${canary.startsWith("SYNTHETIC_") ? "synthetic field" : "phone"})`);
+  }
+  check(rawBlock && Object.keys(rawBlock).sort().join(",") === "card,date,id,kind,packageName,paidKzt,paymentStatus,room,sourceState,startsAt,status", "operations RPC returns only allowlisted fields");
+  check(rawBlock?.packageName === "Пакет из таблицы — не проверен", "free-text package field is replaced by a safe review label");
+  check(rawBlock?.paidKzt === 0 && rawBlock?.paymentStatus === "unpaid" && rawBlock?.card === null, "imported source payment cell is not returned as a payment fact");
 
-  it("e-mail must be stored lower-case and users need a valid role", async () => {
-    await assert.rejects(() => db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('Uppercase@example.invalid', 'Synthetic invalid user', 'h', 'owner')"), /check/i);
-    await assert.rejects(() => db.pool.query("INSERT INTO users (email, name, password_hash, role) VALUES ('invalid-role@example.invalid', 'Synthetic invalid role', 'h', 'admin')"), /invalid input value/);
+  const editorRpc = await rpcAs("ops-editor@e2e.invalid", editorPassword, "operations.overview", {
+    dates: Array.from({ length: 7 }, (_, offset) => datesAfterToday(offset)),
   });
-});
+  check(editorRpc.response.status === 403, "operations RPC denies editor role directly");
+  output.length = 0; // Isolate the following assertion to the server-rendered page call.
+
+  const executable = process.env.E2E_CHROME ?? `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1254/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
+  browser = await chromium.launch({ executablePath: executable, headless: true });
+  const pageErrors = [];
+  const page = await browser.newPage({ viewport: { width: 1360, height: 900 } });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto(`http://127.0.0.1:${frontPort}/login`);
+  await page.fill('input[type="email"]', "ops-manager@e2e.invalid");
+  await page.fill('input[type="password"]', managerPassword);
+  await page.click('button[type="submit"]');
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 20000 });
+  check(await page.getByRole("link", { name: "Ближайшие праздники" }).count() === 1, "manager sees the operations navigation link");
+  await page.goto(`http://127.0.0.1:${frontPort}/`);
+  const analyticsText = (await page.getByTestId("dash-analytics").innerText()).replace(/\s+/g, " ");
+  check(analyticsText.includes("Заявки и предстоящие праздники"), "manager dashboard shows the aggregate analytics snapshot");
+  check(analyticsText.includes("Подтверждённые брони 2") && analyticsText.includes("Блокировки комнат 1"), "dashboard separates two bookings from one imported block");
+  check(analyticsText.includes("не является выручкой") || analyticsText.includes("не является выручкой."), "dashboard labels manual prepayment facts as not revenue");
+
+  const started = performance.now();
+  await page.goto(`http://127.0.0.1:${frontPort}/operations`);
+  await page.getByTestId("operations-events").waitFor({ timeout: 20000 });
+  const elapsedMs = Math.round(performance.now() - started);
+  const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  check(await page.getByTestId("operations-event").count() === 3, "two bookings and the linked Sheets record render in the upcoming list");
+  check(text.includes("Ice Room") || text.includes("Roblox Room"), "room is rendered from the timeline catalog");
+  check(text.includes("BOOM BALA PARTY") && text.includes("STAR PARTY"), "package names are rendered from Booking V2 timeline data");
+  check(text.includes("Synthetic Manager"), "responsible manager is shown");
+  check(text.includes("Согласована") && text.includes("Готовы") && text.includes("Отправлено"), "program, props and applicable invitation states are shown");
+  check(text.includes("Подтверждено: 10 000 ₸") && text.includes("Факт не записан"), "confirmed payment fact and missing fact are visibly distinct");
+  check(text.includes("Импортировано · требуется ручная проверка") && text.includes("Пакет из таблицы — не проверен"), "imported block is clearly flagged for review and not presented as a confirmed booking");
+  const importedEventText = await page.getByTestId("operations-event").filter({ hasText: "Пакет из таблицы — не проверен" }).innerText();
+  check(!importedEventText.includes("Предоплата") && !importedEventText.includes("Факт не записан"), "imported block does not show a financial-fact status");
+  check(!text.includes("SYNTHETIC_PAID_CUSTOMER") && !text.includes("SYNTHETIC_NO_FACT_CUSTOMER") && !text.includes("SYNTHETIC_SHEET_CUSTOMER") && !text.includes(sheetPhoneCanary) && !text.includes("SYNTHETIC_SHEET_CHILD") && !text.includes("SYNTHETIC_SHEET_COMMENT"), "customer names, phone, child and comment are absent from rendered page");
+  check(pageErrors.length === 0, "no browser page errors");
+
+  for (let attempt = 0; attempt < 30 && output.filter((line) => /op=operations\.overview status=200/.test(line)).length < 1; attempt += 1) await sleep(100);
+  const operationsCalls = output.filter((line) => /op=operations\.overview status=200/.test(line));
+  check(operationsCalls.length === 1, "the server page uses one safe operations RPC instead of seven full PII timelines");
+  console.log(`  info measured local browser navigation: ${elapsedMs} ms (isolated local PG; not a Production performance result)`);
+
+  const editorPage = await browser.newPage({ viewport: { width: 1360, height: 900 } });
+  await editorPage.goto(`http://127.0.0.1:${frontPort}/login`);
+  await editorPage.fill('input[type="email"]', "ops-editor@e2e.invalid");
+  await editorPage.fill('input[type="password"]', editorPassword);
+  await editorPage.click('button[type="submit"]');
+  await editorPage.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 20000 });
+  check(await editorPage.getByRole("link", { name: "Ближайшие праздники" }).count() === 0, "editor does not see the operations link");
+  await editorPage.goto(`http://127.0.0.1:${frontPort}/`);
+  check(await editorPage.getByTestId("dash-analytics").count() === 0, "editor does not receive request, booking or payment aggregates");
+  await editorPage.goto(`http://127.0.0.1:${frontPort}/operations`);
+  await editorPage.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
+  check(new URL(editorPage.url()).pathname === "/", "editor is denied direct route access by server-side RBAC");
+  await editorPage.close();
+} finally {
+  await cleanup();
+}
+
+if (fails > 0) process.exitCode = 1;
+else console.log("PASS: upcoming operations browser E2E against isolated PostgreSQL");

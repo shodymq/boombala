@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+export { syntheticPhone } from "./synthetic-data.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -68,7 +70,7 @@ export function seedFromSite(pool: Pool) {
   });
 }
 
-export const TEST_PASSWORD = "correct horse battery staple";
+export const TEST_PASSWORD = `E2E-${randomBytes(32).toString("base64url")}`;
 
 export async function makeUser(pool: Pool, role: Role, email = `${role}@example.test`) {
   return createUser(pool, null, { email, name: `Test ${role}`, role, password: TEST_PASSWORD });
