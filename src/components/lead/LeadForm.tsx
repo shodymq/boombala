@@ -3,7 +3,7 @@
 import { useId, useRef, useState, type FormEvent } from "react";
 import { CalendarBlank, WhatsappLogo, X } from "@phosphor-icons/react";
 import {
-  PACKAGE_OPTIONS,
+  PUBLIC_PACKAGE_OPTIONS,
   formatNationalPhone,
   minBookingDate,
   phoneDigits,
@@ -42,7 +42,11 @@ type Status = "idle" | "submitting" | "success" | "error";
 const field =
   "h-12 w-full rounded-2xl sm:h-14 border-2 border-grape-200 bg-white px-4 text-base text-ink transition-colors placeholder:text-muted/70 focus:border-grape-600 focus:outline-none aria-[invalid=true]:border-lava-500";
 
-const PACKAGE_CHOICES: ChoiceOption[] = PACKAGE_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
+const PACKAGE_CHOICES: ChoiceOption[] = [
+  ...PUBLIC_PACKAGE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+  // Keep the existing no-package-yet choice: LeadFormProvider uses it as the initial value.
+  { value: "undecided", label: "Ещё не определились" },
+];
 const ROOM_CHOICES: ChoiceOption[] = [
   { value: "", label: "Не выбрана" },
   ...birthdayRooms.map((r) => ({ value: r.id, label: r.name, image: { src: r.coverImage.src } })),

@@ -1,14 +1,21 @@
 import { siteConfig } from "@/services/config";
 import { ROOM_IDS } from "@/data/birthdayRooms";
+import { birthdayPackages } from "@/data/birthdays";
+import { birthdayPackagesV4 } from "@/data/birthdays-v4";
+import type { PackageId } from "@/types";
+import type { PackageId as PackageIdV4 } from "@/types/birthdays-v4";
 
-export const PACKAGE_OPTIONS = [
-  { value: "wow-party", label: "WOW PARTY" },
-  { value: "magic-party", label: "MAGIC PARTY" },
-  { value: "boom-party", label: "BOOM PARTY" },
+export type LeadPackage = PackageId | PackageIdV4 | "undecided";
+
+/** New offers visible in the public form. */
+export const PUBLIC_PACKAGE_OPTIONS: { value: PackageIdV4; label: string }[] = birthdayPackagesV4.map((pkg) => ({ value: pkg.id, label: pkg.copy.ru.name }));
+
+/** IDs accepted by the existing API/notification contract, including older cached forms. */
+export const PACKAGE_OPTIONS: readonly { value: LeadPackage; label: string }[] = [
+  ...PUBLIC_PACKAGE_OPTIONS,
+  ...birthdayPackages.map((pkg) => ({ value: pkg.id, label: pkg.name })),
   { value: "undecided", label: "Ещё не определились" },
-] as const;
-
-export type LeadPackage = (typeof PACKAGE_OPTIONS)[number]["value"];
+];
 
 export interface LeadFields {
   name: string;
