@@ -1,0 +1,65 @@
+name: site-release-artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_site_url:
+        description: Public HTTPS origin to inline in this site build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-site:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Build public site only
+        env:
+          PUBLIC_SITE_URL: ${{ inputs.public_site_url }}
+        run: |
+          case "$PUBLIC_SITE_URL" in https://*) ;; *) echo 'public_site_url must use HTTPS' >&2; exit 2;; esac
+          npm ci --no-audit --no-fund
+          NEXT_PUBLIC_SITE_URL="$PUBLIC_SITE_URL" NEXT_PUBLIC_SITE_PROFILE=kz-production NEXT_PUBLIC_BOOKING_CALENDAR=0 NEXT_PUBLIC_NEWS=0 npm run build
+          npm prune --omit=dev --no-audit --no-fund
+      - name: Assemble and smoke the site-only archive
+        env:
+          PUBLIC_SITE_URL: ${{ inputs.public_site_url }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          WORK="$(mktemp -d)"
+          trap 'if [ -n "${PID:-}" ]; then kill "$PID" 2>/dev/null || true; fi; rm -rf "$WORK"' EXIT
+          mkdir -p "$WORK/site" dist
+          cp -R .next public node_modules package.json package-lock.json next.config.ts "$WORK/site/"
+          rm -rf "$WORK/site/.next/cache" "$WORK/site/.next/dev"
+          # bb-site.service binds this path into its writable systemd namespace.
+          # Keep the empty directory in the archive so systemd can start before Next recreates it.
+          mkdir -p "$WORK/site/.next/cache"
+          printf '{"commit":"%s","built_at":"%s","node_build":"%s","platform":"Linux-x86_64","public_site_url":"%s","booking_calendar":"0","news":"0","site_profile":"kz-production","artifact_scope":"site-only"}\n' \
+            "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(node -v)" "$PUBLIC_SITE_URL" > "$WORK/RELEASE.json"
+          (cd "$WORK" && tar -czf "$GITHUB_WORKSPACE/dist/boombala-site-${SHA:0:12}-linux-x64.tar.gz" site RELEASE.json)
+          cp "$WORK/RELEASE.json" dist/RELEASE.json
+          NODE_ENV=production NEXT_PUBLIC_SITE_PROFILE=kz-production SITE_PROFILE=kz-production LEAD_PIPELINE=strict \
+            node "$WORK/site/node_modules/next/dist/bin/next" start -p 3498 -H 127.0.0.1 >"$WORK/server.log" 2>&1 & PID=$!
+          for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:3498/ >/dev/null && break; sleep 1; done
+          for path in / /birthdays /kk/birthdays; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3498$path")"
+            test "$code" = 200 || { echo "site smoke failed: $path HTTP $code" >&2; cat "$WORK/server.log"; exit 1; }
+          done
+          (cd dist && sha256sum boombala-site-*-linux-x64.tar.gz > SHA256SUMS)
+          cat dist/RELEASE.json
+          cat dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boombala-site-only-${{ github.sha }}
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
