@@ -21,6 +21,7 @@ const { bridgeClaimLead, bridgeUpdateLeadWorkflow } = await import("../src/serve
 
 const sessionFor = (user: Awaited<ReturnType<typeof makeUser>>): ValidSession => ({
   sessionId: "isolated-test-session",
+  rememberDevice: false,
   user: { id: user.id, email: user.email, name: user.name, role: user.role, canExport: false },
 });
 
@@ -79,14 +80,15 @@ describe("lead follow-up workflow", () => {
 
   it("saves assignment and a concrete follow-up on the existing lead and writes safe audit history as bb_admin", async () => {
     const result = await updateLeadWorkflow(admin, { id: manager.id, role: "manager" }, {
-      leadId: leadId, expectedVersion: 1, assignedTo: secondManager.id, nextAction: "call_customer", followUpAtLocal: "2095-04-03T10:15",
+      leadId: leadId, expectedVersion: 1, assignedTo: secondManager.id, nextAction: "call_customer", followUpAtLocal: "2095-04-03T10:15", managerAgreement: "Перезвонить после согласования времени",
     });
     assert.equal(result.version, 2);
-    const lead = (await admin.query("SELECT status, assigned_to, next_action, follow_up_at, workflow_version FROM bb.lead_requests WHERE id = $1", [leadId])).rows[0];
+    const lead = (await admin.query("SELECT status, assigned_to, next_action, follow_up_at, manager_agreement, workflow_version FROM bb.lead_requests WHERE id = $1", [leadId])).rows[0];
     assert.equal(lead.status, "new", "workflow metadata does not change the business state");
     assert.equal(lead.assigned_to, secondManager.id);
     assert.equal(lead.next_action, "call_customer");
     assert.equal((lead.follow_up_at as Date).toISOString(), "2095-04-03T05:15:00.000Z");
+    assert.equal(lead.manager_agreement, "Перезвонить после согласования времени");
     assert.equal(lead.workflow_version, 2);
 
     const events = (await admin.query("SELECT action, before, after FROM bb.audit_log WHERE entity_type='lead_request' AND entity_id=$1", [leadId])).rows;
@@ -94,11 +96,14 @@ describe("lead follow-up workflow", () => {
     assert.equal(events[0].action, "lead.workflow_updated");
     assert.equal(events[0].before.assignedTo, null);
     assert.equal(events[0].after.assigneeName, secondManager.name);
+    assert.equal(events[0].after.agreementChanged, true);
+    assert.equal(JSON.stringify(events).includes("Перезвонить после согласования времени"), false, "agreement text is not copied into the audit payload");
     assert.equal(JSON.stringify(events[0].after).includes("Synthetic lead"), false);
 
     const context = await getLeadWorkflowContext(admin, { id: manager.id, role: "manager" }, leadId);
     assert.equal(context.history.length, 1);
     assert.equal(context.history[0].actorName, manager.name);
+    assert.equal(context.history[0].after.agreementChanged, true);
     assert.ok(context.assignees.some((item) => item.id === secondManager.id));
     assert.ok(!context.assignees.some((item) => item.id === editor.id), "editors are not assignable");
   });
@@ -233,8 +238,8 @@ describe("lead follow-up workflow", () => {
       const contact = (await prior.pool.query("INSERT INTO bb.contacts (name,name_key,phone_e164,source) VALUES ('Synthetic historical','synthetic historical',$1,'manual') RETURNING id", [syntheticPhone()])).rows[0].id;
       const existing = (await prior.pool.query("INSERT INTO bb.lead_requests (idempotency_key,contact_id,requested_date,status) VALUES ($1,$2,'2099-08-01','in_progress') RETURNING id,seq,status,assigned_to", [randomUUID(), contact])).rows[0];
       await migrate(prior.pool, MIGRATIONS_DIR);
-      assert.deepEqual((await prior.pool.query("SELECT id,seq,status,assigned_to,next_action,follow_up_at,workflow_version FROM bb.lead_requests WHERE id=$1", [existing.id])).rows[0], {
-        ...existing, next_action: null, follow_up_at: null, workflow_version: 1,
+      assert.deepEqual((await prior.pool.query("SELECT id,seq,status,assigned_to,next_action,follow_up_at,manager_agreement,workflow_version FROM bb.lead_requests WHERE id=$1", [existing.id])).rows[0], {
+        ...existing, next_action: null, follow_up_at: null, manager_agreement: null, workflow_version: 1,
       });
     } finally {
       await prior.stop();

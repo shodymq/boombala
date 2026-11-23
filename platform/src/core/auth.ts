@@ -20,6 +20,8 @@ export interface LoginInput {
   password: string;
   /** The second factor is mandatory (MFA_MODE=required): the password alone never yields a usable session. */
   mfaRequired?: boolean;
+  /** Explicit opt-in for the bounded personal-device session policy. MFA is still required when configured. */
+  rememberDevice?: boolean;
   ip?: string | null;
   userAgent?: string | null;
 }
@@ -81,13 +83,13 @@ export async function authenticate(pool: Pool, input: LoginInput): Promise<Login
   if (input.mfaRequired) {
     // Password accepted, second factor still missing: a short-lived PENDING session that the admin refuses everywhere.
     const enrolled = await isEnrolled(pool, user.id);
-    const pending = await createSession(pool, user.id, { ip, userAgent: input.userAgent }, "pending");
+    const pending = await createSession(pool, user.id, { ip, userAgent: input.userAgent }, "pending", { rememberDevice: input.rememberDevice === true });
     await writeAudit(pool, { actorUserId: user.id, action: "auth.password_verified", entityType: "user", entityId: user.id, ip, userAgent: input.userAgent });
     return { ok: true as const, token: pending.token, expiresAt: pending.expiresAt, userId: user.id, mfa: enrolled ? ("verify" as const) : ("enroll" as const) };
   }
 
   return withTx(pool, async (tx) => {
-    const session = await createSession(tx, user.id, { ip, userAgent: input.userAgent });
+    const session = await createSession(tx, user.id, { ip, userAgent: input.userAgent }, "verified", { rememberDevice: input.rememberDevice === true });
     await tx.query("UPDATE bb.users SET last_login_at = now() WHERE id = $1", [user.id]);
     // A successful login clears the failure counter for this e-mail.
     await tx.query("DELETE FROM bb.login_attempts WHERE email_norm = $1 AND success = false", [emailNorm]);
@@ -146,7 +148,7 @@ export async function completeMfaLogin(pool: Pool, input: MfaLoginInput, now = D
   }
   return withTx(pool, async (tx) => {
     await revokeSession(tx, input.pendingToken as string);
-    const session = await createSession(tx, user.id, { ip, userAgent: input.userAgent }, "verified", { mfaVerified: true });
+    const session = await createSession(tx, user.id, { ip, userAgent: input.userAgent }, "verified", { mfaVerified: true, rememberDevice: pending.rememberDevice });
     await tx.query("UPDATE bb.users SET last_login_at = now() WHERE id = $1", [user.id]);
     await tx.query("DELETE FROM bb.login_attempts WHERE email_norm = $1 AND success = false", [user.email]);
     await writeAudit(tx, { actorUserId: user.id, action: "auth.login", entityType: "user", entityId: user.id, after: { mfa: true }, ip, userAgent: input.userAgent });

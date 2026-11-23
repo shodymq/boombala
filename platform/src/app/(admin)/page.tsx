@@ -10,6 +10,8 @@ import { almatyToday } from "@/core/dates";
 import { outboxStats } from "@/core/outbox";
 import { dashboardCounters, type DashboardCounters } from "@/core/lead-queue";
 import { dashboardAnalytics, type DashboardAnalytics } from "@/core/analytics";
+import { managerWorkspace, type ManagerWorkspace } from "@/core/manager-workspace";
+import { LEAD_NEXT_ACTION_LABELS } from "@/core/lead-workflow";
 import { can, type Permission } from "@/core/rbac";
 import { getPool } from "@/server/db";
 import { requirePermissionAnd } from "@/server/dal";
@@ -42,6 +44,7 @@ type Data = {
   /** Real counters from the database; null when the role may not see them or they are unavailable. Never invented. */
   counters: DashboardCounters | null;
   analytics: DashboardAnalytics | null;
+  workspace: ManagerWorkspace;
 };
 
 export default async function DashboardPage() {
@@ -49,15 +52,15 @@ export default async function DashboardPage() {
   const { session, data: remote } = await requirePermissionAnd("dashboard.view", async () => {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!token) throw new Error("session_missing");
-    return bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters; analytics?: DashboardAnalytics }>("dashboard", {}, token);
+    return bridgeRpc<{ migrations: string[]; summary: Summary | null; outbox: Awaited<ReturnType<typeof outboxStats>> | null; attendance: Awaited<ReturnType<typeof dayFigures>> | null; counters?: DashboardCounters; analytics?: DashboardAnalytics; workspace?: ManagerWorkspace }>("dashboard", {}, token);
   });
   const { user } = session;
   if (remote) {
-    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null, analytics: remote.analytics ?? null }} />;
+    return <DashboardView data={{ user, migration: remote.migrations[0] ?? null, summary: remote.summary, outbox: remote.outbox, attendance: remote.attendance, counters: remote.counters ?? null, analytics: remote.analytics ?? null, workspace: remote.workspace ?? { overdueActions: null, newRequests: null, callsToday: null, upcomingBirthdays: null } }} />;
   }
   const pool = getPool();
   const today = almatyToday();
-  const [migrations, summary, outbox, attendance, counters, analytics] = await Promise.all([
+  const [migrations, summary, outbox, attendance, counters, analytics, workspace] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
@@ -68,11 +71,12 @@ export default async function DashboardPage() {
       : Promise.resolve(null),
     dashboardCounters(pool, user.role),
     dashboardAnalytics(pool, user.role),
+    managerWorkspace(pool, { id: user.id, role: user.role }),
   ]);
   return (
     <DashboardView data={{
       user, migration: migrations.rows[0]?.name ?? null, summary, outbox, attendance,
-      counters, analytics,
+      counters, analytics, workspace,
     }} />
   );
 }
@@ -82,6 +86,7 @@ function DashboardView({ data }: { data: Data }) {
   const requests = data.counters?.requests ?? null;
   const todayBookings = data.counters?.bookings ?? null;
   const analytics = data.analytics;
+  const workspace = data.workspace;
   const migrations = { rows: [{ name: data.migration }] };
   const timestamp = new Date();
   const activePackages = summary?.packages.filter((item) => item.isActive) ?? [];
@@ -121,6 +126,8 @@ function DashboardView({ data }: { data: Data }) {
           {can(user.role as never, "requests.manage") ? <Link className="so-button so-button-secondary" href="/requests">Все заявки</Link> : null}
         </div>
       </header>
+
+      <ManagerWorkspaceView workspace={workspace} />
 
       {metrics.length > 0 ? (
         <section className="so-metrics-section" aria-label="Показатели на сегодня">
@@ -287,5 +294,58 @@ function DashboardView({ data }: { data: Data }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function ManagerWorkspaceView({ workspace }: { workspace: ManagerWorkspace }) {
+  const fmtDate = (value: string) => new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "Asia/Almaty" }).format(new Date(value));
+  const fmtTime = (value: string) => new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Almaty" }).format(new Date(value));
+  const cards = [
+    { key: "overdue", title: "Просроченные действия", items: workspace.overdueActions, tone: "text-red-700", time: (lead: NonNullable<typeof workspace.overdueActions>[number]) => lead.followUpAt ? fmtDate(lead.followUpAt) + " · " + fmtTime(lead.followUpAt) : "Срок пропущен", empty: "Просроченных действий нет." },
+    { key: "calls", title: "Звонки сегодня", items: workspace.callsToday, tone: "text-grape-800", time: (lead: NonNullable<typeof workspace.callsToday>[number]) => lead.followUpAt ? fmtTime(lead.followUpAt) : "Время не указано", empty: "Звонков на сегодня нет." },
+    { key: "new", title: "Новые необработанные заявки", items: workspace.newRequests, tone: "text-grape-800", time: (lead: NonNullable<typeof workspace.newRequests>[number]) => `Заявка №${lead.seq} · ${fmtDate(lead.createdAt)}`, empty: "Новых заявок нет." },
+  ];
+  const visible = cards.filter((card) => card.items !== null);
+  const birthdayItems = workspace.upcomingBirthdays;
+  const showBirthdays = birthdayItems !== null;
+  if (visible.length === 0 && !showBirthdays) return null;
+
+  return (
+    <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Рабочий список менеджера" data-testid="manager-workspace">
+      {visible.map((card) => (
+        <section key={card.key} className="so-panel min-w-0 overflow-hidden" aria-labelledby={`workspace-${card.key}`}>
+          <div className="so-panel-heading"><h2 id={`workspace-${card.key}`} className="min-w-0 break-words">{card.title}</h2><span className="so-panel-caption">{card.items?.length ?? 0}</span></div>
+          {card.items?.length ? (
+            <ul className="grid min-w-0 gap-2">
+              {card.items.map((lead) => (
+                <li key={lead.id} className="min-w-0 border-t border-line pt-2 first:border-0 first:pt-0">
+                  <Link href={`/requests/${encodeURIComponent(lead.id)}`} className="block min-w-0 break-words font-bold text-grape-800 underline-offset-2 hover:underline">{lead.name} · №{lead.seq}</Link>
+                  <div className="mt-1 flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-muted">
+                    <a href={`tel:${lead.phone.replace(/[^\d+]/g, "")}`} className="break-all underline">{lead.phone}</a>
+                    <span className={card.tone}>{card.time(lead)}</span>
+                  </div>
+                  {lead.nextAction ? <p className="mt-1 break-words text-xs text-muted">{LEAD_NEXT_ACTION_LABELS[lead.nextAction]}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-sm text-muted">{card.empty}</p>}
+        </section>
+      ))}
+      {showBirthdays ? (
+        <section className="so-panel min-w-0 overflow-hidden" aria-labelledby="workspace-birthdays">
+          <div className="so-panel-heading"><h2 id="workspace-birthdays" className="min-w-0 break-words">Ближайшие подтверждённые праздники</h2><Link href="/bookings" className="shrink-0 text-xs font-bold text-grape-700 underline">Календарь</Link></div>
+          {birthdayItems.length ? (
+            <ul className="grid min-w-0 gap-2">
+              {birthdayItems.map((booking) => (
+                <li key={booking.id} className="min-w-0 border-t border-line pt-2 first:border-0 first:pt-0">
+                  <Link href={`/bookings?date=${encodeURIComponent(booking.date)}`} className="block min-w-0 break-words font-bold text-grape-800 underline-offset-2 hover:underline">{fmtDate(booking.startsAt)} · {fmtTime(booking.startsAt)}</Link>
+                  <p className="mt-1 break-words text-xs text-muted">{booking.room}{booking.packageName ? ` · ${booking.packageName}` : ""}</p>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-sm text-muted">В ближайшие 30 дней праздников нет.</p>}
+        </section>
+      ) : null}
+    </section>
   );
 }

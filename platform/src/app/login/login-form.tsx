@@ -29,6 +29,10 @@ export function LoginForm() {
           className="h-12 rounded-2xl border-2 border-grape-200 bg-white px-4 text-base font-normal text-ink focus:border-grape-600 focus:outline-none"
         />
       </label>
+      <label className="flex min-w-0 items-start gap-2 text-sm font-semibold text-muted">
+        <input name="rememberDevice" type="checkbox" className="mt-1 size-4 shrink-0 accent-grape-700" />
+        <span>Запомнить это личное устройство на 30 дней</span>
+      </label>
       {state?.error ? (
         <p role="alert" className="rounded-2xl bg-sun-100 p-3 text-sm font-semibold text-grape-900">
           {state.error}

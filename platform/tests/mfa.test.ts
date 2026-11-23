@@ -4,7 +4,7 @@ import { authenticate, completeMfaLogin, MAX_FAILURES_PER_EMAIL } from "../src/c
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../src/core/errors.ts";
 import { beginEnrollment, isEnrolled, recoveryCodesLeft, resetUserMfa, resetUserMfaByEmail, verifySecondFactor } from "../src/core/mfa.ts";
 import { can } from "../src/core/rbac.ts";
-import { createSession, revokeAllSessions, revokeSessionsWithoutMfa, validateSession } from "../src/core/session.ts";
+import { createSession, hashToken, revokeAllSessions, revokeSessionsWithoutMfa, validateSession } from "../src/core/session.ts";
 import { resetPasswordFromConsole } from "../src/core/users.ts";
 import { totpAt } from "../src/core/totp.ts";
 import { makeUser, startTestDb, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
@@ -46,7 +46,9 @@ describe("Second factor (TOTP) for staff", () => {
       assert.ok(r.ok && r.mfa === "enroll");
       assert.equal(await validateSession(db.pool, r.token), null, "not a usable admin session");
       assert.equal(await validateSession(db.pool, r.token, { state: "verified" }), null);
-      assert.equal((await validateSession(db.pool, r.token, { state: "pending" }))?.user.id, u.id);
+      const pending = await validateSession(db.pool, r.token, { state: "pending" });
+      assert.equal(pending?.user.id, u.id);
+      assert.equal(pending?.rememberDevice, false, "shared-device choice is the default");
       assert.equal(await scalar("SELECT last_login_at IS NULL v FROM bb.users WHERE id = $1", [u.id]), true, "not counted as a login yet");
       // the pending session is short-lived
       const left = Number(await scalar("SELECT extract(epoch FROM (expires_at - now())) v FROM bb.sessions WHERE mfa_state = 'pending' ORDER BY created_at DESC LIMIT 1"));
@@ -69,6 +71,24 @@ describe("Second factor (TOTP) for staff", () => {
   });
 
   describe("enrolment", () => {
+    it("stores the personal-device choice on the pending server session and carries it only across successful MFA", async () => {
+      const u = await newStaff("manager");
+      const login = await authenticate(db.pool, { email: u.email, password: TEST_PASSWORD, ip: "10.77.0.5", mfaRequired: true, rememberDevice: true });
+      assert.ok(login.ok && login.mfa === "enroll");
+      const pending = await validateSession(db.pool, login.token, { state: "pending" });
+      assert.equal(pending?.rememberDevice, true);
+      assert.equal(await validateSession(db.pool, login.token, { state: "verified" }), null, "remember-device never bypasses MFA");
+      const pendingSeconds = Number(await scalar("SELECT extract(epoch FROM (expires_at - now())) v FROM bb.sessions WHERE token_hash = $1", [hashToken(login.token)]));
+      assert.ok(pendingSeconds > 0 && pendingSeconds <= 600, "MFA pending remains short-lived");
+
+      const enrollment = await beginEnrollment(db.pool, u.id, KEY);
+      const completed = await completeMfaLogin(db.pool, { pendingToken: login.token, code: totpAt(enrollment.secret, T0), mfaKey: KEY, ip: "10.77.0.5" }, T0);
+      assert.ok(completed.ok);
+      assert.equal((await validateSession(db.pool, completed.token, { requireMfa: true }))?.rememberDevice, true);
+      const verifiedSeconds = Number(await scalar("SELECT extract(epoch FROM (expires_at - now())) v FROM bb.sessions WHERE token_hash = $1", [hashToken(completed.token)]));
+      assert.ok(verifiedSeconds > 29 * 24 * 3600 && verifiedSeconds <= 30 * 24 * 3600);
+    });
+
     it("first login: shows the secret, refuses a wrong code, accepts the right one, returns 10 recovery codes once and swaps the session", async () => {
       const u = await newStaff("owner");
       const login = await passwordStep(u.email);

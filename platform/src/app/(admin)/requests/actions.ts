@@ -89,6 +89,7 @@ export async function updateLeadWorkflowAction(_previous: LeadWorkflowFormState,
     assignedTo: str(formData, "assignedTo") || null,
     nextAction: str(formData, "nextAction") || null,
     followUpAtLocal: str(formData, "followUpAtLocal") || null,
+    managerAgreement: str(formData, "managerAgreement"),
   };
   try {
     if (legacyBridgeEnabled()) {

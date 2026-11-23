@@ -5,6 +5,9 @@ import { isRole, type Role } from "./rbac.ts";
 /** Absolute lifetime and idle timeout of a staff session. */
 export const SESSION_ABSOLUTE_SECONDS = 7 * 24 * 3600;
 export const SESSION_IDLE_SECONDS = 12 * 3600;
+/** Explicitly remembered personal devices have a bounded longer lifetime, never an unbounded session. */
+export const REMEMBERED_SESSION_ABSOLUTE_SECONDS = 30 * 24 * 3600;
+export const REMEMBERED_SESSION_IDLE_SECONDS = 7 * 24 * 3600;
 /** A session at the "password accepted, second factor pending" step is useless for the admin and short-lived. */
 export const PENDING_SESSION_SECONDS = 10 * 60;
 /** `last_seen_at` is refreshed at most this often (saves a write on every request). */
@@ -20,6 +23,8 @@ export interface SessionUser {
 
 export interface ValidSession {
   sessionId: string;
+  /** Read from the server-side session row; never inferred from a browser cookie or MFA form. */
+  rememberDevice: boolean;
   user: SessionUser;
 }
 
@@ -39,18 +44,30 @@ export async function createSession(
   meta: SessionMeta = {},
   state: "verified" | "pending" = "verified",
   /** `mfaVerified: true` only for the session issued right after the second factor was proven. */
-  options: { mfaVerified?: boolean } = {},
+  options: { mfaVerified?: boolean; rememberDevice?: boolean } = {},
 ): Promise<{ token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString("base64url");
   // The column of migration 011 is named only when it is needed, so the application still works on a database that has
   // migrations up to 010 as long as the second factor is not mandatory (the current Preview).
   const withMfa = options.mfaVerified === true && state === "verified";
-  const { rows } = await db.query<{ expires_at: Date }>(
-    `INSERT INTO bb.sessions (token_hash, user_id, expires_at, ip, user_agent, mfa_state${withMfa ? ", mfa_verified_at" : ""})
-     VALUES ($1, $2, now() + make_interval(secs => $3), $4, $5, $6${withMfa ? ", now()" : ""})
-     RETURNING expires_at`,
-    [hashToken(token), userId, state === "pending" ? PENDING_SESSION_SECONDS : SESSION_ABSOLUTE_SECONDS, meta.ip ?? null, meta.userAgent ? meta.userAgent.slice(0, 400) : null, state],
-  );
+  const rememberDevice = options.rememberDevice === true;
+  const absoluteSeconds = state === "pending"
+    ? PENDING_SESSION_SECONDS
+    : rememberDevice ? REMEMBERED_SESSION_ABSOLUTE_SECONDS : SESSION_ABSOLUTE_SECONDS;
+  const params = [hashToken(token), userId, absoluteSeconds, meta.ip ?? null, meta.userAgent ? meta.userAgent.slice(0, 400) : null, state];
+  const { rows } = rememberDevice
+    ? await db.query<{ expires_at: Date }>(
+        `INSERT INTO bb.sessions (token_hash, user_id, expires_at, ip, user_agent, mfa_state, remember_device${withMfa ? ", mfa_verified_at" : ""})
+         VALUES ($1, $2, now() + make_interval(secs => $3), $4, $5, $6, true${withMfa ? ", now()" : ""})
+         RETURNING expires_at`,
+        params,
+      )
+    : await db.query<{ expires_at: Date }>(
+        `INSERT INTO bb.sessions (token_hash, user_id, expires_at, ip, user_agent, mfa_state${withMfa ? ", mfa_verified_at" : ""})
+         VALUES ($1, $2, now() + make_interval(secs => $3), $4, $5, $6${withMfa ? ", now()" : ""})
+         RETURNING expires_at`,
+        params,
+      );
   return { token, expiresAt: rows[0].expires_at };
 }
 
@@ -75,23 +92,25 @@ export async function validateSession(db: Queryable, token: string | undefined, 
     name: string;
     role: string;
     can_export: boolean;
+    remember_device: boolean;
     stale: boolean;
   }>(
-    `SELECT s.id AS session_id, s.last_seen_at, u.id, u.email, u.name, u.role::text AS role, u.can_export,
-            (s.last_seen_at < now() - make_interval(secs => $3)) AS stale
+    `SELECT s.id AS session_id, s.last_seen_at, COALESCE((to_jsonb(s)->>'remember_device')::boolean, false) AS remember_device,
+            u.id, u.email, u.name, u.role::text AS role, u.can_export,
+            (s.last_seen_at < now() - make_interval(secs => $4::double precision)) AS stale
        FROM bb.sessions s JOIN bb.users u ON u.id = s.user_id
       WHERE s.token_hash = $1
         AND s.revoked_at IS NULL
         AND s.expires_at > now()
-        AND s.last_seen_at > now() - make_interval(secs => $2)
+        AND s.last_seen_at > now() - make_interval(secs => CASE WHEN COALESCE((to_jsonb(s)->>'remember_device')::boolean, false) THEN $3::double precision ELSE $2::double precision END)
         AND u.is_active
-        AND s.mfa_state = $4${options.requireMfa === true && (options.state ?? "verified") === "verified" ? "\n        AND s.mfa_verified_at IS NOT NULL" : ""}`,
-    [hashToken(token), SESSION_IDLE_SECONDS, TOUCH_EVERY_SECONDS, options.state ?? "verified"],
+        AND s.mfa_state = $5${options.requireMfa === true && (options.state ?? "verified") === "verified" ? "\n        AND s.mfa_verified_at IS NOT NULL" : ""}`,
+    [hashToken(token), SESSION_IDLE_SECONDS, REMEMBERED_SESSION_IDLE_SECONDS, TOUCH_EVERY_SECONDS, options.state ?? "verified"],
   );
   const row = rows[0];
   if (!row || !isRole(row.role)) return null;
   if (row.stale) await db.query("UPDATE bb.sessions SET last_seen_at = now() WHERE id = $1", [row.session_id]);
-  return { sessionId: row.session_id, user: { id: row.id, email: row.email, name: row.name, role: row.role, canExport: row.can_export } };
+  return { sessionId: row.session_id, rememberDevice: row.remember_device, user: { id: row.id, email: row.email, name: row.name, role: row.role, canExport: row.can_export } };
 }
 
 export async function revokeSession(db: Queryable, token: string): Promise<void> {

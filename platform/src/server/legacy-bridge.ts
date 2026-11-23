@@ -19,6 +19,7 @@ import { validateSession, type ValidSession } from "../core/session.ts";
 import { listLeads, setLeadStatus } from "../core/bookings.ts";
 import { dashboardCounters, getLead, searchLeads, type LeadFilter } from "../core/lead-queue.ts";
 import { dashboardAnalytics } from "../core/analytics.ts";
+import { managerWorkspace } from "../core/manager-workspace.ts";
 import { claimLead, getLeadWorkflowContext, updateLeadWorkflow } from "../core/lead-workflow.ts";
 import { getContact, listContacts } from "../core/crm.ts";
 import { assessContact, anonymizeContact, revokeConsent, retentionReport } from "../core/privacy.ts";
@@ -132,7 +133,7 @@ export async function bridgeLogin(request: NextRequest): Promise<Response> {
     const meta = await requestMeta();
     const email = typeof body.email === "string" ? body.email : "";
     const password = typeof body.password === "string" ? body.password : "";
-    const result = await authenticate(getPool(), { email, password, mfaRequired: body.mfaRequired === true, ip: typeof body.ip === "string" ? body.ip : meta.ip, userAgent: typeof body.userAgent === "string" ? body.userAgent : meta.userAgent });
+    const result = await authenticate(getPool(), { email, password, mfaRequired: body.mfaRequired === true, rememberDevice: body.rememberDevice === true, ip: typeof body.ip === "string" ? body.ip : meta.ip, userAgent: typeof body.userAgent === "string" ? body.userAgent : meta.userAgent });
     return Response.json({ ...result, ...(result.ok ? { expiresAt: result.expiresAt.toISOString() } : {}) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return jsonError(error);
@@ -347,15 +348,16 @@ async function dashboard(pool: Pool, session: ValidSession) {
   const attendance = can(session.user.role, "attendance.manage")
     ? attendanceSchemaReady(pool).then((ok) => (ok ? dayFigures(pool, actor, almatyToday()) : null))
     : Promise.resolve(null);
-  const [migrations, summary, outbox, counters, analytics, figures] = await Promise.all([
+  const [migrations, summary, outbox, counters, analytics, figures, workspace] = await Promise.all([
     pool.query<{ name: string }>("SELECT name FROM bb.schema_migrations ORDER BY name DESC"),
     can(session.user.role, "catalog.view") ? catalogSummary(pool) : Promise.resolve(null),
     can(session.user.role, "contacts.view") ? outboxStats(pool) : Promise.resolve(null),
     dashboardCounters(pool, session.user.role),
     dashboardAnalytics(pool, session.user.role),
     attendance,
+    managerWorkspace(pool, actor),
   ]);
-  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, counters, analytics, attendance: figures };
+  return { migrations: migrations.rows.map((r) => r.name), summary, outbox, counters, analytics, attendance: figures, workspace };
 }
 
 async function bookingCatalog(pool: Pool) {
@@ -812,7 +814,7 @@ async function rpcCore(request: NextRequest, marks: { op: string; sessionMs: num
       case "users.active": await setActive(pool, actor, text(input.id, 80), input.active === true, await requestMeta()); return Response.json({ ok: true });
       case "users.export": await setCanExport(pool, actor, text(input.id, 80), input.allowed === true, await requestMeta()); return Response.json({ ok: true });
       case "users.password": await setPassword(pool, actor, text(input.id, 80), text(input.password, 128), await requestMeta()); return Response.json({ ok: true });
-      case "users.passwordSelf": await changeOwnPassword(pool, actor, text(input.currentPassword, 128), text(input.newPassword, 128), { keepSessionId: session.sessionId, ...(await requestMeta()) }); return Response.json({ ok: true });
+      case "users.passwordSelf": await changeOwnPassword(pool, actor, text(input.currentPassword, 128), text(input.newPassword, 128), await requestMeta()); return Response.json({ ok: true });
       case "users.resetMfa": await resetUserMfa(pool, actor, text(input.id, 80), await requestMeta()); return Response.json({ ok: true });
       case "audit.list": {
         if (!can(session.user.role, "audit.view")) throw new ForbiddenError();

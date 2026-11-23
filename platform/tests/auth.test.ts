@@ -3,7 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { authenticate, MAX_FAILURES_PER_EMAIL } from "../src/core/auth.ts";
 import { ConflictError, ForbiddenError, ValidationError } from "../src/core/errors.ts";
 import { hashPassword } from "../src/core/password.ts";
-import { createSession, hashToken, revokeSession, SESSION_IDLE_SECONDS, validateSession } from "../src/core/session.ts";
+import { createSession, hashToken, REMEMBERED_SESSION_ABSOLUTE_SECONDS, REMEMBERED_SESSION_IDLE_SECONDS, revokeSession, SESSION_ABSOLUTE_SECONDS, SESSION_IDLE_SECONDS, validateSession } from "../src/core/session.ts";
 import { changeOwnPassword, changeRole, createUser, listUsers, setActive, setPassword } from "../src/core/users.ts";
 import { makeUser, startTestDb, TEST_PASSWORD, type TestDb } from "./helpers/db.ts";
 
@@ -105,6 +105,33 @@ describe("authentication, sessions and user management", () => {
     assert.equal(await validateSession(db.pool, undefined), null);
   });
 
+  it("keeps shared-device sessions short and remembered personal-device sessions within 30-day absolute / 7-day idle limits", async () => {
+    const u = await makeUser(db.pool, "manager", "remembered@example.test");
+    await createSession(db.pool, u.id);
+    const personal = await createSession(db.pool, u.id, {}, "verified", { rememberDevice: true });
+    const expiries = await db.pool.query<{ seconds: number; remember_device: boolean }>(
+      `SELECT extract(epoch FROM (expires_at - now()))::int AS seconds, remember_device
+         FROM sessions WHERE user_id = $1 ORDER BY remember_device`,
+      [u.id],
+    );
+    assert.equal(expiries.rows[0].remember_device, false);
+    assert.ok(expiries.rows[0].seconds <= SESSION_ABSOLUTE_SECONDS && expiries.rows[0].seconds > SESSION_ABSOLUTE_SECONDS - 10);
+    assert.equal(expiries.rows[1].remember_device, true);
+    assert.ok(expiries.rows[1].seconds <= REMEMBERED_SESSION_ABSOLUTE_SECONDS && expiries.rows[1].seconds > REMEMBERED_SESSION_ABSOLUTE_SECONDS - 10);
+
+    for (const hours of [24, 72]) {
+      await db.pool.query("UPDATE sessions SET last_seen_at = now() - make_interval(hours => $2) WHERE token_hash = $1", [hashToken(personal.token), hours]);
+      const restored = await validateSession(db.pool, personal.token);
+      assert.equal(restored?.rememberDevice, true, `personal session survives a ${hours}-hour browser close`);
+    }
+    await db.pool.query("UPDATE sessions SET last_seen_at = now() - make_interval(secs => $2) WHERE token_hash = $1", [hashToken(personal.token), REMEMBERED_SESSION_IDLE_SECONDS + 1]);
+    assert.equal(await validateSession(db.pool, personal.token), null, "personal session is rejected after seven idle days");
+
+    await db.pool.query("UPDATE sessions SET last_seen_at = now() WHERE token_hash = $1", [hashToken(personal.token)]);
+    await db.pool.query("UPDATE sessions SET expires_at = now() - interval '1 second' WHERE token_hash = $1", [hashToken(personal.token)]);
+    assert.equal(await validateSession(db.pool, personal.token), null, "absolute expiration is enforced independently of activity");
+  });
+
   it("refreshes last_seen_at only when it is stale (saves writes)", async () => {
     const u = await makeUser(db.pool, "editor", "touch@example.test");
     const s = await createSession(db.pool, u.id);
@@ -118,7 +145,7 @@ describe("authentication, sessions and user management", () => {
     const owner = await makeUser(db.pool, "owner", "root@example.test");
     const actor = { id: owner.id, role: "owner" as const };
     const u = await makeUser(db.pool, "manager", "rev@example.test");
-    const s1 = await createSession(db.pool, u.id);
+    const s1 = await createSession(db.pool, u.id, {}, "verified", { rememberDevice: true });
     const s2 = await createSession(db.pool, u.id);
     await setPassword(db.pool, actor, u.id, "another long password 42");
     assert.equal(await validateSession(db.pool, s1.token), null);
@@ -133,26 +160,24 @@ describe("authentication, sessions and user management", () => {
     if (!again.ok) return;
     await setActive(db.pool, actor, u.id, false);
     assert.equal(await validateSession(db.pool, again.token), null, "disabled user cannot use an old session");
-    // self-service password change keeps the current device only
-    const self = await createSession(db.pool, owner.id);
+    // Password changes invalidate remembered as well as ordinary sessions, including the current device.
+    const self = await createSession(db.pool, owner.id, {}, "verified", { rememberDevice: true });
     const other = await createSession(db.pool, owner.id);
-    const selfSession = await validateSession(db.pool, self.token);
-    await setPassword(db.pool, actor, owner.id, "owner new password 99", { keepSessionId: selfSession!.sessionId });
-    assert.ok(await validateSession(db.pool, self.token));
+    await setPassword(db.pool, actor, owner.id, "owner new password 99");
+    assert.equal(await validateSession(db.pool, self.token), null);
     assert.equal(await validateSession(db.pool, other.token), null);
   });
 
-  it("self-service password change needs the current password and keeps only this device", async () => {
+  it("self-service password change needs the current password and ends every session", async () => {
     const u = await makeUser(db.pool, "manager", "self@example.test");
     const actor = { id: u.id, role: "manager" as const };
     const here = await createSession(db.pool, u.id);
     const elsewhere = await createSession(db.pool, u.id);
-    const current = await validateSession(db.pool, here.token);
-    await assert.rejects(() => changeOwnPassword(db.pool, actor, "not my password", "a brand new password 1", { keepSessionId: current!.sessionId }), ValidationError);
+    await assert.rejects(() => changeOwnPassword(db.pool, actor, "not my password", "a brand new password 1"), ValidationError);
     assert.ok(await validateSession(db.pool, elsewhere.token), "a failed attempt changes nothing");
-    await assert.rejects(() => changeOwnPassword(db.pool, actor, TEST_PASSWORD, "short", { keepSessionId: current!.sessionId }), ValidationError);
-    await changeOwnPassword(db.pool, actor, TEST_PASSWORD, "a brand new password 1", { keepSessionId: current!.sessionId });
-    assert.ok(await validateSession(db.pool, here.token));
+    await assert.rejects(() => changeOwnPassword(db.pool, actor, TEST_PASSWORD, "short"), ValidationError);
+    await changeOwnPassword(db.pool, actor, TEST_PASSWORD, "a brand new password 1");
+    assert.equal(await validateSession(db.pool, here.token), null);
     assert.equal(await validateSession(db.pool, elsewhere.token), null);
     assert.ok((await authenticate(db.pool, { email: "self@example.test", password: "a brand new password 1", ip: "10.3.0.1" })).ok);
   });

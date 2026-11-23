@@ -296,6 +296,15 @@
   justify-self: start;
 }
 
+.crm-lead-workflow-agreement {
+  grid-column: 1 / -1;
+}
+
+.crm-lead-workflow-agreement textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
 .crm-lead-claim-form {
   margin-top: .65rem;
 }

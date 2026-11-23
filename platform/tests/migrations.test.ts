@@ -164,7 +164,7 @@ describe("migrations and DB-level guarantees", () => {
     }
   });
 
-  it("019 and 020 preserve historical leads while adding time preferences and follow-up fields", async () => {
+  it("019-022 preserve historical leads while adding preferences, follow-up, and agreement notes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bb-before-019-"));
     const prior = await startTestDb({ migrate: false });
     try {
@@ -176,9 +176,9 @@ describe("migrations and DB-level guarantees", () => {
       const oldLead = (await prior.pool.query("INSERT INTO bb.lead_requests (idempotency_key,contact_id,requested_date,slot_id,status) VALUES ($1,$2,'2099-02-03',2,'new') RETURNING id,seq,slot_id", [randomUUID(), contact])).rows[0];
 
       const applied = await migrate(prior.pool, MIGRATIONS_DIR);
-      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql", "020_lead_follow_up.sql"]);
-      const after = (await prior.pool.query("SELECT id,seq,slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [oldLead.id])).rows[0];
-      assert.deepEqual(after, { ...oldLead, preferred_start_time: null }, "old identity, slot and status are preserved; no preference is invented");
+      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql", "020_lead_follow_up.sql", "021_remember_device_sessions.sql", "022_lead_manager_agreement.sql"]);
+      const after = (await prior.pool.query("SELECT id,seq,slot_id,preferred_start_time,manager_agreement FROM bb.lead_requests WHERE id=$1", [oldLead.id])).rows[0];
+      assert.deepEqual(after, { ...oldLead, preferred_start_time: null, manager_agreement: null }, "old identity, slot and status are preserved; no preference or agreement is invented");
 
       const legacy = (await prior.pool.query(
         "SELECT id,seq FROM bb.intake_insert_lead($1,$2,NULL,NULL,'2099-02-04',NULL,NULL,NULL,NULL,NULL,NULL,2::smallint)",

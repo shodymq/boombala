@@ -31,6 +31,7 @@ export interface LeadQueueItem extends LeadRow {
   assigneeName: string | null;
   nextAction: LeadNextAction | null;
   followUpAt: Date | null;
+  managerAgreement: string | null;
   workflowVersion: number;
   followUpOverdue: boolean;
 }
@@ -49,7 +50,7 @@ export interface LeadDetail extends LeadQueueItem {
 
 const LEAD_COLUMNS = `l.id, l.seq, l.created_at, l.status, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS requested_date,
             l.slot_id, to_char(l.preferred_start_time, 'HH24:MI') AS preferred_start_time, l.room_id, l.package_id, l.children,
-            l.assigned_to, assignee.name AS assignee_name, l.next_action, l.follow_up_at, l.workflow_version,
+            l.assigned_to, assignee.name AS assignee_name, l.next_action, l.follow_up_at, l.manager_agreement, l.workflow_version,
             (l.follow_up_at IS NOT NULL AND l.follow_up_at <= now() AND l.status IN ('new', 'in_progress')) AS follow_up_overdue,
             (SELECT r.id FROM bb.slot_reservations r WHERE r.lead_request_id = l.id AND r.released_at IS NULL) AS reservation_id`;
 
@@ -72,6 +73,7 @@ function leadRow(r: Record<string, unknown>): LeadQueueItem {
     assigneeName: r.assignee_name as string | null,
     nextAction: r.next_action as LeadNextAction | null,
     followUpAt: r.follow_up_at as Date | null,
+    managerAgreement: r.manager_agreement as string | null,
     workflowVersion: Number(r.workflow_version),
     followUpOverdue: r.follow_up_overdue === true,
   };

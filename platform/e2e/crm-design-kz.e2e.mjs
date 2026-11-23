@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { chromium } from "playwright-core";
 import { applyRoles } from "../scripts/db-roles.ts";
 import { createPool } from "../src/core/db.ts";
+import { hashToken } from "../src/core/session.ts";
 import { createUser } from "../src/core/users.ts";
 import { beginEnrollment, confirmEnrollment } from "../src/core/mfa.ts";
 import { totpAt } from "../src/core/totp.ts";
@@ -208,17 +209,18 @@ let muted = false;
 const badAssets = [];
 const BASE = `https://${FRONT.host}`;
 const shot = (page, name) => page.screenshot({ path: join(ART, `${name}.png`), fullPage: true });
-async function newPage(viewport = { width: 1440, height: 900 }) {
-  const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport, extraHTTPHeaders: {} });
+async function newPage(viewport = { width: 1440, height: 900 }, storageState) {
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport, extraHTTPHeaders: {}, ...(storageState ? { storageState } : {}) });
   const page = await ctx.newPage();
   page.on("console", (m) => { if (!muted && m.type() === "error" && !/favicon/.test(m.text() + m.location().url)) consoleErrors.push(`${m.text().slice(0, 160)}`); });
   page.on("response", (r) => { if (!muted && r.status() >= 400 && !/favicon/.test(r.url())) badAssets.push(`${r.status()} ${new URL(r.url()).pathname}`); });
   return page;
 }
-async function signIn(page, email, secretOrNull) {
+async function signIn(page, email, secretOrNull, rememberDevice = false) {
   await page.goto(`${BASE}/login`);
   await page.fill('input[type="email"]', email);
   await page.fill('input[type="password"]', PW);
+  if (rememberDevice) await page.check('input[name="rememberDevice"]');
   await page.click('button[type="submit"]:has-text("Войти")');
   await page.waitForURL(/\/login\/mfa/, { timeout: 20000 }).catch(async () => {
     throw new Error(`no MFA step after the password for ${email}: ${(await page.locator("body").innerText()).slice(0, 200).replace(/\s+/g, " ")}`);
@@ -254,11 +256,11 @@ try {
 
   // ══ 2. MFA enrolment and login, manager ════════════════════════════════════════════════════════════════════════
   console.log("## 2. MFA through the browser (manager)");
-  const manager = await newPage();
+  let manager = await newPage();
   {
     await manager.goto(`${BASE}/requests`);
     ok(/\/login/.test(manager.url()), "an anonymous visitor is sent to the login page");
-    const secret = await signIn(manager, `kz.manager.${run}@example.test`, null);
+    const secret = await signIn(manager, `kz.manager.${run}@example.test`, null, true);
     await manager.waitForSelector('[data-testid="recovery-codes"]', { timeout: 20000 });
     ok((await manager.locator('[data-testid="recovery-codes"] li').count()) === 10, "MFA enrolled: ten recovery codes shown once");
     await manager.click('a:has-text("Я сохранил коды")');
@@ -267,6 +269,15 @@ try {
     const cookies = await manager.context().cookies();
     const session = cookies.find((c) => c.name === "__Host-bb_session");
     ok(session && session.secure && session.httpOnly && session.sameSite === "Lax" || session?.sameSite === "Strict", "session cookie is __Host-, Secure and HttpOnly");
+    ok(session && session.expires - Date.now() / 1000 > 29 * 86400 && session.expires - Date.now() / 1000 <= 30 * 86400, "remembered browser cookie is bounded by the 30-day server session");
+    const remembered = await owner.query("SELECT remember_device, mfa_verified_at IS NOT NULL AS mfa_verified FROM bb.sessions WHERE user_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1", [staff.manager.id]);
+    ok(remembered.rows[0]?.remember_device === true && remembered.rows[0]?.mfa_verified === true, "remembered preference is stored on the MFA-verified server session");
+    const browserState = await manager.context().storageState();
+    await manager.context().close();
+    manager = await newPage({ width: 1440, height: 900 }, browserState);
+    await manager.goto(`${BASE}/`);
+    await manager.waitForLoadState("networkidle");
+    ok(new URL(manager.url()).pathname === "/", "the remembered login survives closing and reopening the browser context");
   }
 
   // ══ 3. Dashboard: real counters ═════════════════════════════════════════════════════════════════════════════
@@ -283,6 +294,10 @@ try {
     ok((await metric("Брони сегодня")) === 2, "bookings today = 2 (database)");
     ok((await metric("Блокировки сегодня")) === 1, "blocks today = 1 (database)");
     ok((await manager.locator(".so-metric-value span").count()) === 0, "no invented capacity next to the numbers");
+    ok((await manager.locator('[data-testid="manager-workspace"]').count()) === 1, "the authenticated manager sees the RBAC-scoped working lists");
+    for (const section of ["Просроченные действия", "Звонки сегодня", "Новые необработанные заявки", "Ближайшие подтверждённые праздники"]) {
+      ok((await manager.locator('[data-testid="manager-workspace"]').getByRole("heading", { name: section }).count()) === 1, `manager home includes ${section.toLowerCase()}`);
+    }
     await shot(manager, "01-dashboard");
   }
 
@@ -314,11 +329,32 @@ try {
     await manager.waitForLoadState("networkidle");
     targetId = decodeURIComponent(manager.url().split("/requests/")[1].split("?")[0]);
     ok(/^[0-9a-f-]{36}$/.test(targetId) && (await manager.getByRole("heading", { name: "Гость 130" }).count()) === 1, "the card is the concrete record read by id");
+    ok((await manager.locator("a.crm-lead-phone").getAttribute("href"))?.startsWith("tel:+7702"), "the request card exposes a phone link without changing workflow status");
     await shot(manager, "03-request-card");
+    await manager.getByRole("button", { name: "Взять заявку себе" }).click();
+    await manager.waitForURL(new RegExp(`/requests/${targetId}\\?notice=claimed`));
+    let workflowRow = (await owner.query("SELECT status, assigned_to, next_action, manager_agreement, workflow_version FROM bb.lead_requests WHERE id=$1", [targetId])).rows[0];
+    ok(workflowRow?.status === "in_progress" && workflowRow?.assigned_to === staff.manager.id, "claim assigns the lead to this manager without changing its lifecycle status");
+    const workflowForm = manager.locator("form[data-lead-workflow-form]");
+    ok(await workflowForm.locator('select[name="assignedTo"]').inputValue() === staff.manager.id, "the refreshed request card keeps the claimed manager selected in the workflow form");
+    await workflowForm.locator('select[name="nextAction"]').selectOption("call_customer");
+    await workflowForm.locator('input[name="followUpAtLocal"]').fill(`${almatyDay(1)}T11:00`);
+    await workflowForm.locator('textarea[name="managerAgreement"]').fill("Позвонить и уточнить количество гостей.");
+    await workflowForm.getByRole("button", { name: "Сохранить план" }).click();
+    await manager.waitForURL(new RegExp(`/requests/${targetId}\\?notice=workflow`));
+    workflowRow = (await owner.query("SELECT status, assigned_to, next_action, manager_agreement, workflow_version FROM bb.lead_requests WHERE id=$1", [targetId])).rows[0];
+    ok(workflowRow?.status === "in_progress" && workflowRow?.assigned_to === staff.manager.id && workflowRow?.next_action === "call_customer" && workflowRow?.manager_agreement === "Позвонить и уточнить количество гостей." && Number(workflowRow?.workflow_version) === 3, "the manager agreement and next call are persisted on the same lead with workflow versioning");
+    const agreementInAudit = await dbCount("SELECT count(*)::int n FROM bb.audit_log WHERE entity_id=$1 AND action='lead.workflow_updated' AND after::text LIKE '%количество гостей%'", [targetId]);
+    ok(agreementInAudit === 0, "the audit records workflow change without copying the customer's agreement text");
+    await shot(manager, "03-request-workflow-saved");
     const old = await dbCount("SELECT count(*)::int n FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id WHERE c.name = 'Гость 1'");
     const oldId = (await owner.query("SELECT l.id FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id WHERE c.name = 'Гость 1'")).rows[0].id;
     await manager.goto(`${BASE}/requests/${oldId}`);
     ok(old === 1 && (await manager.getByRole("heading", { name: "Гость 1" }).count()) === 1, "the oldest record opens by id too");
+    await manager.getByRole("button", { name: "В работу" }).click();
+    await manager.waitForURL(/\/requests\?notice=status/);
+    const changedStatus = await owner.query("SELECT status FROM bb.lead_requests WHERE id=$1", [oldId]);
+    ok(changedStatus.rows[0]?.status === "in_progress", "the manager changes request status through its Server Action");
     muted = true;
     const missing = await manager.goto(`${BASE}/requests/00000000-0000-4000-8000-000000000000`);
     ok(missing?.status() === 404, "an unknown id is a 404, not a wrong record");
@@ -332,27 +368,62 @@ try {
     await manager.locator('[data-testid="continue-in-calendar"]').click();
     await manager.waitForLoadState("networkidle");
     ok(/continue=/.test(manager.url()) && manager.url().includes(`date=${BOOK_DATE}`), "the link carries the request id and its date");
-    const rooms4 = await manager.locator('[data-timeline] [role="group"]').count();
-    ok(rooms4 === 4, `the calendar actually loaded four room columns (${rooms4})`);
+    const calendarRooms = await manager.locator('[data-timeline] [role="group"]').count();
+    ok(calendarRooms === rooms.length, `the calendar loaded every active catalog room (${calendarRooms}/${rooms.length})`);
     const blocks = await manager.locator('[data-timeline] [data-state="blocked"]').count();
     ok(blocks === 1, "the real block of that day is drawn on the timeline");
     ok(/0 броней/.test(await manager.locator("[data-summary-counts]").innerText()), "the day header says 0 bookings before we book");
-    const form = manager.locator('[data-testid="continue-request-form"]');
-    ok((await form.count()) === 1, "the booking form belongs to the existing request");
-    ok(/Гость 130/.test(await form.innerText()) && /\+7702/.test(await form.innerText()), "customer data comes from the request, nothing is typed twice");
+    // The drawer form is intentionally identified by its existing-request field; no extra UI test hook is needed.
+    const form = manager.locator('form[aria-label="Фиксация полученной предоплаты"]');
+    ok((await form.count()) === 1, "the payment form belongs to the existing request");
+    const drawer = manager.locator('[role="dialog"]');
+    ok(/Гость 130/.test(await drawer.innerText()) && /\+7702/.test(await drawer.innerText()), "customer data comes from the request, nothing is typed twice");
     ok((await form.locator('input[name="requestId"]').inputValue()) === targetId, "the form carries the request id");
     ok((await form.locator('input[name="customerName"]').count()) === 0, "there is no new-customer field: no new request can be created");
-    await shot(manager, "04-continue-form");
-    await form.locator('select[name="roomId"]').selectOption({ label: rooms[0].name });
-    await form.locator('input[name="startTime"]').fill("14:25");
-    await form.locator('input[name="agreedPriceKzt"]').fill("180000");
+    await shot(manager, "04-prepayment-form");
+    await form.locator('input[name="amountKzt"]').fill("10000");
+    await form.locator('select[name="prepaymentMethod"]').selectOption("cash");
+    await form.locator('input[name="receiptConfirmed"]').check();
     await form.locator('button[type="submit"]').click();
-    await manager.waitForURL(/[?&](ok|error)=/, { timeout: 30000 });
+    const paymentResult = await Promise.race([
+      manager.waitForURL(/[?&]payment=recorded/, { timeout: 30000 }).then(() => "redirect").catch(() => null),
+      manager.locator("[data-booking-action-error]").waitFor({ timeout: 30000 }).then(() => "action_error").catch(() => null),
+    ]);
+    if (paymentResult === "action_error") {
+      const code = await manager.locator("[data-booking-action-error]").getAttribute("data-booking-action-error");
+      ok(false, `manual prepayment Server Action returned ${code ?? "an unclassified error"}`);
+      throw new Error(`manual prepayment Server Action returned ${code ?? "an unclassified error"}`);
+    } else {
+      ok(paymentResult === "redirect", "manual prepayment Server Action completed with a read-after-write redirect");
+      if (paymentResult !== "redirect") throw new Error("manual prepayment Server Action had no observable result");
+    }
+    await manager.waitForLoadState("networkidle");
+    const paid = manager.locator('[role="dialog"] form[aria-label="Подтверждение оплаченной заявки"]');
+    const paymentFacts = await dbCount("SELECT count(*)::int n FROM bb.manual_payment_facts WHERE lead_request_id=$1", [targetId]);
+    const reservationsBeforeConfirmation = await dbCount("SELECT count(*)::int n FROM bb.slot_reservations WHERE lead_request_id=$1", [targetId]);
+    ok(paymentFacts === 1 && reservationsBeforeConfirmation === 0, "the real 10,000 ₸ receipt fact is recorded once and does not occupy a room");
+    ok((await paid.count()) === 1 && (await paid.locator('input[name="requestId"]').inputValue()) === targetId, "after payment read-back the same request opens the separate room-confirmation step");
+    await shot(manager, "04-paid-confirmation-form");
+    await paid.locator('select[name="roomId"]').selectOption({ label: rooms[0].name });
+    await paid.locator('input[name="startTime"]').fill("14:00");
+    await paid.locator('input[name="agreedPriceKzt"]').fill("180000");
+    await paid.locator('button[type="submit"]').click();
+    const actionResult = await Promise.race([
+      manager.waitForURL(/[?&](ok|error)=/, { timeout: 30000 }).then(() => "redirect").catch(() => null),
+      manager.locator("[data-booking-action-error]").waitFor({ timeout: 30000 }).then(() => "action_error").catch(() => null),
+    ]);
+    if (actionResult === "action_error") {
+      const code = await manager.locator("[data-booking-action-error]").getAttribute("data-booking-action-error");
+      ok(false, `booking Server Action returned ${code ?? "an unclassified error"}`);
+      throw new Error(`booking Server Action returned ${code ?? "an unclassified error"}`);
+    }
+    ok(actionResult === "redirect", "booking Server Action completed with a read-after-write redirect");
+    if (actionResult !== "redirect") throw new Error("booking Server Action had no observable result");
     await manager.waitForLoadState("networkidle");
     ok(/ok=booked/.test(manager.url()), `booking succeeded (${manager.url().split("?")[1]?.slice(0, 80)})`);
     ok((await manager.locator('[role="status"]', { hasText: "Проверено по данным системы" }).count()) === 1, "success is verified by reading the system back");
-    const booked = manager.locator('[data-timeline] [data-state="booked"][data-start="14:25"]');
-    ok((await booked.count()) === 1, "the booking is drawn at exactly 14:25 (no rounding)");
+    const booked = manager.locator('[data-timeline] [data-state="booked"][data-start="14:00"]');
+    ok((await booked.count()) === 1, "the booking is drawn at the selected full hour");
     ok(/1 бронь/.test(await manager.locator("[data-summary-counts]").innerText()), "the day header now says 1 booking");
     await shot(manager, "05-calendar-booked");
     // The database is the authority.
@@ -361,11 +432,11 @@ try {
       `SELECT l.status, r.kind, to_char(r.starts_at AT TIME ZONE 'Asia/Almaty', 'HH24:MI') hhmm, r.room_id, (r.ends_at - r.starts_at) = interval '4 hours' four,
               (SELECT count(*)::int FROM bb.manual_payment_facts p WHERE p.lead_request_id = l.id) payments
          FROM bb.lead_requests l JOIN bb.slot_reservations r ON r.lead_request_id = l.id AND r.released_at IS NULL WHERE l.id = $1`, [targetId])).rows;
-    ok(row.length === 1 && row[0].status === "confirmed" && row[0].hhmm === "14:25" && row[0].four && row[0].room_id === rooms[0].id, "the booking is attached to THAT request: confirmed, 14:25, 4 hours");
+    ok(row.length === 1 && row[0].status === "confirmed" && row[0].hhmm === "14:00" && row[0].four && row[0].room_id === rooms[0].id, "the booking is attached to THAT request: confirmed at 14:00 for 4 hours");
     ok(row[0]?.payments === 1, "exactly one manual prepayment fact");
     // Continuing it again must not create anything.
     await manager.goto(`${BASE}/bookings?date=${BOOK_DATE}&continue=${targetId}`);
-    ok((await manager.locator('[data-testid="continue-request-form"]').count()) === 0 && (await manager.locator('[role="alert"]', { hasText: "нельзя продолжить" }).count()) === 1, "an already booked request cannot be continued again");
+    ok((await manager.locator('form').filter({ has: manager.locator('input[name="requestId"]') }).count()) === 0 && (await manager.locator('[role="alert"]', { hasText: "нельзя продолжить" }).count()) === 1, "an already booked request cannot be continued again");
     ok((await dbCount("SELECT count(*)::int n FROM bb.slot_reservations WHERE lead_request_id = $1", [targetId])) === 1, "still one reservation for the request");
     await manager.goto(`${BASE}/requests/${targetId}`);
     ok(/Подтверждена/.test(await manager.locator("main").innerText()), "the card shows the request as confirmed");
@@ -399,14 +470,29 @@ try {
   // ══ 7. Responsive navigation ═══════════════════════════════════════════════════════════════════════════════════
   console.log("## 7. phone width");
   {
-    const phone = await newPage({ width: 390, height: 844 });
     const secret = (await owner.query("SELECT 1")).rows.length ? editorEnroll.secret : "";
-    await signIn(phone, `kz.editor.${run}@example.test`, secret);
-    await phone.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20000 });
-    await phone.goto(`${BASE}/`);
-    ok(!(await phone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), "no horizontal page scroll on a phone");
-    await shot(phone, "07-phone-dashboard");
-    await phone.context().close();
+    const managerState = await manager.context().storageState();
+    for (const width of [320, 390, 430]) {
+      const managerPhone = await newPage({ width, height: 844 }, managerState);
+      await managerPhone.goto(`${BASE}/`);
+      await managerPhone.waitForLoadState("networkidle");
+      ok((await managerPhone.locator('[data-testid="manager-workspace"]').count()) === 1, `manager workspace renders at ${width}px`);
+      ok(!(await managerPhone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), `manager dashboard has no horizontal page scroll at ${width}px`);
+      await shot(managerPhone, `07-manager-dashboard-${width}`);
+      await managerPhone.goto(`${BASE}/requests/${targetId}`);
+      await managerPhone.waitForLoadState("networkidle");
+      ok(!(await managerPhone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), `manager request card has no horizontal overflow at ${width}px`);
+      await shot(managerPhone, `07-manager-request-card-${width}`);
+      await managerPhone.context().close();
+
+      const phone = await newPage({ width, height: 844 });
+      await signIn(phone, `kz.editor.${run}@example.test`, secret);
+      await phone.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20000 });
+      await phone.goto(`${BASE}/`);
+      ok(!(await phone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), `no horizontal page scroll at ${width}px`);
+      await shot(phone, `07-phone-dashboard-${width}`);
+      await phone.context().close();
+    }
   }
 
   // ══ 8. The frontend has no path to the database ════════════════════════════════════════════════════════════════
@@ -418,6 +504,21 @@ try {
     muted = true;
     const res = await manager.goto(`${BASE}/requests`);
     ok((res?.status() ?? 0) >= 500 && (await manager.locator(".crm-requests-table").count()) === 0, "with the bridge down the frontend shows no data (it has nothing else to read)");
+    children.push(start("bridge-restart", BRIDGE.port, {
+      ...common, ALLOWED_HOSTS: BRIDGE.host, DATABASE_URL: asRole("bb_admin", ROLE_ADMIN_PW), MFA_ENC_KEY: MFA_KEY,
+      ADMIN_ALLOWED_CIDRS: "127.0.0.1/32", CRON_SECRET: rnd(32),
+    }));
+    await waitFor(BRIDGE.port);
+    muted = false;
+    await manager.goto(`${BASE}/`);
+    await manager.waitForLoadState("networkidle");
+    const cookie = (await manager.context().cookies()).find((c) => c.name === "__Host-bb_session");
+    await manager.getByRole("button", { name: "Выйти" }).click();
+    await manager.waitForURL(/\/login/);
+    const revoked = cookie ? await owner.query("SELECT revoked_at IS NOT NULL AS revoked FROM bb.sessions WHERE token_hash = $1", [hashToken(cookie.value)]) : { rows: [] };
+    ok(revoked.rows[0]?.revoked === true, "logout revokes the remembered server session");
+    await manager.goto(`${BASE}/requests`);
+    ok(new URL(manager.url()).pathname === "/login", "a protected route stays unavailable after logout");
   }
 
   ok(consoleErrors.length === 0, `no browser console errors${consoleErrors.length ? ": " + [...new Set(consoleErrors)].slice(0, 3).join(" | ") : ""}`);
