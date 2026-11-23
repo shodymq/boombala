@@ -456,6 +456,10 @@ try {
       ok((await managerPhone.locator('[data-testid="manager-workspace"]').count()) === 1, `manager workspace renders at ${width}px`);
       ok(!(await managerPhone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), `manager dashboard has no horizontal page scroll at ${width}px`);
       await shot(managerPhone, `07-manager-dashboard-${width}`);
+      await managerPhone.goto(`${BASE}/requests/${targetId}`);
+      await managerPhone.waitForLoadState("networkidle");
+      ok(!(await managerPhone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), `manager request card has no horizontal overflow at ${width}px`);
+      await shot(managerPhone, `07-manager-request-card-${width}`);
       await managerPhone.context().close();
 
       const phone = await newPage({ width, height: 844 });
