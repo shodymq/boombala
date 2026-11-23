@@ -5,6 +5,7 @@ import type { BookingCatalogPackage, BookingTimelineReservation } from "../../..
 import { blockAction, continueRequestAction, createBookingAction, releaseAction, rescheduleAction } from "./crm-actions";
 import { StartTimeField } from "./start-time-field";
 import { SubmitButton } from "./submit-button";
+import { BookingActionForm } from "./server-action-form";
 import { clock } from "./timeline";
 
 const kzt = new Intl.NumberFormat("ru-RU");
@@ -19,12 +20,12 @@ const DEFAULT_PREPAYMENT_KZT = 10_000;
 /** Right-hand panel (full screen on a phone). Server-rendered and driven by the address, so it works without client scripts. */
 export function Drawer({ title, closeHref, children, wide = false }: { title: string; closeHref: string; children: React.ReactNode; wide?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={title} data-drawer>
-      <Link href={closeHref} scroll={false} aria-label="Закрыть" className="hidden flex-1 bg-ink/40 md:block" />
-      <aside className={`flex w-full flex-col overflow-y-auto bg-white p-4 shadow-2xl ${wide ? "md:max-w-2xl" : "md:max-w-md"}`}>
+    <div className="fixed inset-0 z-[70] flex justify-end md:z-50" role="dialog" aria-modal="true" aria-label={title} data-drawer>
+      <Link href={closeHref} prefetch={false} scroll={false} aria-label="Закрыть" className="hidden flex-1 bg-ink/40 md:block" />
+      <aside className={`flex w-full flex-col overflow-y-auto bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl ${wide ? "md:max-w-2xl" : "md:max-w-md"}`}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h2 className="text-xl font-black text-grape-800">{title}</h2>
-          <Link href={closeHref} scroll={false} className={ghost + " h-9 px-3"}>Закрыть</Link>
+          <Link href={closeHref} prefetch={false} scroll={false} className={ghost + " min-h-11 px-3 md:h-9 md:min-h-0"}>Закрыть</Link>
         </div>
         {children}
       </aside>
@@ -129,12 +130,12 @@ export function ReservationDetails({
       {r.sourceManaged ? (
         <p className="mt-3 rounded-xl bg-paper p-2 text-xs text-muted">Эта запись управляется таблицей «Банкеты». Перенос и отмена в CRM отключены, пока работает синхронизация. Сумма предоплаты из таблицы не считается подтверждением поступления денег.</p>
       ) : null}
-      <Link href={cardHref} scroll={false} className={ghost + " mt-3"} data-open-card>Открыть карточку{released ? " (история)" : ""}</Link>
+      <Link href={cardHref} prefetch={false} scroll={false} className={ghost + " mt-3"} data-open-card>Открыть карточку{released ? " (история)" : ""}</Link>
 
       {released || r.sourceManaged ? null : (
         <div className="mt-4 grid gap-3">
           {isBlock ? null : rescheduling ? (
-            <form action={rescheduleAction} className="grid gap-2 rounded-2xl border border-line p-3" aria-label="Перенос брони">
+            <BookingActionForm action={rescheduleAction} className="grid gap-2 rounded-2xl border border-line p-3" label="Перенос брони">
               <h3 className="text-sm font-black text-grape-800">Перенести бронь</h3>
               <Hidden branchId={branchId} reservationId={r.id} />
               <label className={label}>Дата<input type="date" name="date" required defaultValue={date} className={field} /></label>
@@ -143,19 +144,19 @@ export function ReservationDetails({
               </label>
               <StartTimeField defaultValue={clock(r.startsAt)} quick={hoursKnown ? quick : []} label="Новое начало" />
               <p className="text-xs text-muted">Перенос делает сервер одной операцией: если новое время занято, прежняя бронь остаётся. Предоплата не дублируется.</p>
-              <div className="flex gap-2"><SubmitButton className={primary} pending="Переносим…">Перенести на 4 часа</SubmitButton><Link href={detailHref} scroll={false} className={ghost}>Отмена</Link></div>
-            </form>
+              <div className="flex gap-2 max-md:sticky max-md:bottom-0 max-md:z-10 max-md:bg-white/95 max-md:py-2 max-md:pb-[env(safe-area-inset-bottom)]"><SubmitButton className={primary + " min-h-11 flex-1 md:min-h-0"} pending="Переносим…">Перенести на 4 часа</SubmitButton><Link href={detailHref} prefetch={false} scroll={false} className={ghost + " min-h-11 md:min-h-0"}>Отмена</Link></div>
+            </BookingActionForm>
           ) : (
-            <Link href={rescheduleHref} scroll={false} className={ghost}>Перенести бронь</Link>
+            <Link href={rescheduleHref} prefetch={false} scroll={false} className={ghost}>Перенести бронь</Link>
           )}
           <details className="rounded-2xl border border-line p-3">
-            <summary className="flex min-h-9 cursor-pointer items-center text-sm font-extrabold text-danger">{isBlock ? "Освободить комнату" : "Отменить бронь"}</summary>
-            <form action={releaseAction} className="mt-2 grid gap-2">
+            <summary className="flex min-h-11 cursor-pointer items-center text-sm font-extrabold text-danger md:min-h-9">{isBlock ? "Освободить комнату" : "Отменить бронь"}</summary>
+            <BookingActionForm action={releaseAction} className="mt-2 grid gap-2" label={isBlock ? "Освобождение комнаты" : "Отмена брони"}>
               <Hidden branchId={branchId} reservationId={r.id} />
               <input type="hidden" name="date" value={date} />
               <input name="reason" maxLength={300} placeholder="Причина" aria-label="Причина" className={field} />
               <SubmitButton className={ghost} pending="Выполняем…">{isBlock ? "Освободить комнату" : "Отменить бронь"}</SubmitButton>
-            </form>
+            </BookingActionForm>
           </details>
         </div>
       )}
@@ -187,16 +188,16 @@ export function NewBookingForm({
   return (
     <Drawer title={mode === "block" ? "Заблокировать комнату" : "Добавить бронь"} closeHref={closeHref}>
       {mode === "block" ? (
-        <form action={blockAction} className="grid gap-2" aria-label="Блокировка комнаты">
+        <BookingActionForm action={blockAction} className="grid gap-2" label="Блокировка комнаты">
           <Hidden branchId={branchId} />
           <label className={label}>Дата<input type="date" name="date" required defaultValue={date} className={field} /></label>
           <label className={label}>Комната<select name="roomId" required defaultValue={defaultRoomId} className={field}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
           <StartTimeField defaultValue={defaultStart} quick={quick} />
           <input name="reason" required maxLength={300} placeholder="Причина" aria-label="Причина блокировки" className={field} />
-          <SubmitButton className={primary}>Заблокировать на 4 часа</SubmitButton>
-        </form>
+          <SubmitButton className={primary + " max-md:sticky max-md:bottom-0 max-md:z-10 max-md:min-h-11"}>Заблокировать на 4 часа</SubmitButton>
+        </BookingActionForm>
       ) : (
-        <form action={createBookingAction} className="grid gap-2" aria-label="Новая бронь">
+        <BookingActionForm action={createBookingAction} className="grid gap-2" label="Новая бронь">
           <Hidden branchId={branchId} />
           <label className={label}>Дата<input type="date" name="date" required defaultValue={date} className={field} /></label>
           <label className={label}>Комната<select name="roomId" required defaultValue={defaultRoomId} className={field}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
@@ -225,8 +226,8 @@ export function NewBookingForm({
           </div>
           <textarea name="note" maxLength={300} placeholder="Комментарий" aria-label="Комментарий" className="min-h-20 rounded-xl border-2 border-grape-200 bg-white p-3 text-base" />
           <p className="text-xs text-muted">Предоплата записывается менеджером вручную (по умолчанию 10 000 ₸) — это не онлайн-оплата. Бронь показывается как успешная только после того, как система бронирования подтвердила её и деньги при повторном чтении.</p>
-          <SubmitButton className={primary} pending="Создаём бронь…">Создать заявку, записать предоплату и подтвердить</SubmitButton>
-        </form>
+          <SubmitButton className={primary + " max-md:sticky max-md:bottom-0 max-md:z-10 max-md:min-h-11"} pending="Создаём бронь…">Создать заявку, записать предоплату и подтвердить</SubmitButton>
+        </BookingActionForm>
       )}
     </Drawer>
   );
@@ -249,7 +250,7 @@ export function ContinueRequestForm({ request, rooms, packages, quick, branchId,
   const prepaid = request.prepaymentKzt !== null && request.prepaymentKzt > 0;
   return (
     <Drawer title={`Заявка №${request.seq}: подтвердить бронь`} closeHref={closeHref}>
-      <form action={continueRequestAction} className="grid gap-2" aria-label="Подтверждение брони по заявке" data-testid="continue-request-form">
+      <BookingActionForm action={continueRequestAction} className="grid gap-2" label="Подтверждение брони по заявке">
         <Hidden branchId={branchId} />
         <input type="hidden" name="requestId" value={request.id} />
         <input type="hidden" name="idempotencyKey" value={randomUUID()} />
@@ -286,8 +287,8 @@ export function ContinueRequestForm({ request, rooms, packages, quick, branchId,
         )}
         <textarea name="note" maxLength={300} placeholder="Комментарий" aria-label="Комментарий" className="min-h-20 rounded-xl border-2 border-grape-200 bg-white p-3 text-base" />
         <p className="text-xs text-muted">Бронь продолжит эту заявку: новая заявка не создаётся. Предоплата — ручная запись менеджера, не онлайн-оплата.</p>
-        <SubmitButton className={primary} pending="Подтверждаем…">{prepaid ? "Подтвердить бронь" : "Записать предоплату и подтвердить"}</SubmitButton>
-      </form>
+        <SubmitButton className={primary + " max-md:sticky max-md:bottom-0 max-md:z-10 max-md:min-h-11"} pending="Подтверждаем…">{prepaid ? "Подтвердить бронь" : "Записать предоплату и подтвердить"}</SubmitButton>
+      </BookingActionForm>
     </Drawer>
   );
 }

@@ -12,6 +12,7 @@ import { requestMeta } from "../../../server/request.ts";
 import { cookies } from "next/headers";
 import { bridgeRpc, LegacyBridgeError, legacyBridgeEnabled } from "../../../server/bridge-client.ts";
 import { SESSION_COOKIE } from "../../../server/env.ts";
+import type { LeadWorkflowFormState } from "./workflow-action-form.tsx";
 
 const uuid = z.string().uuid();
 const str = (f: FormData, k: string) => String(f.get(k) ?? "");
@@ -76,12 +77,12 @@ function workflowFailure(error: unknown, leadId: string): never {
   redirect(`/requests/${encodeURIComponent(leadId)}?error=${encodeURIComponent(code)}`);
 }
 
-export async function updateLeadWorkflowAction(formData: FormData): Promise<void> {
+export async function updateLeadWorkflowAction(_previous: LeadWorkflowFormState, formData: FormData): Promise<LeadWorkflowFormState> {
   const { user } = await requirePermission("requests.manage");
-  if (unifiedFastapiCrmEnabled() && !legacyBridgeEnabled()) return workflowFailure(new FastApiCrmConfigurationError("crm_actor_missing"), str(formData, "id"));
+  if (unifiedFastapiCrmEnabled() && !legacyBridgeEnabled()) return { errorCode: "fastapi_unavailable" };
   const leadId = uuid.safeParse(formData.get("id"));
   const expectedVersion = Number(str(formData, "expectedVersion"));
-  if (!leadId.success) return workflowFailure(new ValidationError({ id: "invalid" }), "invalid");
+  if (!leadId.success) return { errorCode: "invalid" };
   const input = {
     leadId: leadId.data,
     expectedVersion,
@@ -92,13 +93,21 @@ export async function updateLeadWorkflowAction(formData: FormData): Promise<void
   try {
     if (legacyBridgeEnabled()) {
       const token = (await cookies()).get(SESSION_COOKIE)?.value;
-      if (!token) return workflowFailure(new FastApiCrmConfigurationError("crm_actor_missing"), leadId.data);
+      if (!token) return { errorCode: "fastapi_unavailable" };
       await bridgeRpc("requests.workflow.update", input, token);
     } else {
       await updateLeadWorkflow(getPool(), { id: user.id, role: user.role }, input, await requestMeta());
     }
   } catch (error) {
-    return workflowFailure(error, leadId.data);
+    const remoteCode = error instanceof LegacyBridgeError ? error.code : undefined;
+    const code = remoteCode ?? (
+      error instanceof ConflictError ? error.message
+        : error instanceof ValidationError ? "invalid"
+          : error instanceof ForbiddenError ? "forbidden"
+            : error instanceof FastApiCrmConfigurationError ? "fastapi_unavailable"
+              : "failed"
+    );
+    return { errorCode: code };
   }
   redirect(`/requests/${encodeURIComponent(leadId.data)}?notice=workflow`);
 }

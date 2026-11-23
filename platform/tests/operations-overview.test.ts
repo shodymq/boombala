@@ -122,7 +122,11 @@ describe("operations page access and read path", () => {
   });
 
   it("only exposes the navigation link to roles whose existing menu includes bookings.manage", () => {
-    assert.match(nav, /items\.some\(\(item\) => item\.href === "\/bookings"\)/);
-    assert.match(nav, /href: "\/operations", label: "Ближайшие праздники"/);
+    assert.match(nav, /items\.some\(\(item\) => item\.href === "\/bookings"\)[\s\S]*?\{ href: "\/operations", label: "Ближайшие праздники" \}/);
+    assert.match(nav, /const PRIMARY_HREFS = new Set\(\["\/", "\/bookings", "\/requests", "\/attendance", "\/contacts"\]\)/);
+    assert.match(nav, /const MOBILE_PRIMARY_HREFS = new Set\(\["\/", "\/requests", "\/bookings", "\/operations"\]\)/);
+    assert.match(nav, /visibleItems\.filter\(\(item\) => PRIMARY_HREFS\.has\(item\.href\)\)/);
+    assert.match(nav, /visibleItems\.filter\(\(item\) => !PRIMARY_HREFS\.has\(item\.href\)\)/);
+    assert.match(nav, /className="snow-mobile-primary"/);
   });
 });

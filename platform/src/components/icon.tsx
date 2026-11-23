@@ -1,5 +1,5 @@
 import {
-  Bell, CalendarDays, ChevronRight, CircleCheck, Download, EllipsisVertical, Heart, Inbox, LayoutGrid, LogOut, Menu, Plus, Search, Settings, Ticket, User, Users,
+  Bell, CalendarDays, ChevronRight, CircleCheck, Download, EllipsisVertical, Heart, Inbox, LayoutGrid, LogOut, Menu, Phone, Plus, Search, Settings, Ticket, User, Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -19,6 +19,7 @@ const ICONS = {
   logout: LogOut,
   menu: Menu,
   more: EllipsisVertical,
+  phone: Phone,
   plus: Plus,
   search: Search,
   settings: Settings,

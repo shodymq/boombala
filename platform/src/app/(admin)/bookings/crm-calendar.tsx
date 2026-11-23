@@ -21,6 +21,7 @@ import { confirmPaidRequestAction } from "./crm-actions";
 import { FlashClean } from "./crm-flash-clean";
 import { StartTimeField } from "./start-time-field";
 import { SubmitButton } from "./submit-button";
+import { BookingActionForm } from "./server-action-form";
 import { clock, DayTimeline, TimelineLegend } from "./timeline";
 
 const NOTICES: Record<string, string> = {
@@ -207,7 +208,7 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-3xl font-black tracking-tight text-grape-800">Календарь</h1>
         {hours && packages.length > 0 && rooms.length > 0 ? (
-          <Link href={q({ new: "1" })} scroll={false} className={btn + " flex items-center"}>Добавить бронь</Link>
+          <Link href={q({ new: "1" })} prefetch={false} scroll={false} className={btn + " flex items-center"}>Добавить бронь</Link>
         ) : null}
       </div>
       {search.ok || search.error ? <FlashClean /> : null}
@@ -234,13 +235,13 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
         )
       ) : null}
 
-      <nav aria-label="Дата и филиал" className="flex flex-wrap items-end gap-3">
+      <nav aria-label="Дата и филиал" className="flex flex-wrap items-end gap-3 max-sm:gap-2">
         <div className="flex items-center gap-2">
-          <Link href={q({}, { branch: branch.id, date: shiftDate(date, -1) })} className={btnGhost} aria-label="Предыдущий день">←</Link>
-          <Link href={q({}, { branch: branch.id, date: today })} className={btnGhost + (date === today ? " bg-grape-50" : "")}>Сегодня</Link>
-          <Link href={q({}, { branch: branch.id, date: shiftDate(date, 1) })} className={btnGhost} aria-label="Следующий день">→</Link>
+          <Link href={q({}, { branch: branch.id, date: shiftDate(date, -1) })} prefetch={false} className={btnGhost} aria-label="Предыдущий день">←</Link>
+          <Link href={q({}, { branch: branch.id, date: today })} prefetch={false} className={btnGhost + (date === today ? " bg-grape-50" : "")}>Сегодня</Link>
+          <Link href={q({}, { branch: branch.id, date: shiftDate(date, 1) })} prefetch={false} className={btnGhost} aria-label="Следующий день">→</Link>
         </div>
-        <form method="get" className="flex flex-wrap items-end gap-2">
+        <form method="get" className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
           {branches.length > 1 ? (
             <label className="grid gap-1 text-xs font-extrabold text-muted">Филиал
               <select name="branch" defaultValue={branch.id} className={input + " min-w-44"}>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
@@ -260,7 +261,7 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
         {rooms.length === 0 ? (
           <p role="alert" className="rounded-2xl bg-sun-100 p-4 text-sm font-bold text-grape-900">Для этого филиала нет комнат в системе бронирования.</p>
         ) : (
-          <DayTimeline rooms={rooms} reservations={timeline.reservations} axis={axis} hours={hours} hrefFor={(id) => q({ reservation: id })} selectedId={selected?.id} />
+          <DayTimeline rooms={rooms} reservations={timeline.reservations} axis={axis} hours={hours} date={date} hrefFor={(id) => q({ reservation: id })} createHrefFor={(roomId, start) => q({ new: "1", room: roomId, start })} selectedId={selected?.id} />
         )}
         {active.length === 0 && rooms.length > 0 ? <p className="text-sm font-bold text-muted" data-empty>На эту дату система не вернула ни одной брони или блокировки.</p> : null}
         <TimelineLegend />
@@ -271,7 +272,7 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
           <h2 id="paid-request" className="text-lg font-black text-grape-800">Оплаченная заявка № {paidPending}</h2>
           <p className="text-sm text-grape-900">Предоплата {kzt.format(pendingPaid?.manualPaymentFactAmountKzt ?? 0)} ₸ записана вручную в системе. Бронь НЕ подтверждена. Подтвердите её на выбранные комнату и время: новая предоплата не записывается.</p>
           {hours && packages.length > 0 && rooms.length > 0 ? (
-            <form action={confirmPaidRequestAction} className="grid max-w-md gap-2">
+            <BookingActionForm action={confirmPaidRequestAction} className="grid max-w-md gap-2" label="Подтверждение оплаченной заявки">
               <input type="hidden" name="branchId" value={branch.id} />
               <input type="hidden" name="date" value={date} />
               <input type="hidden" name="requestId" value={paidPending} />
@@ -285,7 +286,7 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
               </label>
               <input name="agreedPriceKzt" type="number" required min={1} max={10000000} placeholder="Согласованная цена, ₸" aria-label="Согласованная цена" className={input} />
               <SubmitButton className={btn} pending="Подтверждаем…">Подтвердить без повторной предоплаты</SubmitButton>
-            </form>
+            </BookingActionForm>
           ) : <p className="text-sm font-bold text-muted">Подтверждение недоступно: нет часов работы, комнат или пакетов.</p>}
         </section>
       ) : null}
@@ -302,11 +303,11 @@ export async function CrmCalendar({ session, search, view = null }: { session: V
           </ul>
         )}
         <p className="text-xs text-muted">Заявка занимает комнату только после подтверждения брони менеджером в системе бронирования. Запись из бумажного журнала или Google Sheets сначала вносится сюда кнопкой «Добавить бронь».</p>
-        <Link href="/requests?status=new" className="text-sm font-extrabold text-grape-700 underline">Открыть раздел «Заявки»</Link>
+        <Link href="/requests?status=new" prefetch={false} className="text-sm font-extrabold text-grape-700 underline">Открыть раздел «Заявки»</Link>
       </section>
 
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        {hours && rooms.length > 0 ? <Link href={q({ block: "1" })} scroll={false} className="font-extrabold text-grape-700 underline">Заблокировать комнату на 4 часа</Link> : null}
+        {hours && rooms.length > 0 ? <Link href={q({ block: "1" })} prefetch={false} scroll={false} className="font-extrabold text-grape-700 underline">Заблокировать комнату на 4 часа</Link> : null}
         <span className="text-muted">История дня (снятые брони): {released.length}</span>
       </div>
       {released.length > 0 ? (

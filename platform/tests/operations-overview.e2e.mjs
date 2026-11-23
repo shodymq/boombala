@@ -231,7 +231,9 @@ try {
   await page.fill('input[type="password"]', managerPassword);
   await page.click('button[type="submit"]');
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 20000 });
+  await page.setViewportSize({ width: 390, height: 844 });
   check(await page.getByRole("link", { name: "Ближайшие праздники" }).count() === 1, "manager sees the operations navigation link");
+  await page.setViewportSize({ width: 1360, height: 900 });
   await page.goto(`http://127.0.0.1:${frontPort}/`);
   const analyticsText = (await page.getByTestId("dash-analytics").innerText()).replace(/\s+/g, " ");
   check(analyticsText.includes("Заявки и предстоящие праздники"), "manager dashboard shows the aggregate analytics snapshot");
@@ -266,6 +268,7 @@ try {
   await editorPage.fill('input[type="password"]', editorPassword);
   await editorPage.click('button[type="submit"]');
   await editorPage.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 20000 });
+  await editorPage.setViewportSize({ width: 390, height: 844 });
   check(await editorPage.getByRole("link", { name: "Ближайшие праздники" }).count() === 0, "editor does not see the operations link");
   await editorPage.goto(`http://127.0.0.1:${frontPort}/`);
   check(await editorPage.getByTestId("dash-analytics").count() === 0, "editor does not receive request, booking or payment aggregates");

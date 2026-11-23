@@ -12,6 +12,8 @@ export interface NavItem {
 }
 
 const PRIMARY_HREFS = new Set(["/", "/bookings", "/requests", "/attendance", "/contacts"]);
+const MOBILE_PRIMARY_HREFS = new Set(["/", "/requests", "/bookings", "/operations"]);
+const MOBILE_PRIMARY_ORDER = ["/", "/requests", "/bookings", "/operations"];
 
 function isCurrent(item: NavItem, pathname: string) {
   return item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -30,7 +32,7 @@ function NavList({ items, pathname, onNavigate }: { items: NavItem[]; pathname: 
         const active = isCurrent(item, pathname);
         return (
           <li key={item.href}>
-            <Link href={item.href} onClick={onNavigate} aria-current={active ? "page" : undefined} className="snow-nav-link">
+            <Link href={item.href} prefetch={false} onClick={onNavigate} aria-current={active ? "page" : undefined} className="snow-nav-link">
               <Icon name={adminNavIcon(item.href)} size={17} className="snow-nav-icon" />
               <span>{item.label}</span>
               <NavPending />
@@ -52,11 +54,15 @@ export function NavLinks({ items }: { items: NavItem[] }) {
     : items;
   const primary = visibleItems.filter((item) => PRIMARY_HREFS.has(item.href));
   const management = visibleItems.filter((item) => !PRIMARY_HREFS.has(item.href));
+  const mobilePrimary = visibleItems
+    .filter((item) => MOBILE_PRIMARY_HREFS.has(item.href))
+    .sort((a, b) => MOBILE_PRIMARY_ORDER.indexOf(a.href) - MOBILE_PRIMARY_ORDER.indexOf(b.href));
 
   const closeMenu = () => setMenu({ pathname, open: false });
 
   return (
-    <nav aria-label="Разделы" className="snow-nav" data-open={menuOpen} onKeyDown={(event) => {
+    <>
+      <nav aria-label="Разделы" className="snow-nav" data-open={menuOpen} onKeyDown={(event) => {
       if (event.key === "Escape") closeMenu();
     }}>
       <button
@@ -83,7 +89,22 @@ export function NavLinks({ items }: { items: NavItem[] }) {
           </section>
         ) : null}
       </div>
-    </nav>
+      </nav>
+      {mobilePrimary.length > 0 ? (
+        <nav className="snow-mobile-primary" aria-label="Быстрая навигация">
+          <ul>
+            {mobilePrimary.map((item) => {
+              const active = isCurrent(item, pathname);
+              const shortLabel = item.href === "/operations" ? "Праздники" : item.label;
+              return <li key={item.href}><Link href={item.href} prefetch={false} onClick={closeMenu} aria-label={item.label} aria-current={active ? "page" : undefined}>
+                <Icon name={adminNavIcon(item.href)} size={19} />
+                <span>{shortLabel}</span>
+              </Link></li>;
+            })}
+          </ul>
+        </nav>
+      ) : null}
+    </>
   );
 }
 

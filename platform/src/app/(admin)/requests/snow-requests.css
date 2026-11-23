@@ -258,6 +258,11 @@
   font-weight: 800;
 }
 
+.crm-requests-follow-up-missing { color: #8f5b00 !important; font-weight: 800; }
+.crm-requests-call { display: none; gap: .4rem; font-size: .78rem; }
+.crm-lead-phone { color: inherit; text-decoration: none; }
+.crm-lead-phone svg { display: none; }
+
 .crm-lead-workflow {
   margin-top: 1.25rem;
   border-top: 1px solid #eee9ef;
@@ -444,6 +449,12 @@
 }
 
 @media (max-width: 760px) {
+  .crm-requests-tabs a { min-height: 2.75rem; }
+  .crm-requests-action { min-height: 2.75rem; }
+  .crm-requests-call { display: inline-flex; min-height: 2.75rem; }
+  .crm-lead-phone { display: inline-flex; min-height: 2.75rem; align-items: center; gap: .45rem; color: #3b1e78; text-decoration: underline; text-underline-offset: 2px; }
+  .crm-lead-phone svg { display: block; }
+
   .crm-requests-heading {
     align-items: flex-start;
   }

@@ -11,6 +11,7 @@ export type AdminNavIcon =
   | "logout"
   | "menu"
   | "more"
+  | "phone"
   | "plus"
   | "search"
   | "settings"
@@ -21,6 +22,7 @@ export type AdminNavIcon =
 const NAV_ICON_NAMES: Record<string, AdminNavIcon> = {
   "/": "dashboard",
   "/bookings": "calendar",
+  "/operations": "calendar",
   "/requests": "inbox",
   "/attendance": "check",
   "/contacts": "users",
