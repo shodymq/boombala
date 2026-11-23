@@ -8,7 +8,7 @@ import { loadLead, loadRequestCard } from "@/server/lead-data";
 import { getPool } from "@/server/db";
 import { legacyBridgeEnabled } from "@/server/bridge-client";
 import { Icon } from "@/components/icon";
-import { claimLeadAction, confirmLeadAction, leadStatusAction, updateLeadWorkflowAction } from "../actions";
+import { claimLeadAction, leadStatusAction, updateLeadWorkflowAction } from "../actions";
 import { WorkflowActionForm } from "../workflow-action-form";
 
 export const metadata: Metadata = { title: "Карточка заявки" };
@@ -22,7 +22,6 @@ const ERRORS: Record<string, string> = {
 };
 const NOTICES: Record<string, string> = { status: "Статус изменён.", workflow: "План обработки сохранён.", claimed: "Заявка назначена вам." };
 const input = "crm-requests-control";
-const btn = "crm-requests-action";
 const btnGhost = "crm-requests-action crm-requests-action-secondary";
 const panel = "rounded-2xl border border-line bg-white p-5 shadow-sm";
 
@@ -65,7 +64,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
   const auditSummary = (value: LeadWorkflowContext["history"][number]["after"]) => {
     const assigned = value.assigneeName ?? (value.assignedTo ? "Сотрудник" : "Не назначен");
     const next = value.nextAction ? `${LEAD_NEXT_ACTION_LABELS[value.nextAction]} · ${actionTime(value.followUpAt ? new Date(value.followUpAt) : null)}` : "Действий не запланировано";
-    return `Ответственный: ${assigned}. ${next}.`;
+    return `Ответственный: ${assigned}. ${next}.${value.agreementChanged ? " Договорённость обновлена." : ""}`;
   };
 
   return (
@@ -99,30 +98,10 @@ export default async function RequestCardPage({ params, searchParams }: { params
       {open ? (
         <section className={panel} aria-labelledby="req-actions">
           <h2 id="req-actions" className="text-lg font-black text-grape-800">Действия</h2>
-          {bridge ? (
-            <p className="mt-3 text-sm font-bold text-muted">Подтверждение выполняется в календаре после фиксации ручной предоплаты. <Link href={`/bookings?date=${lead.requestedDate}&continue=${encodeURIComponent(lead.id)}`} className="text-grape-700 underline" data-testid="continue-in-calendar">Продолжить в календаре</Link></p>
-          ) : (
-            <form action={confirmLeadAction} className="crm-requests-confirm mt-3">
-              <input type="hidden" name="id" value={lead.id} />
-              <input type="date" name="date" defaultValue={lead.requestedDate} required className={input} aria-label="Дата" />
-              <select name="slotId" defaultValue={lead.slotId ?? ""} required className={input} aria-label="Слот">
-                <option value="" disabled>Слот</option>
-                {cat.slots.map((s) => <option key={s.id} value={s.id}>{s.startsAt}–{s.endsAt}</option>)}
-              </select>
-              <select name="roomId" defaultValue={lead.roomId ?? ""} required className={input} aria-label="Комната">
-                <option value="" disabled>Комната</option>
-                {cat.rooms.filter((r) => r.isActive).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
-              <select name="packageId" defaultValue={lead.packageId ?? ""} required className={input} aria-label="Пакет">
-                <option value="" disabled>Пакет</option>
-                {cat.packages.filter((p) => p.isActive || p.id === lead.packageId).map((p) => <option key={p.id} value={p.id}>{p.isActive ? p.name : `${p.name} (снят с продажи)`}</option>)}
-              </select>
-              <button type="submit" className={btn}>Подтвердить бронь</button>
-            </form>
-          )}
+          <p className="mt-3 text-sm font-bold text-muted">Проверьте свободную комнату и завершите бронирование в календаре после отдельной фиксации реально полученной ручной предоплаты: <Link href={`/bookings?date=${lead.requestedDate}&continue=${encodeURIComponent(lead.id)}`} className="text-grape-700 underline" data-testid="continue-in-calendar">Открыть календарь</Link></p>
           <section className="crm-lead-workflow" aria-labelledby="lead-workflow-title">
             <h3 id="lead-workflow-title">Следующее действие</h3>
-          <WorkflowActionForm action={updateLeadWorkflowAction} className="crm-lead-workflow-form">
+          <WorkflowActionForm key={lead.workflowVersion} action={updateLeadWorkflowAction} className="crm-lead-workflow-form">
               <input type="hidden" name="id" value={lead.id} />
               <input type="hidden" name="expectedVersion" value={lead.workflowVersion} />
               <label>
@@ -143,6 +122,11 @@ export default async function RequestCardPage({ params, searchParams }: { params
               <label>
                 <span>Связаться до (Алматы)</span>
                 <input type="datetime-local" name="followUpAtLocal" defaultValue={instantToAlmatyLocalDateTime(lead.followUpAt)} className={input} />
+              </label>
+              <label className="crm-lead-workflow-agreement">
+                <span>Договорённость с клиентом</span>
+                <textarea name="managerAgreement" defaultValue={lead.managerAgreement ?? ""} maxLength={1000} rows={3} className={input} aria-describedby="lead-agreement-help" />
+                <small id="lead-agreement-help" className="font-normal text-muted">Кратко зафиксируйте согласованный следующий шаг. Не записывайте платёжные реквизиты.</small>
               </label>
           </WorkflowActionForm>
             <p className="crm-requests-note">План сохраняется в CRM и журнале действий. Сообщения клиенту автоматически не отправляются.</p>

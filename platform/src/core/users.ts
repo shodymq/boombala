@@ -126,13 +126,13 @@ export async function setActive(pool: Pool, actor: Actor, userId: string, active
   });
 }
 
-/** Sets a new password and signs the user out everywhere, except `keepSessionId` (the current device on a self-service change). */
+/** Sets a new password and immediately signs the user out on every device, including the one that changed it. */
 export async function setPassword(
   pool: Pool,
   actor: Actor,
   userId: string,
   password: string,
-  opts: { keepSessionId?: string } & RequestMeta = {},
+  opts: RequestMeta = {},
 ): Promise<void> {
   if (actor.id !== userId) assertCan(actor, "users.manage");
   const parsed = passwordSchema.safeParse(password);
@@ -141,7 +141,7 @@ export async function setPassword(
   await withTx(pool, async (tx) => {
     const res = await tx.query("UPDATE bb.users SET password_hash = $2, updated_at = now() WHERE id = $1", [userId, passwordHash]);
     if (!res.rowCount) throw new ValidationError({ user: "Пользователь не найден" });
-    await revokeUserSessions(tx, userId, opts.keepSessionId);
+    await revokeUserSessions(tx, userId);
     await writeAudit(tx, { actorUserId: actor.id, action: "user.password_changed", entityType: "user", entityId: userId, ip: opts.ip, userAgent: opts.userAgent });
   });
 }
@@ -163,13 +163,13 @@ export async function resetPasswordFromConsole(pool: Pool, email: string, passwo
   });
 }
 
-/** Self-service change: the current password must be proven first. Other devices are signed out, this one stays. */
+/** Self-service change: prove the current password, then revoke every session so the user signs in again. */
 export async function changeOwnPassword(
   pool: Pool,
   actor: Actor,
   currentPassword: string,
   newPassword: string,
-  opts: { keepSessionId?: string } & RequestMeta = {},
+  opts: RequestMeta = {},
 ): Promise<void> {
   const { rows } = await pool.query<{ password_hash: string }>("SELECT password_hash FROM bb.users WHERE id = $1 AND is_active", [actor.id]);
   const ok = rows[0] ? await verifyPassword(rows[0].password_hash, currentPassword) : (await dummyVerify(currentPassword), false);

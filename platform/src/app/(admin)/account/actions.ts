@@ -11,7 +11,7 @@ import { bridgeRpc, legacyBridgeEnabled } from "../../../server/bridge-client.ts
 import { SESSION_COOKIE } from "../../../server/env.ts";
 
 export async function changeOwnPasswordAction(formData: FormData): Promise<void> {
-  const { user, sessionId } = await requireUser();
+  const { user } = await requireUser();
   const next = String(formData.get("next") ?? "");
   if (next !== String(formData.get("repeat") ?? "")) redirect("/account?error=mismatch");
   try {
@@ -21,11 +21,12 @@ export async function changeOwnPasswordAction(formData: FormData): Promise<void>
       if (!token) redirect("/login");
       await bridgeRpc("users.passwordSelf", { currentPassword: current, newPassword: next }, token);
     } else {
-      await changeOwnPassword(getPool(), { id: user.id, role: user.role }, current, next, { keepSessionId: sessionId, ...(await requestMeta()) });
+      await changeOwnPassword(getPool(), { id: user.id, role: user.role }, current, next, await requestMeta());
     }
   } catch (error) {
     if (error instanceof ValidationError) redirect(`/account?error=${"currentPassword" in error.fields ? "current" : "weak"}`);
     throw error;
   }
-  redirect("/account?notice=ok");
+  (await cookies()).delete(SESSION_COOKIE);
+  redirect("/login");
 }

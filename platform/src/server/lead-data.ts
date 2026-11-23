@@ -35,6 +35,7 @@ const leadRow = z.object({
   nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(),
   followUpAt: z.string().datetime().transform((v) => new Date(v)).nullable(),
   workflowVersion: z.number().int().positive(),
+  managerAgreement: z.string().nullable(),
   followUpOverdue: z.boolean(),
 });
 const leadPage = z.object({ items: z.array(leadRow), total: z.number(), page: z.number(), pageSize: z.number() });
@@ -74,8 +75,8 @@ const requestCard = z.object({
     history: z.array(z.object({
       id: z.number(), at: z.string().datetime().transform((v) => new Date(v)), actorName: z.string().nullable(),
       action: z.enum(["lead.claimed", "lead.workflow_updated"]),
-      before: z.object({ assignedTo: z.string().uuid().nullable(), assigneeName: z.string().nullable(), nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(), followUpAt: z.string().datetime().nullable() }),
-      after: z.object({ assignedTo: z.string().uuid().nullable(), assigneeName: z.string().nullable(), nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(), followUpAt: z.string().datetime().nullable() }),
+      before: z.object({ assignedTo: z.string().uuid().nullable(), assigneeName: z.string().nullable(), nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(), followUpAt: z.string().datetime().nullable(), agreementChanged: z.boolean().optional() }),
+      after: z.object({ assignedTo: z.string().uuid().nullable(), assigneeName: z.string().nullable(), nextAction: z.enum(LEAD_NEXT_ACTIONS).nullable(), followUpAt: z.string().datetime().nullable(), agreementChanged: z.boolean().optional() }),
     })),
   }),
 });

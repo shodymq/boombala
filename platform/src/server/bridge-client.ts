@@ -2,13 +2,14 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-export type BridgeLoginInput = { email: string; password: string; ip?: string | null; userAgent?: string | null; mfaRequired: boolean };
+export type BridgeLoginInput = { email: string; password: string; ip?: string | null; userAgent?: string | null; mfaRequired: boolean; rememberDevice: boolean };
 export type BridgeLoginResult =
   | { ok: true; token: string; expiresAt: string; userId: string; mfa: "none" | "verify" | "enroll" }
   | { ok: false; reason: "invalid" | "locked"; retryAfterSeconds?: number };
 
 export type BridgeSession = {
   sessionId: string;
+  rememberDevice: boolean;
   user: { id: string; email: string; name: string; role: "owner" | "manager" | "editor"; canExport: boolean };
 };
 

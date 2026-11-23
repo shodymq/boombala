@@ -64,6 +64,8 @@ export interface LeadWorkflowUpdateInput {
   assignedTo: string | null;
   nextAction: LeadNextAction | null;
   followUpAtLocal: string | null;
+  /** Optional for older callers; omission preserves the existing agreement. */
+  managerAgreement?: string | null;
 }
 
 export interface LeadWorkflowClaimInput { leadId: string; expectedVersion: number }
@@ -76,6 +78,7 @@ export function parseLeadWorkflowUpdate(value: unknown): LeadWorkflowUpdateInput
   const assignedTo = input.assignedTo;
   const nextAction = input.nextAction;
   const followUpAtLocal = input.followUpAtLocal;
+  const managerAgreement = input.managerAgreement;
   if (!UUID.test(leadId) || !Number.isSafeInteger(expectedVersion) || Number(expectedVersion) < 1) throw new ValidationError({ input: "invalid" });
   if (assignedTo !== null && (typeof assignedTo !== "string" || !UUID.test(assignedTo))) throw new ValidationError({ assignedTo: "invalid" });
   if (nextAction !== null && !(LEAD_NEXT_ACTIONS as readonly unknown[]).includes(nextAction)) throw new ValidationError({ nextAction: "invalid" });
@@ -83,7 +86,11 @@ export function parseLeadWorkflowUpdate(value: unknown): LeadWorkflowUpdateInput
   const local = followUpAtLocal as string | null;
   if ((nextAction === null) !== (local === null)) throw new ValidationError({ followUpAt: "action_and_time_required_together" });
   if (local !== null) almatyLocalDateTimeToInstant(local);
-  return { leadId, expectedVersion: Number(expectedVersion), assignedTo: assignedTo as string | null, nextAction: nextAction as LeadNextAction | null, followUpAtLocal: local };
+  let agreement: string | null | undefined;
+  if (managerAgreement === undefined || managerAgreement === null) agreement = managerAgreement;
+  else if (typeof managerAgreement !== "string" || managerAgreement.length > 1000) throw new ValidationError({ managerAgreement: "invalid" });
+  else agreement = managerAgreement.trim() || null;
+  return { leadId, expectedVersion: Number(expectedVersion), assignedTo: assignedTo as string | null, nextAction: nextAction as LeadNextAction | null, followUpAtLocal: local, managerAgreement: agreement };
 }
 
 export function parseLeadWorkflowClaim(value: unknown): LeadWorkflowClaimInput {
@@ -97,7 +104,7 @@ export function parseLeadWorkflowClaim(value: unknown): LeadWorkflowClaimInput {
 
 type WorkflowRow = {
   id: string; status: string; assigned_to: string | null; assigned_name: string | null; next_action: LeadNextAction | null;
-  follow_up_at: Date | null; workflow_version: number;
+  follow_up_at: Date | null; manager_agreement: string | null; workflow_version: number;
 };
 type AuditMeta = { ip?: string | null; userAgent?: string | null };
 
@@ -113,7 +120,7 @@ async function writeWorkflow(
 
   return withTx(pool, async (tx) => {
     const selected = await tx.query<WorkflowRow>(
-      `SELECT l.id, l.status, l.assigned_to, u.name AS assigned_name, l.next_action, l.follow_up_at, l.workflow_version
+      `SELECT l.id, l.status, l.assigned_to, u.name AS assigned_name, l.next_action, l.follow_up_at, l.manager_agreement, l.workflow_version
          FROM bb.lead_requests l LEFT JOIN bb.users u ON u.id = l.assigned_to WHERE l.id = $1 FOR UPDATE OF l`,
       [input.leadId],
     );
@@ -135,16 +142,17 @@ async function writeWorkflow(
     }
     const nextAction = mode === "claim" ? before.next_action : input.nextAction;
     const nextFollowUpAt = mode === "claim" ? before.follow_up_at : followUpAt;
+    const nextAgreement = mode === "claim" || input.managerAgreement === undefined ? before.manager_agreement : input.managerAgreement;
     const sameInstant = (a: Date | null, b: Date | null) => (a?.getTime() ?? null) === (b?.getTime() ?? null);
-    const unchanged = before.assigned_to === nextAssignedTo && before.next_action === nextAction && sameInstant(before.follow_up_at, nextFollowUpAt);
+    const unchanged = before.assigned_to === nextAssignedTo && before.next_action === nextAction && sameInstant(before.follow_up_at, nextFollowUpAt) && before.manager_agreement === nextAgreement;
     if (unchanged) return { version: before.workflow_version, assignedTo: before.assigned_to, nextAction: before.next_action, followUpAt: before.follow_up_at?.toISOString() ?? null };
 
-    const updated = await tx.query<{ workflow_version: number; assigned_to: string | null; next_action: LeadNextAction | null; follow_up_at: Date | null }>(
+    const updated = await tx.query<{ workflow_version: number; assigned_to: string | null; next_action: LeadNextAction | null; follow_up_at: Date | null; manager_agreement: string | null }>(
       `UPDATE bb.lead_requests
-          SET assigned_to = $3, next_action = $4, follow_up_at = $5, workflow_version = workflow_version + 1
+          SET assigned_to = $3, next_action = $4, follow_up_at = $5, manager_agreement = $6, workflow_version = workflow_version + 1
         WHERE id = $1 AND workflow_version = $2 AND status IN ('new', 'in_progress')
-        RETURNING workflow_version, assigned_to, next_action, follow_up_at`,
-      [input.leadId, input.expectedVersion, nextAssignedTo, nextAction, nextFollowUpAt],
+        RETURNING workflow_version, assigned_to, next_action, follow_up_at, manager_agreement`,
+      [input.leadId, input.expectedVersion, nextAssignedTo, nextAction, nextFollowUpAt, nextAgreement],
     );
     if (!updated.rows[0]) throw new ConflictError("stale_update");
     const after = updated.rows[0];
@@ -154,7 +162,7 @@ async function writeWorkflow(
       entityType: "lead_request",
       entityId: input.leadId,
       before: { assignedTo: before.assigned_to, assigneeName: before.assigned_name, nextAction: before.next_action, followUpAt: before.follow_up_at?.toISOString() ?? null, version: before.workflow_version },
-      after: { assignedTo: after.assigned_to, assigneeName: nextAssignedName, nextAction: after.next_action, followUpAt: after.follow_up_at?.toISOString() ?? null, version: after.workflow_version },
+      after: { assignedTo: after.assigned_to, assigneeName: nextAssignedName, nextAction: after.next_action, followUpAt: after.follow_up_at?.toISOString() ?? null, version: after.workflow_version, agreementChanged: before.manager_agreement !== after.manager_agreement },
       ...meta,
     });
     return { version: after.workflow_version, assignedTo: after.assigned_to, nextAction: after.next_action, followUpAt: after.follow_up_at?.toISOString() ?? null };
@@ -174,8 +182,8 @@ export async function claimLead(pool: Pool, actor: Actor, rawInput: unknown, met
 export interface LeadAssignee { id: string; name: string; role: "owner" | "manager" }
 export interface LeadWorkflowHistory {
   id: number; at: Date; actorName: string | null; action: "lead.claimed" | "lead.workflow_updated";
-  before: { assignedTo: string | null; assigneeName: string | null; nextAction: LeadNextAction | null; followUpAt: string | null };
-  after: { assignedTo: string | null; assigneeName: string | null; nextAction: LeadNextAction | null; followUpAt: string | null };
+  before: { assignedTo: string | null; assigneeName: string | null; nextAction: LeadNextAction | null; followUpAt: string | null; agreementChanged?: boolean };
+  after: { assignedTo: string | null; assigneeName: string | null; nextAction: LeadNextAction | null; followUpAt: string | null; agreementChanged?: boolean };
 }
 export interface LeadWorkflowContext { assignees: LeadAssignee[]; history: LeadWorkflowHistory[] }
 
@@ -186,6 +194,7 @@ function auditSnapshot(value: unknown): LeadWorkflowHistory["before"] {
     assigneeName: typeof v.assigneeName === "string" ? v.assigneeName : null,
     nextAction: typeof v.nextAction === "string" && (LEAD_NEXT_ACTIONS as readonly string[]).includes(v.nextAction) ? v.nextAction as LeadNextAction : null,
     followUpAt: typeof v.followUpAt === "string" ? v.followUpAt : null,
+    ...(v.agreementChanged === true ? { agreementChanged: true } : {}),
   };
 }
 

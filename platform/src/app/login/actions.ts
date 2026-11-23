@@ -26,9 +26,10 @@ export async function login(_prev: LoginState | undefined, formData: FormData): 
   const parsed = schema.safeParse({ email: formData.get("email"), password: formData.get("password") });
   if (!parsed.success) return { error: "Введите e-mail и пароль." };
   const meta = await requestMeta();
+  const rememberDevice = formData.get("rememberDevice") === "on";
   const result = legacyBridgeEnabled()
-    ? await bridgeLogin({ ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired })
-    : await authenticate(getPool(), { ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired });
+    ? await bridgeLogin({ ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired, rememberDevice })
+    : await authenticate(getPool(), { ...parsed.data, ip: meta.ip, userAgent: meta.userAgent, mfaRequired, rememberDevice });
   if (!result.ok) {
     if (result.reason === "locked") {
       return { error: `Слишком много неудачных попыток. Повторите через ${Math.max(1, Math.ceil((result.retryAfterSeconds ?? 60) / 60))} мин.` };
