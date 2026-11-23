@@ -1,7 +1,7 @@
 import "server-only";
-import { almatyWindow, CLOSED_REQUEST_STATUSES, windowOverlapsRoom } from "../core/booking-calendar.ts";
+import { createHash } from "node:crypto";
+import { almatyWindow, windowOverlapsRoom } from "../core/booking-calendar.ts";
 import { FastApiCrmConfigurationError, FastApiCrmError, type FastApiCrmClient } from "./fastapi-crm.ts";
-import { samePhone } from "../core/booking-calendar.ts";
 
 /**
  * The booking steps the calendar performs, as plain functions over the FastAPI client. The server actions wrap them with
@@ -12,23 +12,24 @@ import { samePhone } from "../core/booking-calendar.ts";
  */
 
 /** The methods the flows use. A test can pass a fake with only these. */
-export type BookingWriter = Pick<FastApiCrmClient, "getBookingTimeline" | "createStaffRequest" | "recordManualPayment" | "confirmBooking" | "listLeads" | "getBirthdayLead">;
+export type BookingWriter = Pick<FastApiCrmClient, "getBookingTimeline" | "createStaffRequest" | "recordManualPaymentAndRead" | "confirmBooking" | "getBirthdayLead">;
 
-export type NewBookingInput = {
+export type CreateBookingRequestInput = {
   branchId: string;
-  date: string;
-  roomId: string;
-  startTime: string;
+  requestedDate: string;
   packageId: string;
   customerName: string;
   phone: string;
   guestCount?: number;
-  agreedPriceKzt: number;
-  prepaymentKzt: number;
-  prepaymentMethod: "cash" | "card_terminal" | "bank_transfer" | "other_manual";
   note?: string;
-  /** Booking V2 card fields recorded with the booking (all optional: the card is filled gradually). */
-  card?: Record<string, unknown>;
+  idempotencyKey: string;
+};
+
+export type RecordPrepaymentInput = {
+  requestId: string;
+  amountKzt: number;
+  method: "cash" | "card_terminal" | "bank_transfer" | "other_manual";
+  note?: string;
   idempotencyKey: string;
 };
 
@@ -40,19 +41,22 @@ export type ConfirmPaidInput = {
   startTime: string;
   packageId: string;
   agreedPriceKzt: number;
+  note?: string;
   card?: Record<string, unknown>;
   idempotencyKey: string;
-};
-
-export type ContinueRequestInput = ConfirmPaidInput & {
-  prepaymentKzt: number;
-  prepaymentMethod: "cash" | "card_terminal" | "bank_transfer" | "other_manual";
-  note?: string;
 };
 
 export type FlowResult =
   | { ok: true; reservationId: string; requestId: string }
   | { ok: false; code: string; requestId: string | null };
+
+export type RequestFlowResult =
+  | { ok: true; requestId: string }
+  | { ok: false; code: string; requestId: null };
+
+export type PrepaymentFlowResult =
+  | { ok: true; requestId: string; amountKzt: number; alreadyRecorded: boolean }
+  | { ok: false; code: string; requestId: string };
 
 const KNOWN_ERRORS = new Set([
   "time_conflict",
@@ -65,6 +69,9 @@ const KNOWN_ERRORS = new Set([
   "birthday_prepayment_required",
   "birthday_request_not_bookable",
   "birthday_request_not_payable",
+  "payment_confirmation_required",
+  "payment_unverified",
+  "payment_amount_mismatch",
   "request_already_booked",
   "reservation_not_found",
   "reservation_already_released",
@@ -125,66 +132,53 @@ export async function precheckRoom(client: BookingWriter, branchId: string, date
   if (windowOverlapsRoom(occupied, roomId, startIso, newOccupiedEnd)) throw new FastApiCrmError(409, "time_conflict", "precheck");
 }
 
-const CLOSED_LEAD_STATUSES = CLOSED_REQUEST_STATUSES;
-
-/**
- * The request id of a paid, unconfirmed request for the same phone, branch and date, created in the last 24 hours, or null.
- * It covers a response lost after the manual payment was recorded: the manager reloads and tries again, and a second request and
- * a second payment must not be created. Older or different-date requests do not block a new booking. The FastAPI detail decides.
- */
-export async function findPaidUnconfirmedRequest(client: BookingWriter, branchId: string, phone: string, date: string, today: string, nowMs = Date.now()): Promise<string | null> {
-  const from = new Date(`${today}T00:00:00Z`);
-  from.setUTCDate(from.getUTCDate() - 2);
-  const list = await client.listLeads({ branchId, createdFrom: from.toISOString().slice(0, 10) });
-  for (const item of list.items) {
-    if (item.type !== "birthday_request" || CLOSED_LEAD_STATUSES.has(item.status) || !samePhone(item.phone, phone)) continue;
-    if (item.requestedDate !== date) continue;
-    if (nowMs - Date.parse(item.createdAt) > 24 * 60 * 60 * 1000) continue;
-    const lead = await client.getBirthdayLead(item.id);
-    if (lead.bookedAt === null && lead.manualPaymentFactStatus === "prepaid" && lead.manualPaymentFactAmountKzt > 0) return item.id;
-  }
-  return null;
-}
-
-/** Request, then the manual prepayment, then the confirmation. Each step has its own derived idempotency key. */
-export async function createBookingFlow(client: BookingWriter, input: NewBookingInput, today: string): Promise<FlowResult> {
-  let requestId: string | null = null;
+/** Creating a request never writes money or occupies a room. Booking is a later, separate action after recorded prepayment. */
+export async function createBookingRequestFlow(client: BookingWriter, input: CreateBookingRequestInput): Promise<RequestFlowResult> {
   try {
-    await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
-    const pending = await findPaidUnconfirmedRequest(client, input.branchId, input.phone, input.date, today);
-    if (pending) return { ok: false, code: "paid_request_pending", requestId: pending };
     const request = await client.createStaffRequest({
       branchId: input.branchId,
       packageId: input.packageId,
       customerName: input.customerName,
       phone: input.phone,
       guestCount: input.guestCount,
-      requestedDate: input.date,
+      requestedDate: input.requestedDate,
       notes: input.note,
       idempotencyKey: `${input.idempotencyKey}:request`,
     });
-    requestId = request.id;
-    await client.recordManualPayment(request.id, {
-      amountKzt: input.prepaymentKzt,
-      method: input.prepaymentMethod,
+    return { ok: true, requestId: request.id };
+  } catch (error) {
+    if (isUnauthorized(error)) throw error;
+    return { ok: false, code: failureCode(error), requestId: null };
+  }
+}
+
+/** Record an explicitly attested, already received manual prepayment; never creates or confirms a reservation. */
+export async function recordManualPrepaymentFlow(client: BookingWriter, input: RecordPrepaymentInput): Promise<PrepaymentFlowResult> {
+  try {
+    if (input.amountKzt !== 10_000) return { ok: false, code: "payment_amount_mismatch", requestId: input.requestId };
+    const lead = await client.getBirthdayLead(input.requestId);
+    if (lead.bookedAt !== null) return { ok: false, code: "request_already_booked", requestId: input.requestId };
+    if (!(["new", "in_progress"] as string[]).includes(lead.status)) return { ok: false, code: "birthday_request_not_payable", requestId: input.requestId };
+    if (lead.manualPaymentFactStatus === "prepaid" && lead.manualPaymentFactAmountKzt > 0) {
+      return lead.manualPaymentFactAmountKzt === 10_000
+        ? { ok: true, requestId: input.requestId, amountKzt: lead.manualPaymentFactAmountKzt, alreadyRecorded: true }
+        : { ok: false, code: "payment_amount_mismatch", requestId: input.requestId };
+    }
+
+    const { lead: verified } = await client.recordManualPaymentAndRead(input.requestId, {
+      amountKzt: input.amountKzt,
+      method: input.method,
       idempotencyKey: `${input.idempotencyKey}:payment`,
       note: input.note,
     });
-    const confirmed = await client.confirmBooking({
-      requestId: request.id,
-      bookingDate: input.date,
-      roomId: input.roomId,
-      startTime: input.startTime,
-      packageId: input.packageId,
-      agreedPriceKzt: input.agreedPriceKzt,
-      idempotencyKey: `${input.idempotencyKey}:confirm`,
-      note: input.note,
-      ...(input.card ? { card: input.card } : {}),
-    });
-    return settled(confirmed, requestId);
+    const state = verified as typeof lead;
+    if (state.id !== input.requestId || state.manualPaymentFactStatus !== "prepaid" || state.manualPaymentFactAmountKzt !== input.amountKzt) {
+      return { ok: false, code: "payment_unverified", requestId: input.requestId };
+    }
+    return { ok: true, requestId: input.requestId, amountKzt: state.manualPaymentFactAmountKzt, alreadyRecorded: false };
   } catch (error) {
     if (isUnauthorized(error)) throw error;
-    return { ok: false, code: failureCode(error), requestId };
+    return { ok: false, code: failureCode(error), requestId: input.requestId };
   }
 }
 
@@ -194,6 +188,12 @@ export async function createBookingFlow(client: BookingWriter, input: NewBooking
  */
 export async function confirmPaidRequestFlow(client: BookingWriter, input: ConfirmPaidInput): Promise<FlowResult> {
   try {
+    const lead = await client.getBirthdayLead(input.requestId);
+    if (lead.bookedAt !== null) return { ok: false, code: "request_already_booked", requestId: input.requestId };
+    if (!(lead.status === "new" || lead.status === "in_progress")) return { ok: false, code: "birthday_request_not_bookable", requestId: input.requestId };
+    if (lead.manualPaymentFactStatus !== "prepaid" || lead.manualPaymentFactAmountKzt !== 10_000) {
+      return { ok: false, code: "birthday_prepayment_required", requestId: input.requestId };
+    }
     await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
     const confirmed = await client.confirmBooking({
       requestId: input.requestId,
@@ -202,7 +202,11 @@ export async function confirmPaidRequestFlow(client: BookingWriter, input: Confi
       startTime: input.startTime,
       packageId: input.packageId,
       agreedPriceKzt: input.agreedPriceKzt,
-      idempotencyKey: `${input.idempotencyKey}:confirm`,
+      note: input.note,
+      // A failed room conflict must not pin the request to the original slot. Reuse the same key for an
+      // identical retry (including a lost success response), but derive a new key when the manager picks
+      // another target. The bridge still owns the authoritative idempotency and booking transaction.
+      idempotencyKey: confirmationIdempotencyKey(input),
       ...(input.card ? { card: input.card } : {}),
     });
     return settled(confirmed, input.requestId);
@@ -212,41 +216,19 @@ export async function confirmPaidRequestFlow(client: BookingWriter, input: Confi
   }
 }
 
-/**
- * Books an EXISTING request (the one the manager opened in "Заявки"): it never creates a request. If the manual prepayment is not
- * recorded yet it records it once (idempotent per request), then confirms. A request that is already booked is refused, so
- * continuing the same request twice can never produce two bookings.
- */
-export async function continueRequestFlow(client: BookingWriter, input: ContinueRequestInput): Promise<FlowResult> {
-  try {
-    const lead = await client.getBirthdayLead(input.requestId);
-    if (lead.bookedAt != null) return { ok: false, code: "request_already_booked", requestId: input.requestId };
-    await precheckRoom(client, input.branchId, input.date, input.roomId, input.startTime);
-    const prepaid = lead.manualPaymentFactStatus === "prepaid" && lead.manualPaymentFactAmountKzt > 0;
-    if (!prepaid) {
-      await client.recordManualPayment(input.requestId, {
-        amountKzt: input.prepaymentKzt,
-        method: input.prepaymentMethod,
-        idempotencyKey: `${input.idempotencyKey}:payment`,
-        note: input.note,
-      });
-    }
-    const confirmed = await client.confirmBooking({
-      requestId: input.requestId,
-      bookingDate: input.date,
-      roomId: input.roomId,
-      startTime: input.startTime,
-      packageId: input.packageId,
-      agreedPriceKzt: input.agreedPriceKzt,
-      idempotencyKey: `${input.idempotencyKey}:confirm`,
-      note: input.note,
-      ...(input.card ? { card: input.card } : {}),
-    });
-    return settled(confirmed, input.requestId);
-  } catch (error) {
-    if (isUnauthorized(error)) throw error;
-    return { ok: false, code: failureCode(error), requestId: input.requestId };
-  }
+function confirmationIdempotencyKey(input: ConfirmPaidInput): string {
+  const target = createHash("sha256").update(JSON.stringify({
+    requestId: input.requestId,
+    branchId: input.branchId,
+    date: input.date,
+    roomId: input.roomId,
+    startTime: input.startTime,
+    packageId: input.packageId,
+    agreedPriceKzt: input.agreedPriceKzt,
+    note: input.note ?? null,
+    card: input.card ?? null,
+  })).digest("hex").slice(0, 24);
+  return `${input.idempotencyKey}:confirm:${target}`;
 }
 
 function settled(confirmed: unknown, requestId: string): FlowResult {
