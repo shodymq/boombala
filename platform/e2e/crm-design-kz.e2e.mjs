@@ -374,16 +374,40 @@ try {
     ok(blocks === 1, "the real block of that day is drawn on the timeline");
     ok(/0 броней/.test(await manager.locator("[data-summary-counts]").innerText()), "the day header says 0 bookings before we book");
     // The drawer form is intentionally identified by its existing-request field; no extra UI test hook is needed.
-    const form = manager.locator('form').filter({ has: manager.locator('input[name="requestId"]') });
-    ok((await form.count()) === 1, "the booking form belongs to the existing request");
-    ok(/Гость 130/.test(await form.innerText()) && /\+7702/.test(await form.innerText()), "customer data comes from the request, nothing is typed twice");
+    const form = manager.locator('form[aria-label="Фиксация полученной предоплаты"]');
+    ok((await form.count()) === 1, "the payment form belongs to the existing request");
+    const drawer = manager.locator('[role="dialog"]');
+    ok(/Гость 130/.test(await drawer.innerText()) && /\+7702/.test(await drawer.innerText()), "customer data comes from the request, nothing is typed twice");
     ok((await form.locator('input[name="requestId"]').inputValue()) === targetId, "the form carries the request id");
     ok((await form.locator('input[name="customerName"]').count()) === 0, "there is no new-customer field: no new request can be created");
-    await shot(manager, "04-continue-form");
-    await form.locator('select[name="roomId"]').selectOption({ label: rooms[0].name });
-    await form.locator('input[name="startTime"]').fill("14:00");
-    await form.locator('input[name="agreedPriceKzt"]').fill("180000");
+    await shot(manager, "04-prepayment-form");
+    await form.locator('input[name="amountKzt"]').fill("10000");
+    await form.locator('select[name="prepaymentMethod"]').selectOption("cash");
+    await form.locator('input[name="receiptConfirmed"]').check();
     await form.locator('button[type="submit"]').click();
+    const paymentResult = await Promise.race([
+      manager.waitForURL(/[?&]payment=recorded/, { timeout: 30000 }).then(() => "redirect").catch(() => null),
+      manager.locator("[data-booking-action-error]").waitFor({ timeout: 30000 }).then(() => "action_error").catch(() => null),
+    ]);
+    if (paymentResult === "action_error") {
+      const code = await manager.locator("[data-booking-action-error]").getAttribute("data-booking-action-error");
+      ok(false, `manual prepayment Server Action returned ${code ?? "an unclassified error"}`);
+      throw new Error(`manual prepayment Server Action returned ${code ?? "an unclassified error"}`);
+    } else {
+      ok(paymentResult === "redirect", "manual prepayment Server Action completed with a read-after-write redirect");
+      if (paymentResult !== "redirect") throw new Error("manual prepayment Server Action had no observable result");
+    }
+    await manager.waitForLoadState("networkidle");
+    const paid = manager.locator('[role="dialog"] form[aria-label="Подтверждение оплаченной заявки"]');
+    const paymentFacts = await dbCount("SELECT count(*)::int n FROM bb.manual_payment_facts WHERE lead_request_id=$1", [targetId]);
+    const reservationsBeforeConfirmation = await dbCount("SELECT count(*)::int n FROM bb.slot_reservations WHERE lead_request_id=$1", [targetId]);
+    ok(paymentFacts === 1 && reservationsBeforeConfirmation === 0, "the real 10,000 ₸ receipt fact is recorded once and does not occupy a room");
+    ok((await paid.count()) === 1 && (await paid.locator('input[name="requestId"]').inputValue()) === targetId, "after payment read-back the same request opens the separate room-confirmation step");
+    await shot(manager, "04-paid-confirmation-form");
+    await paid.locator('select[name="roomId"]').selectOption({ label: rooms[0].name });
+    await paid.locator('input[name="startTime"]').fill("14:00");
+    await paid.locator('input[name="agreedPriceKzt"]').fill("180000");
+    await paid.locator('button[type="submit"]').click();
     const actionResult = await Promise.race([
       manager.waitForURL(/[?&](ok|error)=/, { timeout: 30000 }).then(() => "redirect").catch(() => null),
       manager.locator("[data-booking-action-error]").waitFor({ timeout: 30000 }).then(() => "action_error").catch(() => null),
@@ -392,10 +416,9 @@ try {
       const code = await manager.locator("[data-booking-action-error]").getAttribute("data-booking-action-error");
       ok(false, `booking Server Action returned ${code ?? "an unclassified error"}`);
       throw new Error(`booking Server Action returned ${code ?? "an unclassified error"}`);
-    } else {
-      ok(actionResult === "redirect", "booking Server Action completed with a read-after-write redirect");
-      if (actionResult !== "redirect") throw new Error("booking Server Action had no observable result");
     }
+    ok(actionResult === "redirect", "booking Server Action completed with a read-after-write redirect");
+    if (actionResult !== "redirect") throw new Error("booking Server Action had no observable result");
     await manager.waitForLoadState("networkidle");
     ok(/ok=booked/.test(manager.url()), `booking succeeded (${manager.url().split("?")[1]?.slice(0, 80)})`);
     ok((await manager.locator('[role="status"]', { hasText: "Проверено по данным системы" }).count()) === 1, "success is verified by reading the system back");
