@@ -120,16 +120,18 @@ function reservationIdOf(value: unknown): string | null {
 }
 
 /**
- * A UX hint only: refuses a window that overlaps a known occupancy (party plus buffer) before anything is written. PostgreSQL
- * stays the authority; a race between this read and the confirmation still ends in the kernel's time_conflict.
+ * A UX hint only: refuses a window that overlaps a known four-hour interval before anything is written. There is no buffer.
+ * PostgreSQL stays the authority; a race between this read and the confirmation still ends in the kernel's time_conflict.
  */
 export async function precheckRoom(client: BookingWriter, branchId: string, date: string, roomId: string, startTime: string): Promise<void> {
   const timeline = await client.getBookingTimeline(branchId, date);
-  if (timeline.rooms?.find((room) => room.id === roomId)?.occupancyMode === "shared") return;
+  if (timeline.branchId !== branchId) throw new FastApiCrmError(403, "branch_access_denied", "timeline branch mismatch");
+  const room = timeline.rooms?.find((item) => item.id === roomId);
+  if (!room) throw new FastApiCrmError(403, "branch_access_denied", "room is outside the selected branch");
+  if (room.occupancyMode === "shared") return;
   const { startIso, endIso } = almatyWindow(date, startTime);
-  const newOccupiedEnd = new Date(Date.parse(endIso) + timeline.bufferMinutes * 60_000).toISOString();
-  const occupied = timeline.reservations.map((r) => ({ roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt, status: r.status }));
-  if (windowOverlapsRoom(occupied, roomId, startIso, newOccupiedEnd)) throw new FastApiCrmError(409, "time_conflict", "precheck");
+  const occupied = timeline.reservations.map((r) => ({ roomId: r.roomId, startsAt: r.startsAt, endsAt: r.endsAt, status: r.status }));
+  if (windowOverlapsRoom(occupied, roomId, startIso, endIso)) throw new FastApiCrmError(409, "time_conflict", "precheck");
 }
 
 /** Creating a request never writes money or occupies a room. Booking is a later, separate action after recorded prepayment. */

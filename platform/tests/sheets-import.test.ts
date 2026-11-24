@@ -20,12 +20,18 @@ function raw(over: Partial<RawRow> = {}): RawRow {
 const run = (rows: RawRow[], crm = EMPTY_CRM) => reconcile(rows.map((r, i) => normalizeRow(r, { spreadsheetId: SID, sheetId: 1, rowNumber: i + 2 }, CATALOG)), crm, TODAY);
 
 describe("sheets import: normalisation", () => {
-  it("accepts any valid start minute exactly as written: 13:15, 13:30, 13:45, 14:30, 16:40, 17:30", () => {
-    for (const t of ["13:00", "13:15", "13:30", "13:45", "14:30", "16:40", "17:30"]) {
+  it("accepts whole-hour starts and sends 13:45/16:15 to manual review without rounding", () => {
+    for (const t of ["13:00", "14:00", "16:00", "17:00"]) {
       const [r] = run([raw({ time: t })]);
       assert.equal(r.time, t);
-      assert.ok(!r.reasons.some((x) => (x as string).includes("whole_hour")));
-      assert.equal(r.status, "CANDIDATE", `${t} must not be pushed to review because of its minutes`);
+      assert.ok(!r.reasons.includes("start_not_whole_hour"));
+      assert.equal(r.status, "CANDIDATE");
+    }
+    for (const t of ["13:45", "16:15"]) {
+      const [r] = run([raw({ time: t })]);
+      assert.equal(r.time, t, "source time remains exact");
+      assert.ok(r.reasons.includes("start_not_whole_hour"));
+      assert.equal(r.status, "NEEDS_REVIEW", `${t} must not be imported into the booking writer`);
     }
   });
   it("still rejects impossible times", () => {
@@ -84,16 +90,20 @@ describe("sheets import: reconciliation", () => {
     const ok = run([raw({ time: "10:00" }), raw({ time: "14:00", phone: "8 707 999 88 77", client: "Другой" })]);
     assert.ok(ok.every((r) => !r.reasons.includes("overlap_in_sheet")), "back-to-back four-hour events do not overlap");
   });
-  it("adjacent bookings to the minute are allowed, one minute of overlap is not", () => {
+  it("allows adjacent whole-hour bookings and flags an overlapping whole-hour start", () => {
     const other = { phone: "8 707 999 88 77", client: "Другой" };
-    const adj = run([raw({ time: "13:15" }), raw({ time: "17:15", ...other })]);
+    const adj = run([raw({ time: "13:00" }), raw({ time: "17:00", ...other })]);
     assert.ok(adj.every((r) => r.status === "CANDIDATE"));
-    const ov = run([raw({ time: "13:15" }), raw({ time: "17:14", ...other })]);
+    const ov = run([raw({ time: "13:00" }), raw({ time: "16:00", ...other })]);
     assert.ok(ov.every((r) => r.reasons.includes("overlap_in_sheet") && r.status === "NEEDS_REVIEW"));
-    const night = run([raw({ time: "13:30" }), raw({ time: "16:40", ...other })]);
+    const night = run([raw({ time: "13:00" }), raw({ time: "16:00", ...other })]);
     assert.ok(night.every((r) => r.reasons.includes("overlap_in_sheet")));
-    const otherRoom = run([raw({ time: "13:30" }), raw({ time: "16:40", room: "Джунгли", ...other })]);
+    const otherRoom = run([raw({ time: "13:00" }), raw({ time: "16:00", room: "Джунгли", ...other })]);
     assert.ok(otherRoom.every((r) => r.status === "CANDIDATE"), "different rooms never conflict");
+    const offHour = run([raw({ time: "13:45" })])[0];
+    assert.equal(offHour.time, "13:45", "the importer never rounds the source time");
+    assert.ok(offHour.reasons.includes("start_not_whole_hour"));
+    assert.equal(offHour.status, "NEEDS_REVIEW");
   });
   it("checks branch working hours only when they are given; the four-hour window must fit", () => {
     const hours = { workingHours: { openMin: 10 * 60, closeMin: 23 * 60 } };
@@ -101,7 +111,8 @@ describe("sheets import: reconciliation", () => {
       .map((r, i) => normalizeRow(r, { spreadsheetId: SID, sheetId: 1, rowNumber: i + 2 }, CATALOG));
     reconcile(rows, EMPTY_CRM, TODAY, hours);
     assert.deepEqual(rows.map((r) => r.reasons.includes("outside_working_hours")), [true, false, true]);
-    assert.equal(run([raw({ time: "19:30" })])[0].status, "CANDIDATE", "no hours given: not checked");
+    assert.equal(run([raw({ time: "19:30" })])[0].status, "NEEDS_REVIEW", "working-hours checks are optional, but the whole-hour rule is not");
+    assert.equal(run([raw({ time: "19:00" })])[0].status, "CANDIDATE");
   });
   it("matches existing CRM records and reports conflicts instead of overwriting", () => {
     const crm: CrmSnapshot = {
@@ -151,12 +162,12 @@ describe("sheets import: reader", () => {
     assert.equal(r.spreadsheetTimeZone, "Europe/Moscow");
   });
   it("CSV goes through the same normalizer and reconciliation as the API and yields identical keys", async () => {
-    const csv = "\uFEFF" + [HEADER.join(";"), "20.11.2026;13:15;Стандарт;;Космос;\"К, Клиент\";8 707 111 22 33;Р;7;20000;10;5", ";;;;;;;;;;;", "21.11.2026;16:40;Стандарт;;Джунгли;К2;8 707 111 22 44;;;;;"].join("\r\n");
+    const csv = "\uFEFF" + [HEADER.join(";"), "20.11.2026;13:00;Стандарт;;Космос;\"К, Клиент\";8 707 111 22 33;Р;7;20000;10;5", ";;;;;;;;;;;", "21.11.2026;16:00;Стандарт;;Джунгли;К2;8 707 111 22 44;;;;;"].join("\r\n");
     const c = readCsv(csv, { spreadsheetId: SID, sheetId: 77 });
     assert.equal(c.rows.length, 2);
     assert.equal(c.blankRows, 1);
     const viaCsv = reconcile(c.rows.map((r) => normalizeRow(r.raw, r.source, CATALOG)), EMPTY_CRM, TODAY);
-    assert.deepEqual(viaCsv.map((r) => r.time), ["13:15", "16:40"]);
+    assert.deepEqual(viaCsv.map((r) => r.time), ["13:00", "16:00"]);
     assert.ok(viaCsv.every((r) => r.status === "CANDIDATE"));
     assert.equal(viaCsv[0].customerName, "К, Клиент");
     const api = await readSheet({ getMeta: async () => ({ timeZone: "Europe/Moscow", sheets: [{ sheetId: 77, title: "x", rowCount: 9 }] }), getValues: async () => parseCsv(csv) }, SID);
@@ -201,8 +212,8 @@ describe("sheets import: staging against a real PostgreSQL", () => {
     const mk = (over: Partial<RawRow>, rowNumber: number) => normalizeRow(raw({ room: roomName, package: pkgName, ...over }), { spreadsheetId: SID, sheetId: 1, rowNumber }, catalog);
     const crm = await loadCrmSnapshot(db.pool);
     const batch = (rows: ReturnType<typeof mk>[]) => reconcile(rows, crm, TODAY);
-    const a = (n = 2) => mk({ date: "20.11.2026", time: "13:15" }, n);
-    const b = (n = 3, pre = "5 000") => mk({ date: "21.11.2026", time: "16:40", phone: "8 707 222 33 44", client: "Второй", prepayment: pre }, n);
+    const a = (n = 2) => mk({ date: "20.11.2026", time: "13:00" }, n);
+    const b = (n = 3, pre = "5 000") => mk({ date: "21.11.2026", time: "16:00", phone: "8 707 222 33 44", client: "Второй", prepayment: pre }, n);
 
     const first = await stageRows(db.pool, SID, batch([a(), b()]));
     assert.deepEqual([first.inserted, first.updated, first.unchanged], [2, 0, 0]);
@@ -259,9 +270,10 @@ describe("sheets import: formats seen in the real sheet (synthetic examples)", (
     assert.ok(r.reasons.includes("count_approximate"), "2-3 adults is approximate, not guessed");
     assert.equal(r.adults, null);
   });
-  it("resolves Russian room spellings and the Boom Bala package, keeps 16:40, ignores bidi marks in phones", () => {
+  it("resolves Russian room spellings and the Boom Bala package, preserves 16:40 for review, ignores bidi marks in phones", () => {
     const r = final(real({ package: "Boom bala party " }));
-    assert.deepEqual([r.roomId, r.packageId, r.time, r.phoneE164, r.status], ["rapunzel-room", "boom-party", "16:40", "+77016000246", "CANDIDATE"]);
+    assert.deepEqual([r.roomId, r.packageId, r.time, r.phoneE164, r.status], ["rapunzel-room", "boom-party", "16:40", "+77016000246", "NEEDS_REVIEW"]);
+    assert.ok(r.reasons.includes("start_not_whole_hour"));
   });
   it("amounts: 10к, 10к нал, 20к перевод Сабина, 'по факту' (no prepayment), free text stays unparsed", () => {
     assert.deepEqual(["10к", "10 к", "10кнал", "10к нал", "20к перевод Сабина", "10к подтверждено"].map((x) => parseAmount(x)), [10000, 10000, 10000, 10000, 20000, 10000]);
@@ -276,10 +288,11 @@ describe("sheets import: formats seen in the real sheet (synthetic examples)", (
     assert.equal(final(real({ package: "Magic party — уточнить" })).status, "NEEDS_REVIEW");
     assert.equal(final(real({ room: "Общий зал — 10 мест (согласовать)" })).status, "NEEDS_REVIEW");
   });
-  it("two children in the age cell are not guessed; approximate counts do not block a candidate", () => {
-    const r = final(real({ age: "8 лет, 6 лет", children: "≈15" }));
+  it("two children in the age cell are not guessed; approximate counts do not block a valid candidate", () => {
+    const r = final(real({ time: "16:00", age: "8 лет, 6 лет", children: "≈15" }));
     assert.equal(r.childAge, null);
     assert.equal(r.status, "CANDIDATE");
+    assert.ok(!r.reasons.includes("start_not_whole_hour"));
   });
   it("a row with no phone, client or time is review, never a candidate", () => {
     assert.equal(final(real({ phone: "", client: "", time: "" })).status, "NEEDS_REVIEW");

@@ -132,6 +132,13 @@ async function createRequest(page, { name, phone, room, start, pkg = "star-party
     ok(await time.evaluate((el) => !el.validity.valid && !el.form.checkValidity()), "the mobile form rejects a non-hour start before submission");
     checkedMobileTimeStep = true;
   }
+  await form.evaluate((el) => { el.noValidate = true; });
+  for (const invalidStart of ["13:45", "16:15"]) {
+    await form.locator('input[name="startTime"]').fill(invalidStart);
+    await form.getByRole("button", { name: "Создать заявку без оплаты" }).click();
+    await form.locator('[data-booking-action-error="invalid"]').waitFor();
+    ok(await requestIdOf(phone) === undefined, `Server Action rejects ${invalidStart} without creating a request`);
+  }
   await form.locator('input[name="startTime"]').fill(start);
   await form.locator('select[name="packageId"]').selectOption(pkg);
   await form.locator('input[name="guestCount"]').fill(String(guestCount));
@@ -173,7 +180,7 @@ async function attemptPayment(page, requestId, { amount = "10000", method = "cas
   return code;
 }
 async function confirmRequest(page, requestId, { room, start, pkg = "star-party", child, extra = {}, conflict = false }) {
-  const form = page.locator('form[aria-label="Подтверждение оплаченной заявки"]');
+  const form = page.getByRole("dialog").locator('form[aria-label="Подтверждение оплаченной заявки"]');
   await form.waitFor();
   await form.locator('input[name="date"]').fill(D);
   await form.locator('select[name="roomId"]').selectOption(room);
@@ -228,13 +235,17 @@ try {
     ok(overflow <= 1, `${width}px calendar has no horizontal overflow (actual ${overflow}px)`);
     if (width === 1440) await shot(anna, "06-desktop-calendar-1440");
     if (width === 320) await shot(anna, "00-mobile-calendar-320");
-    if (width === 390) {
+    if (width === 320 || width === 390) {
       const links = await anna.locator("nav[aria-label='Быстрая навигация'] a").evaluateAll((els) => els.map((el) => {
         const r = el.getBoundingClientRect();
         return { width: r.width, height: r.height };
       }));
-      ok(links.length === 4 && links.every((r) => r.width >= 44 && r.height >= 44), "mobile primary navigation has 44px touch targets");
-      await shot(anna, "00-mobile-calendar-390");
+      ok(links.length === 4 && links.every((r) => r.width >= 44 && r.height >= 44), `mobile primary navigation has 44px touch targets at ${width}px`);
+      await shot(anna, `00-mobile-calendar-${width}`);
+    }
+    if (width === 1440) {
+      const mobileNavDisplay = await anna.locator("nav[aria-label='Быстрая навигация']").evaluate((el) => getComputedStyle(el).display);
+      ok(mobileNavDisplay === "none", "mobile navigation is absent from the visible desktop layout");
     }
   }
   await anna.setViewportSize({ width: 390, height: 450 });
@@ -384,8 +395,9 @@ try {
   ok(await paymentFactCount(conflictRequest.requestId) === 1 && await activeBookingCount(conflictRequest.requestId) === 0, "explicit payment is retained while no room is occupied");
   await confirmRequest(anna, conflictRequest.requestId, { room: "ice-room", start: "16:00", conflict: true });
   ok(await paymentFactCount(conflictRequest.requestId) === 1 && await activeBookingCount(conflictRequest.requestId) === 0, "room conflict leaves one fact and no reservation");
-  await anna.locator('form[aria-label="Подтверждение оплаченной заявки"] select[name="roomId"]').selectOption("roblox-room");
-  await anna.locator('form[aria-label="Подтверждение оплаченной заявки"] input[name="startTime"]').fill("18:00");
+  const conflictConfirmationForm = anna.getByRole("dialog").locator('form[aria-label="Подтверждение оплаченной заявки"]');
+  await conflictConfirmationForm.locator('select[name="roomId"]').selectOption("roblox-room");
+  await conflictConfirmationForm.locator('input[name="startTime"]').fill("18:00");
   await anna.getByRole("button", { name: "Подтвердить бронь" }).click();
   await anna.waitForURL((u) => u.searchParams.get("ok") === "booked", { timeout: 20000 });
   ok(await paymentFactCount(conflictRequest.requestId) === 1 && await activeBookingCount(conflictRequest.requestId) === 1, "another free slot confirms using the original single fact");

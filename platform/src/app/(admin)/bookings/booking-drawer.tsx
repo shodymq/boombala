@@ -92,7 +92,6 @@ export function ReservationDetails({
         <Row term="Комната">{roomName}</Row>
         <Row term="Дата">{dayLabel}</Row>
         <Row term="Время">{clock(r.startsAt)}–{clock(r.endsAt)} (4 часа)</Row>
-        {r.occupiedEndsAt !== r.endsAt ? <Row term="Занято до">{clock(r.occupiedEndsAt)} (с подготовкой)</Row> : null}
         {r.sourceManaged && r.sourceDetails ? (
           <>
             {r.sourceDetails.childName ? <Row term="Именинник">{r.sourceDetails.childName}</Row> : null}

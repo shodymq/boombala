@@ -4,12 +4,8 @@
  */
 
 export const BOOKING_DURATION_MINUTES = 240;
-/**
- * Owner decision (2026-11): a party may start at ANY minute (HH:MM), is exactly 240 minutes long and has no buffer.
- * The form offers a 15-minute picker for speed and always allows manual entry to the minute. The authoritative booking
- * writer validates the same minute-precise contract and PostgreSQL remains the final overlap guard.
- */
-export const QUICK_STEP_MINUTES = 15;
+/** Birthday bookings start on a whole Almaty clock hour, last four hours, and have no buffer. */
+export const QUICK_STEP_MINUTES = 60;
 export const BUSINESS_TIMEZONE = "Asia/Almaty";
 
 const HHMM = /^(\d{2}):(\d{2})$/;
@@ -46,20 +42,20 @@ export function parseWorkingHours(text: string | null | undefined): WorkingWindo
   return { openMin, closeMin };
 }
 
-/** Quick-pick starts on a 15-minute step whose four-hour window ends inside working hours. Manual entry is never limited to these. */
-export function startOptions(window: WorkingWindow, step: number = QUICK_STEP_MINUTES): string[] {
+/** Starts on whole hours whose four-hour window fits inside working hours. */
+export function startOptions(window: WorkingWindow): string[] {
   const options: string[] = [];
-  const firstStart = Math.ceil(window.openMin / step) * step;
-  for (let t = firstStart; t + BOOKING_DURATION_MINUTES <= window.closeMin; t += step) {
+  const firstStart = Math.ceil(window.openMin / QUICK_STEP_MINUTES) * QUICK_STEP_MINUTES;
+  for (let t = firstStart; t + BOOKING_DURATION_MINUTES <= window.closeMin; t += QUICK_STEP_MINUTES) {
     options.push(formatMinutes(t));
   }
   return options;
 }
 
-/** Any valid HH:MM whose whole four-hour window fits in working hours. No rounding, no step. */
+/** A valid whole-hour start whose four-hour window fits in working hours. Invalid minutes are rejected, never rounded. */
 export function isBookableStart(startTime: string, window: WorkingWindow | null): boolean {
   const t = toMinutes(startTime);
-  if (t === null || window === null) return false;
+  if (t === null || t % 60 !== 0 || window === null) return false;
   return t >= window.openMin && t + BOOKING_DURATION_MINUTES <= window.closeMin;
 }
 

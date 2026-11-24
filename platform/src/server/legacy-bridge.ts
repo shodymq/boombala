@@ -326,7 +326,13 @@ function parseDate(value: unknown): string {
 function parseTime(value: unknown): string {
   const timeValue = text(value, 5);
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) throw new ValidationError({ startTime: "invalid" });
+  if (!timeValue.endsWith(":00")) throw new ValidationError({ startTime: "full_hour_required" });
   return timeValue;
+}
+function ensureKnownBranch(value: unknown): void {
+  // This legacy database currently exposes one branch. Refuse a caller-supplied foreign branch instead of silently
+  // writing to Almaty; a future multi-branch map must be introduced with its own explicit authorization checks.
+  if (value !== undefined && value !== null && value !== "almaty") throw new ValidationError({ branchId: "not_found" });
 }
 function almatyInterval(date: string, start: string): { startSql: string; endSql: string } {
   // Asia/Almaty is UTC+05:00. Keep the conversion explicit so the bridge
@@ -550,6 +556,7 @@ async function ensureIdempotent<T>(pool: Pool, actor: Actor, key: string, operat
 export async function bridgeCreateRequest(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session);
   if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  ensureKnownBranch(input.branchId);
   const key = text(input.idempotencyKey, 200);
   const date = parseDate(input.requestedDate);
   const name = text(input.customerName, 120);
@@ -572,6 +579,7 @@ export async function bridgeCreateRequest(pool: Pool, session: ValidSession, inp
 export async function bridgePayment(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session);
   if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  ensureKnownBranch(input.branchId);
   const requestId = text(input.requestId, 80);
   const key = text(input.idempotencyKey, 200);
   const amount = Number(input.amountKzt);
@@ -606,6 +614,7 @@ export async function bridgeRescheduleFromSheetSync(pool: Pool, actor: Actor, in
 }
 
 async function bridgeRescheduleWithActor(pool: Pool, actor: Actor, input: Record<string, unknown>, sourceSync: boolean, meta: { ip?: string | null; userAgent?: string | null }, syncRecord?: SheetSyncRecordInput) {
+  ensureKnownBranch(input.branchId);
   const key = text(input.idempotencyKey, 200); const id = text(input.reservationId, 80); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120);
   return ensureIdempotent(pool, actor, key, "reschedule", input, async (tx) => {
     if (!sourceSync && process.env.SHEETS_SYNC_ENABLED === "1") {
@@ -630,6 +639,7 @@ async function bridgeRescheduleWithActor(pool: Pool, actor: Actor, input: Record
 export async function bridgeConfirm(pool: Pool, session: ValidSession, input: Record<string, unknown>) {
   const actor = actorOf(session);
   if (!can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+  ensureKnownBranch(input.branchId);
   const leadId = text(input.requestId, 80); const key = text(input.idempotencyKey, 200); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120); const packageId = text(input.packageId, 120);
   const cardPatch = input.card === undefined ? {} : parseCardPatch(input.card);
   return ensureIdempotent(pool, actor, key, "confirm", input, async (tx) => {
@@ -695,6 +705,7 @@ export async function bridgeBlockFromSheetSync(pool: Pool, actor: Actor, input: 
 }
 
 async function bridgeBlockWithActor(pool: Pool, actor: Actor, input: Record<string, unknown>, sourceSync: boolean, meta: { ip?: string | null; userAgent?: string | null }, syncRecord?: SheetSyncRecordInput) {
+  ensureKnownBranch(input.branchId);
   const key = text(input.idempotencyKey, 200); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120); const { startSql, endSql } = almatyInterval(date, start);
   return ensureIdempotent(pool, actor, key, "block", input, async (tx) => {
     const row = await tx.query<{ id: string }>("INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block',$1,NULL,$2,$3,$4,$5,$6) RETURNING id", [date, roomId, text(input.reason, 300), actor.id, startSql, endSql]);

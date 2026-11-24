@@ -27,29 +27,30 @@ test("parses branch hours and refuses unknown or too-short ranges", () => {
   assert.equal(parseWorkingHours("10:00-13:00"), null, "less than four hours cannot hold a party");
 });
 
-test("quick starts use a 15-minute step and end inside working hours", () => {
-  const options = startOptions({ openMin: 600, closeMin: 1380 });
+test("quick starts use strict whole hours and end inside 10:00-22:00 working hours", () => {
+  const options = startOptions({ openMin: 600, closeMin: 1320 });
   assert.equal(options[0], "10:00");
-  assert.equal(options[1], "10:15");
-  assert.equal(options.at(-1), "19:00");
-  assert.equal(options.length, (1380 - 600 - 240) / 15 + 1);
+  assert.equal(options[1], "11:00");
+  assert.equal(options.at(-1), "18:00");
+  assert.equal(options.length, 9);
+  assert.ok(options.every((time) => time.endsWith(":00")));
 });
 
-test("a branch opening on a half-hour offers 10:30 and the exact minute", () => {
+test("a branch opening between hours offers only the next whole hour", () => {
   const window = { openMin: 10 * 60 + 30, closeMin: 22 * 60 + 30 };
   const options = startOptions(window);
-  assert.equal(options[0], "10:30");
-  assert.equal(options.at(-1), "18:30");
-  assert.equal(isBookableStart("10:30", window), true);
-  assert.equal(isBookableStart("10:29", window), false, "before opening");
+  assert.equal(options[0], "11:00");
+  assert.equal(options.at(-1), "18:00");
+  assert.equal(isBookableStart("10:30", window), false, "non-hour start is rejected");
+  assert.equal(isBookableStart("11:00", window), true);
+  assert.equal(isBookableStart("10:00", window), false, "before opening");
 });
 
-test("any valid minute is bookable when the whole window fits; nothing is rounded", () => {
-  const window = { openMin: 600, closeMin: 1380 };
-  for (const t of ["10:00", "11:15", "13:00", "13:30", "16:40", "17:07", "19:00"]) assert.equal(isBookableStart(t, window), true, t);
-  assert.equal(isBookableStart("19:01", window), false, "19:01 + 4h runs past closing");
+test("whole-hour start rule rejects 13:45 and 16:15 without rounding", () => {
+  const window = { openMin: 600, closeMin: 1320 };
+  for (const t of ["10:00", "11:00", "13:00", "14:00", "16:00", "18:00"]) assert.equal(isBookableStart(t, window), true, t);
+  for (const t of ["13:45", "16:15", "19:00", "09:00"]) assert.equal(isBookableStart(t, window), false, t);
   assert.equal(isBookableStart("20:00", window), false);
-  assert.equal(isBookableStart("09:59", window), false);
   assert.equal(isBookableStart("25:00", window), false, "not a time of day");
   assert.equal(isBookableStart("13:60", window), false);
   assert.equal(isBookableStart("14:00", null), false);

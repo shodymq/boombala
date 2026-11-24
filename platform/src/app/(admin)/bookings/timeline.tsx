@@ -45,7 +45,7 @@ export function DayTimeline({
 }) {
   const active = reservations.filter((r) => r.status !== "released");
   const exclusiveIds = new Set(rooms.filter((room) => room.occupancyMode !== "shared").map((room) => room.id));
-  const flagged = overlappingIds(active.filter((r) => exclusiveIds.has(r.roomId)).map((r) => ({ id: r.id, roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt })));
+  const flagged = overlappingIds(active.filter((r) => exclusiveIds.has(r.roomId)).map((r) => ({ id: r.id, roomId: r.roomId, startsAt: r.startsAt, endsAt: r.endsAt })));
   const marks: number[] = [];
   for (let m = axis.startMin; m <= axis.endMin; m += 60) marks.push(m);
   const closed = hours ? [axisRange(axis, axis.startMin, hours.openMin), axisRange(axis, hours.closeMin, axis.endMin)].filter((x) => x !== null) : [];
@@ -67,8 +67,8 @@ export function DayTimeline({
         {rooms.map((room) => {
           const items = active
             .filter((r) => r.roomId === room.id)
-            .map((r) => ({ r, span: axisSpan(axis, r.startsAt, r.endsAt), buffer: axisSpan(axis, r.endsAt, r.occupiedEndsAt) }))
-            .filter((x): x is { r: BookingTimelineReservation; span: { top: number; height: number }; buffer: { top: number; height: number } | null } => x.span !== null);
+            .map((r) => ({ r, span: axisSpan(axis, r.startsAt, r.endsAt) }))
+            .filter((x): x is { r: BookingTimelineReservation; span: { top: number; height: number } } => x.span !== null);
           const lanes = assignLanes(items.map((x) => ({ id: x.r.id, start: x.span.top, span: x.span.height })));
           const laneCount = Math.min(Math.max(1, ...[...lanes.values()]), 3);
           return (
@@ -77,7 +77,7 @@ export function DayTimeline({
               <div className={`relative ${heightClass(axis.minutes)} bg-paper`} role="list" aria-label={`Занятость: ${room.name}`}>
                 {closed.map((c, i) => (c ? <div key={i} aria-hidden="true" className={`absolute inset-x-0 ${topClass(c.top)} ${heightClass(c.height)} bg-line/50`} /> : null))}
                 {marks.map((m, i) => (i === 0 ? null : <div key={m} aria-hidden="true" className={`absolute inset-x-0 ${topClass(m - axis.startMin)} border-t border-grape-100`} />))}
-                {items.map(({ r, span, buffer }) => {
+                {items.map(({ r, span }) => {
                   const conflict = flagged.has(r.id);
                   const pay = paymentLabel(r, (n) => kzt.format(n));
                   const tone: Tone = conflict ? "conflict" : r.kind === "block" ? "block" : pay.tone === "prepaid" ? "confirmed" : "prepay";
@@ -115,7 +115,6 @@ export function DayTimeline({
                           </>
                         )}
                       </Link>
-                      {buffer ? <div aria-hidden="true" data-buffer={r.id} className={`absolute inset-x-1 z-0 ${topClass(buffer.top)} ${heightClass(buffer.height)} rounded border border-dashed border-muted bg-line/70`} /> : null}
                     </div>
                   );
                 })}
@@ -133,7 +132,7 @@ export function DayTimeline({
           if (nowMinute !== null && (Number(start.slice(0, 2)) * 60 + Number(start.slice(3)) <= nowMinute)) return false;
           if (room.occupancyMode === "shared") return true;
           const window = almatyWindow(date, start);
-          return !windowOverlapsRoom(active.map((r) => ({ roomId: r.roomId, startsAt: r.startsAt, endsAt: r.occupiedEndsAt, status: r.status })), room.id, window.startIso, window.endIso);
+          return !windowOverlapsRoom(active.map((r) => ({ roomId: r.roomId, startsAt: r.startsAt, endsAt: r.endsAt, status: r.status })), room.id, window.startIso, window.endIso);
         }) : [];
         const defaultStart = candidates[0] ?? null;
         return (

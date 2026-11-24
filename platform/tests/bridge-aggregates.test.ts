@@ -81,7 +81,7 @@ describe("aggregated bridge operations", () => {
   it("calendar.view: request, reservation and continuation lookups, with malformed ids ignored", async () => {
     const reservation = (await db.pool.query(
       `INSERT INTO bb.slot_reservations (kind, slot_date, slot_id, room_id, lead_request_id, contact_id, package_id, children, price_kzt, price_source, created_by, starts_at, ends_at)
-       SELECT 'booking', $1::date, NULL, $2, $3, l.contact_id, $4, 6, 1000, 'base', $5, ($1::date + time '14:25') AT TIME ZONE 'Asia/Almaty', ($1::date + time '18:25') AT TIME ZONE 'Asia/Almaty'
+       SELECT 'booking', $1::date, NULL, $2, $3, l.contact_id, $4, 6, 1000, 'base', $5, ($1::date + time '14:00') AT TIME ZONE 'Asia/Almaty', ($1::date + time '18:00') AT TIME ZONE 'Asia/Almaty'
          FROM bb.lead_requests l WHERE l.id = $3 RETURNING id`,
       [day, roomId, paidId, packageId, manager.user.id],
     )).rows[0].id as string;
@@ -104,7 +104,7 @@ describe("aggregated bridge operations", () => {
   it("calendar.view never serves stale availability: a new block shows on the very next call", async () => {
     const before = await calendarView(db.pool, manager, { date: plus(45) });
     assert.equal(before.timeline.reservations.length, 0);
-    await bridgeBlock(db.pool, manager, { idempotencyKey: `k-${randomUUID()}`, bookingDate: plus(45), roomId, startTime: "13:30", reason: "check" });
+    await bridgeBlock(db.pool, manager, { idempotencyKey: `k-${randomUUID()}`, bookingDate: plus(45), roomId, startTime: "13:00", reason: "check" });
     const after = await calendarView(db.pool, manager, { date: plus(45) });
     assert.equal(after.timeline.reservations.length, 1);
     assert.equal(after.timeline.reservations[0].kind, "block");

@@ -2,7 +2,7 @@ import { nameKey } from "../phone.ts";
 import type { CrmSnapshot, NormalizedRow, Reason } from "./types.ts";
 
 const HARD: ReadonlySet<Reason> = new Set<Reason>([
-  "date_unparseable", "date_missing", "time_unparseable", "time_missing", "outside_working_hours", "room_unknown", "room_ambiguous",
+  "date_unparseable", "date_missing", "time_unparseable", "time_missing", "start_not_whole_hour", "outside_working_hours", "room_unknown", "room_ambiguous",
   "room_missing", "package_unknown", "package_missing", "phone_invalid", "phone_missing", "client_missing", "prepayment_unparseable",
   "duplicate_in_sheet", "overlap_in_sheet", "overlap_with_crm", "overlap_with_crm_block", "matches_crm_conflicting", "children_unparseable", "unknown_status_text",
 ]);
@@ -26,11 +26,12 @@ function add(row: NormalizedRow, reason: Reason) {
  * CANDIDATE, which still needs a manager. `today` is the Asia/Almaty calendar date.
  */
 export function reconcile(rows: NormalizedRow[], crm: CrmSnapshot, today: string, opts: ReconcileOptions = {}): NormalizedRow[] {
-  if (opts.workingHours) {
-    for (const r of rows) {
-      if (!r.time) continue;
-      const t = Number(r.time.slice(0, 2)) * 60 + Number(r.time.slice(3, 5));
-      if (t < opts.workingHours.openMin || t + FOUR_HOURS > opts.workingHours.closeMin) add(r, "outside_working_hours");
+  for (const r of rows) {
+    if (!r.time) continue;
+    const t = Number(r.time.slice(0, 2)) * 60 + Number(r.time.slice(3, 5));
+    if (t % 60 !== 0) add(r, "start_not_whole_hour");
+    if (opts.workingHours && (t < opts.workingHours.openMin || t + FOUR_HOURS > opts.workingHours.closeMin)) {
+      add(r, "outside_working_hours");
     }
   }
 

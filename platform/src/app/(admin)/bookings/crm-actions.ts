@@ -18,7 +18,7 @@ import type { BookingFormState } from "./booking-action-state";
  */
 
 const key = z.string().min(8).max(100);
-// Any real HH:MM. The minute is not rounded or restricted here: the FastAPI kernel decides which starts it accepts.
+// New birthday reservations start at whole Almaty clock hours. The server rejects off-hour values; it never rounds them.
 const startTime = z.string().regex(/^\d{2}:\d{2}$/).refine((v) => {
   const minutes = toMinutes(v);
   return minutes !== null && minutes % 60 === 0;

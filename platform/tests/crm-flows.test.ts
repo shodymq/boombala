@@ -11,19 +11,35 @@ import {
   type RecordPrepaymentInput,
 } from "../src/server/crm-flows.ts";
 
-function fakeWriter(options: { conflict?: boolean; dropPaymentResponse?: boolean; status?: string } = {}) {
+function fakeWriter(options: {
+  conflict?: boolean;
+  dropPaymentResponse?: boolean;
+  dropConfirmationResponse?: boolean;
+  status?: string;
+  timelineBranchId?: string;
+  timelineRooms?: { id: string; occupancyMode?: string }[];
+  timelineReservations?: { id: string; roomId: string; startsAt: string; endsAt: string; occupiedEndsAt: string; status: string }[];
+  confirmationError?: Error;
+} = {}) {
   const calls: string[] = [];
   const confirmBodies: Record<string, unknown>[] = [];
   const requests = new Map<string, string>();
   const paymentKeys = new Map<string, unknown>();
+  const confirmationKeys = new Map<string, { id: string }>();
   let payment: { amountKzt: number; method: string } | null = null;
   let reservation: { id: string } | null = null;
+  let confirmationWrites = 0;
   let leadStatus = options.status ?? "new";
   let queue = Promise.resolve();
   const writer = {
-    async getBookingTimeline() {
+    async getBookingTimeline(branchId: string) {
       calls.push("timeline");
-      return { bufferMinutes: 0, rooms: [{ id: "room-a", occupancyMode: "exclusive" }], reservations: [] };
+      return {
+        branchId: options.timelineBranchId ?? branchId,
+        bufferMinutes: 0,
+        rooms: options.timelineRooms ?? [{ id: "room-a", occupancyMode: "exclusive" }, { id: "room-b", occupancyMode: "exclusive" }],
+        reservations: options.timelineReservations ?? [],
+      };
     },
     async createStaffRequest(body: Record<string, unknown>) {
       calls.push("request");
@@ -64,11 +80,20 @@ function fakeWriter(options: { conflict?: boolean; dropPaymentResponse?: boolean
     async confirmBooking(body: Record<string, unknown>) {
       calls.push("confirm");
       confirmBodies.push(body);
+      if (options.confirmationError) throw options.confirmationError;
       if (!payment || payment.amountKzt !== 10_000) throw new FastApiCrmError(422, "birthday_prepayment_required", "fake");
-      if (options.conflict) throw new FastApiCrmError(409, "time_conflict", "fake");
       const key = String(body.idempotencyKey);
+      const prior = confirmationKeys.get(key);
+      if (prior) return prior;
+      if (options.conflict) throw new FastApiCrmError(409, "time_conflict", "fake");
       reservation ??= { id: `reservation-${key}` };
+      confirmationKeys.set(key, reservation);
+      confirmationWrites += 1;
       leadStatus = "confirmed";
+      if (options.dropConfirmationResponse) {
+        options.dropConfirmationResponse = false;
+        throw new TypeError("simulated response loss after commit");
+      }
       return reservation;
     },
   };
@@ -79,6 +104,7 @@ function fakeWriter(options: { conflict?: boolean; dropPaymentResponse?: boolean
     allowConfirmation: () => { options.conflict = false; },
     paymentFacts: () => payment ? 1 : 0,
     reservations: () => reservation ? 1 : 0,
+    confirmationWrites: () => confirmationWrites,
   };
 }
 
@@ -177,6 +203,58 @@ describe("manual payment is a distinct, explicit step", () => {
     else assert.fail("expected alternate slot to confirm");
     assert.equal(fake.paymentFacts(), 1);
     assert.notEqual(fake.confirmBodies[0].idempotencyKey, fake.confirmBodies[1].idempotencyKey, "changing the target slot creates a new confirmation idempotency key");
+  });
+
+  it("a known occupied interval is refused before the confirmation write", async () => {
+    const fake = fakeWriter({
+      timelineReservations: [{ id: "occupied", roomId: "room-a", startsAt: "2026-11-20T09:00:00+05:00", endsAt: "2026-11-20T13:00:00+05:00", occupiedEndsAt: "2026-11-20T13:00:00+05:00", status: "confirmed" }],
+    });
+    await recordManualPrepaymentFlow(fake.writer, paymentInput);
+    const result = await confirmPaidRequestFlow(fake.writer, { ...confirmInput, startTime: "12:00" });
+    assert.deepEqual(result, { ok: false, code: "time_conflict", requestId: "req-1" });
+    assert.equal(fake.paymentFacts(), 1, "the previously received payment remains recorded");
+    assert.equal(fake.confirmationWrites(), 0, "known conflict never reaches the booking writer");
+  });
+
+  it("adjacent four-hour bookings remain allowed with no extra preparation buffer", async () => {
+    const fake = fakeWriter({
+      timelineReservations: [{ id: "occupied", roomId: "room-a", startsAt: "2026-11-20T09:00:00+05:00", endsAt: "2026-11-20T13:00:00+05:00", occupiedEndsAt: "2026-11-20T14:00:00+05:00", status: "confirmed" }],
+    });
+    await recordManualPrepaymentFlow(fake.writer, paymentInput);
+    const result = await confirmPaidRequestFlow(fake.writer, { ...confirmInput, startTime: "13:00" });
+    assert.equal(result.ok, true, "occupiedEndsAt compatibility metadata cannot add a buffer to the four-hour interval");
+    assert.equal(fake.confirmationWrites(), 1);
+  });
+
+  it("a room outside the selected branch timeline is refused before confirmation", async () => {
+    const fake = fakeWriter({ timelineBranchId: "almaty" });
+    await recordManualPrepaymentFlow(fake.writer, paymentInput);
+    const result = await confirmPaidRequestFlow(fake.writer, { ...confirmInput, branchId: "foreign-branch", roomId: "room-a" });
+    assert.deepEqual(result, { ok: false, code: "forbidden", requestId: "req-1" });
+    assert.equal(fake.confirmationWrites(), 0);
+  });
+
+  it("a committed confirmation whose response is lost is not duplicated on retry", async () => {
+    const fake = fakeWriter({ dropConfirmationResponse: true });
+    await recordManualPrepaymentFlow(fake.writer, paymentInput);
+    const first = await confirmPaidRequestFlow(fake.writer, confirmInput);
+    assert.deepEqual(first, { ok: false, code: "unavailable", requestId: "req-1" });
+    const retry = await confirmPaidRequestFlow(fake.writer, confirmInput);
+    assert.deepEqual(retry, { ok: false, code: "request_already_booked", requestId: "req-1" }, "backend state is authoritative after the lost response");
+    assert.equal(fake.confirmationWrites(), 1);
+    assert.equal(fake.paymentFacts(), 1);
+    assert.equal(fake.reservations(), 1);
+    assert.equal(fake.confirmBodies.length, 1, "the retry reads the committed booking and does not issue another write");
+  });
+
+  it("reauthentication errors escape confirmation so the caller can refresh the bridge token", async () => {
+    const fake = fakeWriter({ confirmationError: new FastApiCrmError(401, "token_expired", "synthetic") });
+    await recordManualPrepaymentFlow(fake.writer, paymentInput);
+    await assert.rejects(
+      confirmPaidRequestFlow(fake.writer, confirmInput),
+      (error: unknown) => error instanceof FastApiCrmError && error.status === 401,
+    );
+    assert.equal(fake.confirmationWrites(), 0);
   });
 
   it("does not record money for a closed or already booked request", async () => {

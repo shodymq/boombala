@@ -5,6 +5,7 @@ import { after, before, describe, it } from "node:test";
 import { applyRoles } from "../scripts/db-roles.ts";
 import { createPool, type Pool } from "../src/core/db.ts";
 import { almatyToday } from "../src/core/dates.ts";
+import { ForbiddenError, ValidationError } from "../src/core/errors.ts";
 import type { ValidSession } from "../src/core/session.ts";
 import { makeUser, seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
 
@@ -29,6 +30,7 @@ describe("booking writer under the exact production bb_admin privileges", () => 
   let db: TestDb;
   let admin: Pool;
   let session: ValidSession;
+  let editorSession: ValidSession;
   let pkg: string;
   let rooms: string[];
   const day = 20;
@@ -45,7 +47,9 @@ describe("booking writer under the exact production bb_admin privileges", () => 
     url.password = password;
     admin = createPool(url.toString(), { max: 16 });
     const manager = await makeUser(db.pool, "manager");
+    const editor = await makeUser(db.pool, "editor");
     session = { user: { id: manager.id, role: "manager", name: "m", email: "m@example.test" }, sessionId: "s" } as unknown as ValidSession;
+    editorSession = { user: { id: editor.id, role: "editor", name: "e", email: "e@example.test" }, sessionId: "s-editor" } as unknown as ValidSession;
     pkg = (await db.pool.query("SELECT id FROM bb.packages WHERE is_active ORDER BY sort_order LIMIT 1")).rows[0].id;
     rooms = (await db.pool.query("SELECT id FROM bb.rooms WHERE is_active ORDER BY sort_order")).rows.map((r) => r.id);
   });
@@ -75,9 +79,9 @@ describe("booking writer under the exact production bb_admin privileges", () => 
     const lead = await newRequest();
     const payment = await pay(lead.id);
     assert.ok(payment.id);
-    const booked = await confirm(lead.id, rooms[0], "14:25");
-    const moved = (await bridgeReschedule(admin, session, { idempotencyKey: key(), reservationId: booked.id, bookingDate: plus(day), roomId: rooms[1], startTime: "11:10" })) as { id: string };
-    const block = (await bridgeBlock(admin, session, { idempotencyKey: key(), bookingDate: plus(day), roomId: rooms[2], startTime: "15:35", reason: "e2e" })) as { id: string };
+    const booked = await confirm(lead.id, rooms[0], "14:00");
+    const moved = (await bridgeReschedule(admin, session, { idempotencyKey: key(), reservationId: booked.id, bookingDate: plus(day), roomId: rooms[1], startTime: "11:00" })) as { id: string };
+    const block = (await bridgeBlock(admin, session, { idempotencyKey: key(), bookingDate: plus(day), roomId: rooms[2], startTime: "15:00", reason: "e2e" })) as { id: string };
     await bridgeRelease(admin, session, { idempotencyKey: key(), reservationId: moved.id, reason: "cancel" });
     await bridgeRelease(admin, session, { idempotencyKey: key(), reservationId: block.id, reason: "unblock" });
     const row = (await db.pool.query("SELECT status FROM bb.lead_requests WHERE id = $1", [lead.id])).rows[0];
@@ -116,6 +120,53 @@ describe("booking writer under the exact production bb_admin privileges", () => 
     await assert.rejects(bridgePayment(admin, session, { requestId: lead.id, idempotencyKey: k, amountKzt: 10000, method: "bank_transfer" }), /idempotency_conflict/);
   });
 
+  it("bookings.manage is required for payment and reservation writes", async () => {
+    const lead = await newRequest();
+    const paymentInput = { requestId: lead.id, idempotencyKey: key(), amountKzt: 10000, method: "cash" };
+    await assert.rejects(bridgePayment(admin, editorSession, paymentInput), ForbiddenError);
+    await assert.rejects(bridgeConfirm(admin, editorSession, { requestId: lead.id, idempotencyKey: key(), bookingDate: plus(day), roomId: rooms[0], startTime: "14:00", packageId: pkg, agreedPriceKzt: 150000 }), ForbiddenError);
+    assert.equal(await count("SELECT count(*)::int n FROM bb.manual_payment_facts WHERE lead_request_id=$1", [lead.id]), 0);
+    assert.equal(await count("SELECT count(*)::int n FROM bb.slot_reservations WHERE lead_request_id=$1 AND released_at IS NULL", [lead.id]), 0);
+  });
+
+  it("rejects foreign branch ids before creating requests, payments or bookings", async () => {
+    const before = await count("SELECT count(*)::int n FROM bb.lead_requests");
+    await assert.rejects(bridgeCreateRequest(admin, session, { branchId: "foreign-branch", idempotencyKey: key(), requestedDate: plus(day), customerName: "Synthetic", phone: "+77079990002", packageId: pkg }), ValidationError);
+    const lead = await newRequest();
+    await assert.rejects(bridgePayment(admin, session, { requestId: lead.id, idempotencyKey: key(), amountKzt: 10000, method: "cash", branchId: "foreign-branch" }), ValidationError);
+    assert.equal(await count("SELECT count(*)::int n FROM bb.manual_payment_facts WHERE lead_request_id=$1", [lead.id]), 0);
+    await pay(lead.id);
+    await assert.rejects(bridgeConfirm(admin, session, { branchId: "foreign-branch", requestId: lead.id, idempotencyKey: key(), bookingDate: plus(day), roomId: rooms[0], startTime: "14:00", packageId: pkg, agreedPriceKzt: 150000 }), ValidationError);
+    await assert.rejects(bridgeBlock(admin, session, { branchId: "foreign-branch", idempotencyKey: key(), bookingDate: plus(day + 1), roomId: rooms[0], startTime: "14:00", reason: "synthetic" }), ValidationError);
+    assert.equal(await count("SELECT count(*)::int n FROM bb.lead_requests"), before + 1);
+    assert.equal(await count("SELECT count(*)::int n FROM bb.slot_reservations WHERE released_at IS NULL"), 0);
+  });
+
+  it("legacy bridge rejects 13:45 and 16:15 without rounding or writing", async () => {
+    const lead = await newRequest();
+    await pay(lead.id);
+    const rescheduleLead = await newRequest();
+    await pay(rescheduleLead.id);
+    const reservation = await confirm(rescheduleLead.id, rooms[2], "10:00");
+    for (const startTime of ["13:45", "16:15"]) {
+      await assert.rejects(
+        bridgeConfirm(admin, session, { requestId: lead.id, idempotencyKey: key(), bookingDate: plus(day), roomId: rooms[0], startTime, packageId: pkg, agreedPriceKzt: 150000 }),
+        ValidationError,
+      );
+      await assert.rejects(
+        bridgeBlock(admin, session, { idempotencyKey: key(), bookingDate: plus(day + 1), roomId: rooms[1], startTime, reason: "synthetic" }),
+        ValidationError,
+      );
+      await assert.rejects(
+        bridgeReschedule(admin, session, { idempotencyKey: key(), reservationId: reservation.id, bookingDate: plus(day), roomId: rooms[3], startTime }),
+        ValidationError,
+      );
+    }
+    assert.equal(await count("SELECT count(*)::int n FROM bb.slot_reservations WHERE lead_request_id=$1 AND released_at IS NULL", [lead.id]), 0);
+    assert.equal(await count("SELECT count(*)::int n FROM bb.slot_reservations WHERE lead_request_id=$1 AND released_at IS NULL", [rescheduleLead.id]), 1, "failed reschedule leaves the existing reservation untouched");
+    assert.equal(await count("SELECT count(*)::int n FROM bb.manual_payment_facts WHERE lead_request_id=$1", [lead.id]), 1, "rejected booking attempts do not alter the received payment fact");
+  });
+
   it("concurrent request creation with one key creates one request", async () => {
     const k = key();
     const input = { idempotencyKey: k, requestedDate: plus(day), customerName: "Один Запрос", phone: "+77079990001", packageId: pkg };
@@ -129,7 +180,7 @@ describe("booking writer under the exact production bb_admin privileges", () => 
     const b = await newRequest("Гонка Б", 2222222);
     await pay(a.id);
     await pay(b.id);
-    const settled = await Promise.allSettled([confirm(a.id, rooms[3], "13:45"), confirm(b.id, rooms[3], "13:45")]);
+    const settled = await Promise.allSettled([confirm(a.id, rooms[3], "13:00"), confirm(b.id, rooms[3], "13:00")]);
     assert.equal(settled.filter((s) => s.status === "fulfilled").length, 1);
     assert.equal(await count("SELECT count(*)::int n FROM bb.slot_reservations WHERE room_id = $1 AND slot_date = $2 AND released_at IS NULL", [rooms[3], plus(day)]), 1);
   });
@@ -138,7 +189,7 @@ describe("booking writer under the exact production bb_admin privileges", () => 
     const lead = await newRequest();
     await pay(lead.id);
     const k = key();
-    const input = { requestId: lead.id, idempotencyKey: k, bookingDate: plus(day), roomId: rooms[0], startTime: "16:15", packageId: pkg, agreedPriceKzt: 150000 };
+    const input = { requestId: lead.id, idempotencyKey: k, bookingDate: plus(day), roomId: rooms[0], startTime: "16:00", packageId: pkg, agreedPriceKzt: 150000 };
     const results = (await Promise.all(Array.from({ length: 6 }, () => bridgeConfirm(admin, session, input)))) as Array<{ id: string }>;
     assert.equal(new Set(results.map((r) => r.id)).size, 1);
     assert.equal(await count("SELECT count(*)::int n FROM bb.slot_reservations WHERE lead_request_id = $1", [lead.id]), 1);
@@ -146,7 +197,7 @@ describe("booking writer under the exact production bb_admin privileges", () => 
 
   it("the same block key sent concurrently blocks once; release is idempotent", async () => {
     const k = key();
-    const input = { idempotencyKey: k, bookingDate: plus(day + 1), roomId: rooms[1], startTime: "12:20", reason: "race" };
+    const input = { idempotencyKey: k, bookingDate: plus(day + 1), roomId: rooms[1], startTime: "12:00", reason: "race" };
     const results = (await Promise.all(Array.from({ length: 6 }, () => bridgeBlock(admin, session, input)))) as Array<{ id: string }>;
     assert.equal(new Set(results.map((r) => r.id)).size, 1);
     const rk = key();
