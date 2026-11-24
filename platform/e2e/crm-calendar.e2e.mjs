@@ -49,14 +49,17 @@ async function openCalendar(page, extra = "") {
 
 /** Waits for the server action's redirect (an outcome parameter in the address) and the page that follows it. */
 async function afterAction(page) {
-  await page.waitForURL((u) => /[?&](ok|error)=/.test(u.search), { timeout: 20000 });
-  await page.waitForLoadState("networkidle");
+  await Promise.race([
+    page.waitForURL((u) => /[?&](ok|error)=/.test(u.search), { timeout: 20000 }),
+    page.locator("[data-booking-action-error]").waitFor({ state: "visible", timeout: 20000 }),
+  ]);
+  if (/[?&](ok|error)=/.test(new URL(page.url()).search)) await page.waitForLoadState("networkidle");
 }
 
 async function createBooking(page, { room, start, name, price, prepay, phone }) {
   const form = page.locator('form:has(input[name="customerName"])');
   await form.locator('select[name="roomId"]').selectOption({ label: room });
-  await form.locator('select[name="startTime"]').selectOption(start);
+  await form.locator('input[name="startTime"]').fill(start);
   await form.locator('input[name="customerName"]').fill(name);
   await form.locator('input[name="phone"]').fill(phone);
   await form.locator('input[name="agreedPriceKzt"]').fill(String(price));
@@ -71,8 +74,8 @@ const tokenA = await staffToken({ email: "manager-a@staging.boombala.example.com
 const dbA = new pg.Client({ connectionString: process.env.FASTAPI_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://") });
 await dbA.connect();
 
-const ctxA = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-const ctxB = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const ctxA = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const ctxB = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const pageA = await ctxA.newPage();
 const pageB = await ctxB.newPage();
 
@@ -153,8 +156,8 @@ try {
   // 8. RBAC on manual blocks: the sales manager is refused by FastAPI (403), so the page says so and nothing is blocked.
   await openCalendar(pageA);
   const blockForm = pageA.locator('form:has(input[aria-label="Причина блокировки"])');
-  await blockForm.locator('select[aria-label="Комната блокировки"]').selectOption({ label: ROOM_B });
-  await blockForm.locator('select[aria-label="Начало блокировки"]').selectOption("10:00");
+  await blockForm.locator('select[name="roomId"]').selectOption({ label: ROOM_B });
+  await blockForm.locator('input[name="startTime"]').fill("10:00");
   await blockForm.locator('input[aria-label="Причина блокировки"]').fill("E2E блок менеджера");
   await blockForm.locator('button[type="submit"]').click();
   await afterAction(pageA);
@@ -163,13 +166,13 @@ try {
   await shot(pageA, "08-a-block-forbidden");
 
   // 8b. The owner (super_admin in FastAPI) blocks Room B 10:00–14:00 in its own context: verified.
-  const ctxOwner = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const ctxOwner = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const pageOwner = await ctxOwner.newPage();
   await login(pageOwner, "owner-a@staging.boombala.example.com");
   await openCalendar(pageOwner);
   const ownerBlock = pageOwner.locator('form:has(input[aria-label="Причина блокировки"])');
-  await ownerBlock.locator('select[aria-label="Комната блокировки"]').selectOption({ label: ROOM_B });
-  await ownerBlock.locator('select[aria-label="Начало блокировки"]').selectOption("10:00");
+  await ownerBlock.locator('select[name="roomId"]').selectOption({ label: ROOM_B });
+  await ownerBlock.locator('input[name="startTime"]').fill("10:00");
   await ownerBlock.locator('input[aria-label="Причина блокировки"]').fill("E2E блок");
   await ownerBlock.locator('button[type="submit"]').click();
   await afterAction(pageOwner);
@@ -249,12 +252,16 @@ try {
   check("expired Platform session is sent to login", pageA.url().includes("/login"), pageA.url());
   await login(pageA, "manager-a@staging.boombala.example.com");
 
-  // 13. Tablet width: no horizontal page overflow.
-  await pageA.setViewportSize({ width: 768, height: 1024 });
-  await openCalendar(pageA);
-  const overflow = await pageA.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  check("tablet 768px: no horizontal page overflow", overflow <= 1, `overflow=${overflow}`);
-  await shot(pageA, "13-tablet");
+  // 13. Required phone and desktop widths: compact room cards on phones, timeline on desktop, no page overflow.
+  for (const width of [320, 360, 375, 390, 430, 1440]) {
+    await pageA.setViewportSize({ width, height: width < 500 ? 844 : 1000 });
+    await openCalendar(pageA);
+    const overflow = await pageA.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check(`calendar ${width}px: no horizontal page overflow`, overflow <= 1, `overflow=${overflow}`);
+    if (width < 768) check(`calendar ${width}px: mobile room cards visible`, await pageA.locator("[data-mobile-calendar]").isVisible());
+    else check(`calendar ${width}px: desktop timeline visible`, await pageA.locator("[data-timeline]").isVisible());
+    if (width === 390) await shot(pageA, "13-mobile-calendar-390");
+  }
 } catch (error) {
   check("E2E ran to completion", false, error instanceof Error ? error.message : String(error));
 } finally {

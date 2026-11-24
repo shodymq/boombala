@@ -118,7 +118,7 @@ export function normalizeRow(raw: RawRow, source: SourceRef, catalog: Catalog): 
   if (!date) reasons.push((raw.date ?? "").trim() ? "date_unparseable" : "date_missing");
   const time = parseTime(raw.time ?? "");
   if (!time) reasons.push((raw.time ?? "").trim() ? "time_unparseable" : "time_missing");
-  // Any valid HH:MM start is allowed (13:15, 16:40 ...). Duration is fixed at four hours with no buffer; see reconcile.ts.
+  // Preserve the written HH:MM exactly. reconcile.ts sends off-hour starts to manual review; it never rounds them.
 
   const room = resolveByName(raw.room ?? "", catalog.rooms, "room");
   const roomId = typeof room === "object" ? room.id : null;

@@ -7,7 +7,9 @@ import { requirePermissionAnd } from "@/server/dal";
 import { loadLead, loadRequestCard } from "@/server/lead-data";
 import { getPool } from "@/server/db";
 import { legacyBridgeEnabled } from "@/server/bridge-client";
+import { Icon } from "@/components/icon";
 import { claimLeadAction, confirmLeadAction, leadStatusAction, updateLeadWorkflowAction } from "../actions";
+import { WorkflowActionForm } from "../workflow-action-form";
 
 export const metadata: Metadata = { title: "Карточка заявки" };
 
@@ -68,7 +70,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
 
   return (
     <div className="crm-page crm-requests-page">
-      <nav aria-label="Назад"><Link href="/requests" className="text-sm font-extrabold text-grape-700 underline">← Все заявки</Link></nav>
+      <nav aria-label="Назад"><Link href="/requests" className="inline-flex min-h-11 items-center text-sm font-extrabold text-grape-700 underline md:min-h-0">← Все заявки</Link></nav>
       <header className="crm-requests-heading">
         <div>
           <p className="crm-eyebrow">Заявка №{lead.seq}</p>
@@ -83,7 +85,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
       <section className={panel} aria-labelledby="req-info">
         <h2 id="req-info" className="text-lg font-black text-grape-800">Данные заявки</h2>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-          <div><dt className="text-muted">Телефон</dt><dd className="font-bold">{lead.phone}</dd></div>
+          <div><dt className="text-muted">Телефон</dt><dd className="font-bold"><a href={`tel:${lead.phone.replace(/[^\d+]/g, "")}`} className="crm-lead-phone"><Icon name="phone" size={15} /><span>{lead.phone}</span></a></dd></div>
           <div><dt className="text-muted">Желаемая дата</dt><dd className="font-bold">{lead.requestedDate ?? "не указана"}</dd></div>
           <div><dt className="text-muted">Пожелание по времени</dt><dd className="font-bold">{lead.preferredStartTime ?? "не указано"}</dd></div>
           <div><dt className="text-muted">Пакет</dt><dd className="font-bold">{pkg}</dd></div>
@@ -120,7 +122,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
           )}
           <section className="crm-lead-workflow" aria-labelledby="lead-workflow-title">
             <h3 id="lead-workflow-title">Следующее действие</h3>
-            <form action={updateLeadWorkflowAction} className="crm-lead-workflow-form">
+          <WorkflowActionForm action={updateLeadWorkflowAction} className="crm-lead-workflow-form">
               <input type="hidden" name="id" value={lead.id} />
               <input type="hidden" name="expectedVersion" value={lead.workflowVersion} />
               <label>
@@ -142,8 +144,7 @@ export default async function RequestCardPage({ params, searchParams }: { params
                 <span>Связаться до (Алматы)</span>
                 <input type="datetime-local" name="followUpAtLocal" defaultValue={instantToAlmatyLocalDateTime(lead.followUpAt)} className={input} />
               </label>
-              <button type="submit" className={btn}>Сохранить план</button>
-            </form>
+          </WorkflowActionForm>
             <p className="crm-requests-note">План сохраняется в CRM и журнале действий. Сообщения клиенту автоматически не отправляются.</p>
             {!lead.assignedTo ? <form action={claimLeadAction} className="crm-lead-claim-form">
               <input type="hidden" name="id" value={lead.id} />

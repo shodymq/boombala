@@ -20,7 +20,7 @@ export type BookingTimelineReservation = {
   /** The four-hour party window. */
   startsAt: string;
   endsAt: string;
-  /** End of the room occupancy, including the branch preparation buffer. The PostgreSQL overlap rule uses this value. */
+  /** Compatibility field for zero-buffer clients; the authoritative occupied interval is exactly startsAt–endsAt. */
   occupiedEndsAt: string;
   slotId: string | null;
   packageName: string | null;

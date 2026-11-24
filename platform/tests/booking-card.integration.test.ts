@@ -112,7 +112,7 @@ describe("Birthday CRM V2: the booking card", () => {
     const lead = await request(anna, "+77075550102");
     await prepay(anna, lead.id);
     // Anna books Star Party with the customer card. 9 children of 7 included, 2 adults.
-    const booked = await book(anna, lead.id, roomA, "13:25", "star-party", { childName: "Алия", childAge: 7, childrenTotal: 9, adultsTotal: 2, preferredLanguage: "kk", animators: ["Дино"] });
+    const booked = await book(anna, lead.id, roomA, "13:00", "star-party", { childName: "Алия", childAge: 7, childrenTotal: 9, adultsTotal: 2, preferredLanguage: "kk", animators: ["Дино"] });
 
     const first = await get(booked.id);
     assert.equal(first.exists, true);
@@ -161,7 +161,7 @@ describe("Birthday CRM V2: the booking card", () => {
     assert.equal((await get(booked.id)).pricing.totalKzt, 79900 + 8000 + 6000);
 
     // Boris moves the event: the same card follows, the creator stays Anna, and the move is in the history.
-    const moved = (await bridgeReschedule(admin, boris, { idempotencyKey: key(), reservationId: booked.id, bookingDate: date, roomId: "ice-room", startTime: "15:10" })) as { id: string };
+    const moved = (await bridgeReschedule(admin, boris, { idempotencyKey: key(), reservationId: booked.id, bookingDate: date, roomId: "ice-room", startTime: "15:00" })) as { id: string };
     assert.notEqual(moved.id, booked.id);
     const afterMove = await get(moved.id);
     assert.equal(afterMove.exists, true);
@@ -224,7 +224,7 @@ describe("Birthday CRM V2: the booking card", () => {
     const b = await request(boris, "+77075550106", "star-party", 7);
     await prepay(anna, a.id);
     await prepay(boris, b.id);
-    const settled = await Promise.allSettled([book(anna, a.id, "roblox-room", "16:20"), book(boris, b.id, "roblox-room", "17:00")]);
+    const settled = await Promise.allSettled([book(anna, a.id, "roblox-room", "16:00"), book(boris, b.id, "roblox-room", "17:00")]);
     assert.equal(settled.filter((s) => s.status === "fulfilled").length, 1, "an exclusive room has one event at a time");
     const loser = settled.find((s) => s.status === "rejected") as PromiseRejectedResult | undefined;
     assert.ok(loser, "the second manager is told, not silently accepted");
@@ -261,7 +261,7 @@ describe("Birthday CRM V2: the booking card", () => {
       assert.equal((await db.pool.query("SELECT state FROM bb.sheet_sync_records WHERE reservation_id = $1", [block.id])).rows[0].state, "crm_managed");
       await assert.rejects(bridgeHandover(admin, boris, { idempotencyKey: key(), reservationId: block.id }), /already_handed_over/);
       // The CRM can now move and cancel it.
-      const moved = (await bridgeReschedule(admin, boris, { idempotencyKey: key(), reservationId: block.id, bookingDate: plus(40), roomId: "ice-room", startTime: "12:30" })) as { id: string };
+      const moved = (await bridgeReschedule(admin, boris, { idempotencyKey: key(), reservationId: block.id, bookingDate: plus(40), roomId: "ice-room", startTime: "12:00" })) as { id: string };
       assert.equal((await get(moved.id)).fields.childName, "Томирис", "the card followed the move");
       await bridgeRelease(admin, boris, { idempotencyKey: key(), reservationId: moved.id, reason: "ok" });
     } finally {
@@ -272,7 +272,7 @@ describe("Birthday CRM V2: the booking card", () => {
   it("RBAC: a role without bookings.manage cannot read or write a card; bad ids are not found", async () => {
     const lead = await request(anna, "+77075550109");
     await prepay(anna, lead.id);
-    const booked = await book(anna, lead.id, "magic-room", "17:10");
+    const booked = await book(anna, lead.id, "magic-room", "17:00");
     await assert.rejects(bridgeCardGet(admin, editor, { reservationId: booked.id }), ForbiddenError);
     await assert.rejects(bridgeCardSave(admin, editor, { idempotencyKey: key(), reservationId: booked.id, expectedVersion: 1, fields: { wishes: "x" } }), ForbiddenError);
     await assert.rejects(bridgeCardGet(admin, anna, { reservationId: "not-a-uuid" }), /not_found/);

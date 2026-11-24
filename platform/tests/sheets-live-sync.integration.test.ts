@@ -21,7 +21,7 @@ const HMAC = "test-only-hmac-key-that-is-at-least-thirty-two-bytes-long";
 const DATE = "2099-02-20";
 const NOW = new Date("2026-11-20T08:00:00.000Z");
 
-function event(sourceId: string, date = DATE, time = "13:30", room = "Синтетическая exclusive комната", suffix = sourceId): RawRow {
+function event(sourceId: string, date = DATE, time = "13:00", room = "Синтетическая exclusive комната", suffix = sourceId): RawRow {
   return {
     sourceId, date: date.split("-").reverse().join("."), time, room, package: "Синтетический пакет",
     client: `QA клиент ${suffix}`, phone: `+7 700 000 ${suffix.slice(-2).padStart(2, "0")} 01`,
@@ -99,7 +99,7 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     assert.equal(active.rowCount, 1);
     assert.equal(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Almaty", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(active.rows[0].starts_at), "14:00");
 
-    const returned = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event("event-qa-0001", DATE, "13:30", "Синтетическая exclusive комната")]) });
+    const returned = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event("event-qa-0001", DATE, "13:00", "Синтетическая exclusive комната")]) });
     assert.equal(returned.counts.updated, 1);
     const movedBack = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => moved });
     assert.equal(movedBack.counts.updated, 1, "returning to a previously-used target needs a new transition idempotency key");
@@ -207,7 +207,7 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     await db.pool.query("INSERT INTO rooms (id,name,occupancy_mode) VALUES ('sync-test-shared','Синтетическая общая зона','shared')");
     const shared = sheet([
       event("event-qa-shared-1", "2099-02-22", "13:00", "Синтетическая общая зона", "Общий 1"),
-      event("event-qa-shared-2", "2099-02-22", "13:30", "Синтетическая общая зона", "Общий 2"),
+      event("event-qa-shared-2", "2099-02-22", "14:00", "Синтетическая общая зона", "Общий 2"),
     ]);
     const sharedResult = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => shared });
     assert.equal(sharedResult.counts.created, 2, JSON.stringify(sharedResult.counts));
@@ -227,7 +227,7 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     assert.equal(stored.rowCount, 1);
     assert.equal(stored.rows[0].source_payload.phone, undefined);
 
-    const outside = event("event-qa-outside", "2099-02-24", "18:01", "Синтетическая exclusive комната", "Вне часов");
+    const outside = event("event-qa-outside", "2099-02-24", "19:00", "Синтетическая exclusive комната", "Вне часов");
     const hours = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([outside]) });
     assert.equal(hours.counts.manualReview, 1);
     const sourceKey = stableSourceIdentity(outside, HMAC);
@@ -299,7 +299,7 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
   it("a record handed over to the CRM is ignored by sync: not moved, not released, not marked missing", async () => {
     process.env.SHEETS_SYNC_ENABLED = "1";
     const handoverDate = "2099-04-10";
-    const created = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event("event-qa-handover", handoverDate, "13:30", "Синтетическая exclusive комната", "handover-41")]) });
+    const created = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event("event-qa-handover", handoverDate, "13:00", "Синтетическая exclusive комната", "handover-41")]) });
     assert.equal(created.counts.created, 1);
     const record = (await db.pool.query<{ reservation_id: string }>("SELECT reservation_id FROM bb.sheet_sync_records WHERE reservation_id IN (SELECT id FROM bb.slot_reservations WHERE slot_date=$1)", [handoverDate])).rows[0];
     const manager = await createUser(db.pool, null, { email: "handover.manager@example.test", name: "Передача", role: "manager", password: "correct horse battery staple" });
@@ -313,7 +313,7 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     assert.equal(still.rowCount, 1, "no second reservation");
     assert.equal(still.rows[0].id, record.reservation_id);
     assert.equal(still.rows[0].released_at, null);
-    assert.equal(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Almaty", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(still.rows[0].starts_at), "13:30", "the time was not changed by the sheet");
+    assert.equal(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Almaty", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(still.rows[0].starts_at), "13:00", "the time was not changed by the sheet");
 
     const gone = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([]) });
     assert.equal((await db.pool.query("SELECT state FROM bb.sheet_sync_records WHERE reservation_id=$1", [record.reservation_id])).rows[0].state, "crm_managed", "an absent row does not flip a handed-over record to source_missing");

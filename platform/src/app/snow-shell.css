@@ -117,6 +117,7 @@
 .snow-logout .ui-icon { color: #3b1e78; }
 .snow-logout:hover { border-color: #cbbde1; background: #f7f4fb; }
 .snow-main { width: 100%; max-width: 1440px; min-width: 0; margin: 0 auto; padding: 41px 42px; }
+.snow-mobile-primary { display: none; }
 
 @media (max-width: 820px) {
   .snow-shell { grid-template-columns: minmax(0, 1fr); }
@@ -124,14 +125,47 @@
   .snow-brand { padding: 0 0 0 2px; }
   .snow-brand-mark { width: 27px; height: 27px; }
   .snow-nav { flex: 0 0 auto; }
-  .snow-nav-toggle { position: absolute; top: -31px; right: 0; display: inline-flex; padding: 0 12px; }
+  .snow-nav-toggle { position: absolute; top: -34px; right: 0; display: inline-flex; min-width: 44px; min-height: 44px; padding: 0 12px; }
   .snow-nav-sections { display: none; margin-top: 14px; }
   .snow-nav[data-open="true"] .snow-nav-sections { display: grid; }
   .snow-nav[data-open="true"] { padding-bottom: 2px; }
+  .snow-nav-link { min-height: 44px; }
   .snow-sidebar-label { margin-top: 2px; }
   .snow-sidebar-footer { display: none; }
   .snow-topbar { min-height: 64px; padding: 0 18px; }
-  .snow-main { padding: 28px 20px; }
+  .snow-main { padding: 28px 20px calc(28px + 72px + env(safe-area-inset-bottom)); }
+  .snow-mobile-primary {
+    position: fixed;
+    z-index: 60;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: block;
+    border-top: 1px solid #eee9e3;
+    background: rgba(255, 255, 255, .98);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 20px rgba(42, 24, 16, .08);
+  }
+  .snow-mobile-primary ul { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+  .snow-mobile-primary li { min-width: 0; }
+  .snow-mobile-primary a {
+    display: flex;
+    min-width: 44px;
+    min-height: 48px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border-radius: 10px;
+    color: #81766f;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.1;
+    text-align: center;
+    text-decoration: none;
+  }
+  .snow-mobile-primary a[aria-current="page"] { background: #3b1e78; color: #fff; }
+  .snow-mobile-primary a:focus-visible { outline: 2px solid #3b1e78; outline-offset: 1px; }
 }
 
 @media (max-width: 480px) {
@@ -142,11 +176,11 @@
   .snow-topbar-user .snow-avatar { width: 28px; height: 28px; }
   .snow-topbar-user-copy strong { max-width: 90px; font-size: 11px; }
   .snow-topbar-user-copy span { display: none; }
-  .snow-logout { min-height: 32px; padding: 0 9px; font-size: 11px; }
-  .snow-main { padding: 22px 14px; }
+  .snow-logout { min-height: 44px; padding: 0 9px; font-size: 11px; }
+  .snow-main { padding: 22px 14px calc(22px + 72px + env(safe-area-inset-bottom)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .snow-nav-link, .snow-logout { transition: none; }
+  .snow-nav-link, .snow-mobile-primary a, .snow-logout { transition: none; }
   .snow-nav-pending[data-pending="true"] { animation: none; }
 }

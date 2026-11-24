@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { migrate } from "../src/core/migrate.ts";
-import { MIGRATIONS_DIR, startTestDb, syntheticPhone, type TestDb } from "./helpers/db.ts";
+import { MIGRATIONS_DIR, makeUser, seedFromSite, startTestDb, syntheticPhone, type TestDb } from "./helpers/db.ts";
 
 describe("migrations and DB-level guarantees", () => {
   let db: TestDb;
@@ -164,7 +164,7 @@ describe("migrations and DB-level guarantees", () => {
     }
   });
 
-  it("019 and 020 preserve historical leads while adding time preferences and follow-up fields", async () => {
+  it("019-021 preserve historical leads while adding time preferences, follow-up fields and a booking guard", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bb-before-019-"));
     const prior = await startTestDb({ migrate: false });
     try {
@@ -176,7 +176,7 @@ describe("migrations and DB-level guarantees", () => {
       const oldLead = (await prior.pool.query("INSERT INTO bb.lead_requests (idempotency_key,contact_id,requested_date,slot_id,status) VALUES ($1,$2,'2099-02-03',2,'new') RETURNING id,seq,slot_id", [randomUUID(), contact])).rows[0];
 
       const applied = await migrate(prior.pool, MIGRATIONS_DIR);
-      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql", "020_lead_follow_up.sql"]);
+      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql", "020_lead_follow_up.sql", "021_booking_whole_hour_starts.sql"]);
       const after = (await prior.pool.query("SELECT id,seq,slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [oldLead.id])).rows[0];
       assert.deepEqual(after, { ...oldLead, preferred_start_time: null }, "old identity, slot and status are preserved; no preference is invented");
 
@@ -201,6 +201,50 @@ describe("migrations and DB-level guarantees", () => {
     } finally {
       await prior.stop();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("021 rejects off-hour inserts and leaves already stored interval rows unchanged", async () => {
+    const priorDir = mkdtempSync(join(tmpdir(), "bb-before-021-"));
+    const prior = await startTestDb({ migrate: false });
+    try {
+      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql") && name < "021_booking_whole_hour_starts.sql")) {
+        cpSync(join(MIGRATIONS_DIR, file), join(priorDir, file));
+      }
+      await migrate(prior.pool, priorDir);
+      await seedFromSite(prior.pool);
+      const owner = await makeUser(prior.pool, "owner");
+      const roomId = (await prior.pool.query("SELECT id FROM bb.rooms WHERE occupancy_mode='exclusive' ORDER BY sort_order LIMIT 1")).rows[0].id as string;
+      const old = (await prior.pool.query(
+        `INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at)
+         VALUES ('block','2099-04-05',NULL,$1,'synthetic historical interval',$2,
+                 ('2099-04-05'::date + time '13:45') AT TIME ZONE 'Asia/Almaty',
+                 (('2099-04-05'::date + time '13:45') AT TIME ZONE 'Asia/Almaty') + interval '4 hours')
+         RETURNING id,starts_at,ends_at,released_at`,
+        [roomId, owner.id],
+      )).rows[0];
+
+      const applied = await migrate(prior.pool, MIGRATIONS_DIR);
+      assert.deepEqual(applied.applied, ["021_booking_whole_hour_starts.sql"]);
+      const after = (await prior.pool.query("SELECT id,starts_at,ends_at,released_at FROM bb.slot_reservations WHERE id=$1", [old.id])).rows[0];
+      assert.deepEqual(after, old, "the additive guard does not rewrite existing reservations");
+
+      for (const start of ["13:45", "16:15"]) {
+        await assert.rejects(
+          () => prior.pool.query(
+            `INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at)
+             VALUES ('block','2099-04-06',NULL,$1,'synthetic invalid interval',$2,
+                     ('2099-04-06'::date + $3::time) AT TIME ZONE 'Asia/Almaty',
+                     (('2099-04-06'::date + $3::time) AT TIME ZONE 'Asia/Almaty') + interval '4 hours')`,
+            [roomId, owner.id, start],
+          ),
+          (error: { code?: string; message?: string }) => error.code === "23514" && error.message?.includes("whole hour") === true,
+          `PostgreSQL rejects ${start}`,
+        );
+      }
+    } finally {
+      await prior.stop();
+      rmSync(priorDir, { recursive: true, force: true });
     }
   });
 

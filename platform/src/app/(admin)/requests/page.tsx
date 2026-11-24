@@ -82,8 +82,8 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
 
       <nav className="crm-requests-tabs" aria-label="Фильтр заявок по статусу">
         <Link href={statusHref()} aria-current={!status ? "page" : undefined}>Все</Link>
-        {Object.entries(STATUS).map(([k, v]) => <Link key={k} href={statusHref(k)} aria-current={status === k ? "page" : undefined}>{v}</Link>)}
-        <Link href={overdue ? "/requests" : "/requests?overdue=1"} aria-current={overdue ? "page" : undefined}>Просроченные действия</Link>
+        {Object.entries(STATUS).map(([k, v]) => <Link key={k} href={statusHref(k)} aria-label={k === "new" ? "Новые" : v} aria-current={status === k ? "page" : undefined}><span className="max-md:inline hidden">{k === "new" ? "Новые" : v}</span><span className="inline max-md:hidden">{v}</span></Link>)}
+        <Link href={overdue ? "/requests" : "/requests?overdue=1"} aria-label="Просроченные" aria-current={overdue ? "page" : undefined}><span className="max-md:inline hidden">Просроченные</span><span className="inline max-md:hidden">Просроченные действия</span></Link>
       </nav>
 
       <form method="get" className="crm-requests-filters">
@@ -153,6 +153,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
                   <td className="crm-requests-actions-cell">
                     <span className="crm-requests-mobile-label">Действия</span>
                     <Link href={`/requests/${encodeURIComponent(l.id)}`} className={btnGhost}>Открыть карточку</Link>
+                    <a href={`tel:${l.phone.replace(/[^\d+]/g, "")}`} className="crm-requests-action crm-requests-call" aria-label={`Позвонить по заявке №${l.seq}`}><Icon name="phone" size={15} />Позвонить</a>
                     {open ? (
                       <div className="crm-requests-status-actions">
                         {l.status === "new" ? <form action={leadStatusAction}><input type="hidden" name="id" value={l.id} /><input type="hidden" name="status" value="in_progress" /><button type="submit" className={btnGhost}>В работу</button></form> : null}

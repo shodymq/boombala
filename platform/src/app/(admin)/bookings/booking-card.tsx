@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { BookingCardView } from "../../../core/booking-card.ts";
 import type { OptionKind, PricingGap } from "../../../core/booking-pricing.ts";
 import { handoverAction, saveCardAction } from "./crm-actions";
+import { BookingActionForm } from "./server-action-form";
 import { Drawer } from "./booking-drawer";
 import { SubmitButton } from "./submit-button";
 
@@ -130,7 +131,7 @@ export function BookingCardPanel({ view, branchId, date, closeHref, backHref, sa
       ) : null}
       {handedOver ? <p className="mt-3 rounded-xl bg-paper p-2 text-xs text-muted">Запись передана из таблицы в CRM: синхронизация её больше не меняет.</p> : null}
 
-      <form action={saveCardAction} className="mt-4 grid gap-3" aria-label="Карточка брони" data-testid="booking-card-form">
+      <BookingActionForm action={saveCardAction} className="mt-4 grid gap-3" label="Карточка брони" dataTestId="booking-card-form">
         <input type="hidden" name="branchId" value={branchId} />
         <input type="hidden" name="date" value={date} />
         <input type="hidden" name="reservationId" value={view.reservationId} />
@@ -246,7 +247,7 @@ export function BookingCardPanel({ view, branchId, date, closeHref, backHref, sa
             <Link href={backHref} scroll={false} className={ghost}>К брони</Link>
           </div>
         ) : <Link href={backHref} scroll={false} className={ghost}>К брони</Link>}
-      </form>
+      </BookingActionForm>
 
       <section aria-label="История изменений" className="mt-5">
         <h3 className="text-sm font-black text-grape-800">История события</h3>

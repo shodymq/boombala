@@ -171,6 +171,10 @@ function eventsFromSheet(sheet: Awaited<ReturnType<typeof readSheet>>, rooms: Ro
       continue;
     }
     const startMinutes = Number(normalized.time.slice(0, 2)) * 60 + Number(normalized.time.slice(3, 5));
+    if (startMinutes % 60 !== 0) {
+      unresolved.push({ rowNumber: source.rowNumber, sourceKey: identity.sourceKey, status: "manual_review", safeCode: "start_not_whole_hour", raw });
+      continue;
+    }
     if (startMinutes < 600 || startMinutes + 240 > 1320) {
       unresolved.push({ rowNumber: source.rowNumber, sourceKey: identity.sourceKey, status: "manual_review", safeCode: "outside_working_hours", raw });
       continue;

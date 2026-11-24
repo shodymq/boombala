@@ -126,7 +126,7 @@ export default async function OperationsPage() {
                         <p className="break-words text-base font-extrabold text-grape-900">{event.room} <span aria-hidden="true">·</span> {event.packageName}</p>
                       </div>
                       {event.recordStatus === "confirmed" ? (
-                        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3 xl:grid-cols-5">
+                        <dl className="grid grid-cols-1 gap-x-4 gap-y-3 text-sm min-[390px]:grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
                           <div>
                             <dt className="font-semibold text-muted">Ответственный</dt>
                             <dd className="mt-0.5 font-bold text-ink">{event.responsibleManager ?? "Не назначен"}</dd>
