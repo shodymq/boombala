@@ -33,7 +33,7 @@ function setupCrmSyncIdAutomation() {
   const sheet = spreadsheet.getSheetByName(CRM_SYNC_ID_CONFIG.sheetName);
   if (!sheet) throw new Error("crm_sync_sheet_not_found");
 
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
     const header = findHeader_(sheet);
@@ -54,7 +54,7 @@ function handleCrmSyncIdEdit(event) {
   const sheet = event.range.getSheet();
   if (sheet.getName() !== CRM_SYNC_ID_CONFIG.sheetName) return;
 
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
     const header = findHeader_(sheet);
@@ -77,7 +77,7 @@ function handleCrmSyncIdChange(event) {
 
   const sheet = event.source.getSheetByName(CRM_SYNC_ID_CONFIG.sheetName);
   if (!sheet) throw new Error("crm_sync_sheet_not_found");
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
     const header = findHeader_(sheet);
