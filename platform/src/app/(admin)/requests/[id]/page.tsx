@@ -96,6 +96,22 @@ export default async function RequestCardPage({ params, searchParams }: { params
         {lead.reservationId ? <p className="mt-4 text-sm"><Link href={`/bookings?date=${lead.requestedDate}`} className="font-extrabold text-grape-700 underline">Показать бронь в календаре</Link></p> : null}
       </section>
 
+      {lead.possibleDuplicates.length ? (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4" aria-labelledby="possible-duplicate-title" role="status">
+          <h2 id="possible-duplicate-title" className="font-black text-amber-950">Проверьте возможные совпадения</h2>
+          <p className="mt-1 text-sm text-amber-950">Есть другие активные заявки этого клиента на ту же дату. Это только подсказка: разные заказы не объединяются автоматически.</p>
+          <ul className="mt-2 grid gap-1 text-sm">
+            {lead.possibleDuplicates.map((candidate) => (
+              <li key={candidate.id}>
+                <Link href={`/requests/${encodeURIComponent(candidate.id)}`} className="font-bold underline">
+                  Заявка №{candidate.seq} · {STATUS[candidate.status] ?? candidate.status} · {candidate.requestedDate}{candidate.preferredStartTime ? ` · ${candidate.preferredStartTime}` : ""}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {open ? (
         <section className={panel} aria-labelledby="req-actions">
           <h2 id="req-actions" className="text-lg font-black text-grape-800">Действия</h2>

@@ -29,7 +29,7 @@ const FUTURE = (() => {
 const KEY = Buffer.alloc(32, 21).toString("base64");
 
 /** Tables the public API must never reach. Every table of the schema is either in API_GRANTS or here, so a new table forces a decision. */
-const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections", "booking_operations", "manual_payment_facts", "sheet_sync_runs", "sheet_sync_records", "booking_cards", "booking_card_events", "guest_tariffs", "package_archive", "package_program_options", "package_program_rules", "package_versions", "program_options"];
+const API_CLOSED = ["users", "sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "export_log", "retention_settings", "schema_migrations", "contacts", "lead_requests", "consent_registrations", "consent_events", "outbox", "audit_log", "attendance_entries", "attendance_corrections", "booking_operations", "manual_payment_facts", "sheet_sync_runs", "sheet_sync_records", "sheet_sync_webhook_requests", "sheet_sync_webhook_nonces", "booking_cards", "booking_card_events", "guest_tariffs", "package_archive", "package_program_options", "package_program_rules", "package_versions", "program_options"];
 
 describe("Database roles: one per application, least privilege", () => {
   let db: TestDb;
@@ -493,6 +493,15 @@ describe("Database roles: one per application, least privilege", () => {
     it("may use the sequences it needs (serial columns), and nothing else about them is a way in", async () => {
       const seqs = (await db.pool.query("SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'bb' AND c.relkind = 'S'")).rows;
       for (const q of seqs) assert.equal((await db.pool.query("SELECT has_sequence_privilege('bb_admin', $1::oid, 'USAGE') AS ok", [q.oid])).rows[0].ok, true);
+    });
+
+    it("can expire replay nonces without deleting webhook request audit or booking history", async () => {
+      const requestId = randomUUID();
+      await admin.query("INSERT INTO bb.sheet_sync_webhook_requests (request_id,body_hash,status) VALUES ($1,$2,'completed')", [requestId, "a".repeat(64)]);
+      await admin.query("INSERT INTO bb.sheet_sync_webhook_nonces (nonce,request_id,received_at) VALUES ($1,$2,now()-interval '2 days')", [randomUUID(), requestId]);
+      assert.equal((await admin.query("DELETE FROM bb.sheet_sync_webhook_nonces WHERE request_id=$1 AND received_at < now()-interval '1 day'", [requestId])).rowCount, 1);
+      await denied(admin, "DELETE FROM bb.sheet_sync_webhook_requests WHERE request_id=$1", [requestId]);
+      await denied(admin, "DELETE FROM bb.slot_reservations");
     });
 
     it("cannot change the structure, empty a table, rewrite the append-only history or become more powerful", async () => {

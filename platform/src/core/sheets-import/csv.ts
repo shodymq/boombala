@@ -1,5 +1,5 @@
 import { isBlank, mapHeader, rowFromCells } from "./normalize.ts";
-import type { SheetRead } from "./reader.ts";
+import type { SheetRead } from "./types.ts";
 
 /** RFC 4180 parser (quotes, doubled quotes, CRLF, BOM). Delimiter is detected from the header line: `,` or `;` or tab. */
 export function parseCsv(text: string): string[][] {

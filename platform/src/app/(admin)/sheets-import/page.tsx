@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requirePermission } from "@/server/dal";
 import { runBookingSheetsBlockImport } from "./actions";
-import { runSheetsSyncNow } from "./actions";
-import { getLatestSheetSyncStatus } from "@/server/sheets-live-sync";
+import { bridgeRpc, legacyBridgeEnabled } from "@/server/bridge-client";
+import { SESSION_COOKIE } from "@/server/env";
+import { getLatestSheetSyncStatus, type SheetSyncStatus } from "@/server/sheets-sync-status";
 
 export const metadata: Metadata = { title: "Импорт праздников из таблицы" };
 
@@ -24,8 +26,9 @@ export default async function SheetsImportPage({ searchParams }: { searchParams:
   const query = await searchParams;
   const hasRun = single(query.run) === "1";
   const error = single(query.error);
-  const sync = await getLatestSheetSyncStatus();
-  const syncMessage = single(query.sync) === "1";
+  const sync = legacyBridgeEnabled()
+    ? await bridgeRpc<SheetSyncStatus>("sheets.status", {}, (await cookies()).get(SESSION_COOKIE)?.value ?? "")
+    : await getLatestSheetSyncStatus();
 
   return (
     <div className="grid gap-5">
@@ -56,15 +59,13 @@ export default async function SheetsImportPage({ searchParams }: { searchParams:
         </p>
       ) : null}
 
-      {syncMessage ? <p role="status" className="rounded-xl border border-line bg-white p-3 text-sm">Проверка источника завершена. Подробные данные и контакты не включаются в журналы.</p> : null}
-
       <section className="rounded-2xl border border-line bg-white p-4 sm:p-6" aria-labelledby="sheets-sync-title">
-        <h2 id="sheets-sync-title" className="font-black text-grape-800">Односторонняя синхронизация Google Sheets</h2>
-        <p className="mt-2 text-sm leading-6">Источник: «Банкеты» → «Лист1». Сервис читает таблицу через Google Sheets API и пишет только блокировки через штатный booking writer. Предоплаты из таблицы не становятся финансовыми фактами. Удаление строки только создаёт отметку для ручной сверки.</p>
+        <h2 id="sheets-sync-title" className="font-black text-grape-800">Google Sheets Live Sync</h2>
+        <p className="mt-2 text-sm leading-6">Источник: «Банкеты» → «Лист1». Приватный standalone Apps Script владельца отправляет полный подписанный снимок по HTTPS; backend на VPS пишет только блокировки через штатный booking writer. Предоплаты из таблицы не становятся финансовыми фактами. Удаление строки только создаёт отметку для ручной сверки.</p>
         <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <div><dt className="text-muted">Последний запуск</dt><dd className="font-bold">{sync.lastUpdated ? new Date(sync.lastUpdated).toLocaleString("ru-RU", { timeZone: "Asia/Almaty" }) : "нет"}</dd></div>
           <div><dt className="text-muted">Результат</dt><dd className="font-bold">{sync.outcome ?? "нет данных"}{sync.safeErrorCode ? ` · ${sync.safeErrorCode}` : ""}</dd></div>
-          <div><dt className="text-muted">Режим</dt><dd className="font-bold">{sync.enabled ? "запись включена" : "выключено / dry-run"}</dd></div>
+          <div><dt className="text-muted">Режим записи</dt><dd className="font-bold">{sync.enabled ? "разрешён сервером" : "выключен / dry-run"}</dd></div>
           <div><dt className="text-muted">Конфликты</dt><dd className="font-bold">{sync.counts?.conflicts ?? 0}</dd></div>
           <div><dt className="text-muted">Ошибки</dt><dd className="font-bold">{sync.counts?.errors ?? 0}</dd></div>
           <div><dt className="text-muted">Новые записи</dt><dd className="font-bold">{sync.counts?.created ?? 0}</dd></div>
@@ -87,10 +88,7 @@ export default async function SheetsImportPage({ searchParams }: { searchParams:
             </div>
           </div>
         ) : null}
-        <form action={runSheetsSyncNow} className="mt-4">
-          <button type="submit" className="min-h-11 rounded-full bg-grape-700 px-5 font-extrabold text-white hover:bg-grape-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-grape-800">Синхронизировать сейчас</button>
-          <p className="mt-2 text-xs text-muted">Пока SHEETS_SYNC_ENABLED не включён, кнопка выполняет dry-run без изменений календаря.</p>
-        </form>
+        <p className="mt-4 text-xs text-muted">Приватный проект GAS не расшаривается с менеджерами. HTTPS-маршрут и автоматический таймер выключены до отдельного разрешения; эта страница не запускает синхронизацию.</p>
       </section>
 
       <section className="rounded-2xl border border-line bg-white p-4 sm:p-6">

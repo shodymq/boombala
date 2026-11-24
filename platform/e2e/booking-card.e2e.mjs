@@ -101,6 +101,10 @@ async function session(email) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${email}: ${e.stack ?? e.message}`));
+  if (process.env.E2E_VERBOSE) {
+    page.on("requestfailed", (request) => console.error(`[${email}] request failed ${request.method()} ${request.url()} ${request.failure()?.errorText ?? "unknown"}`));
+    page.on("console", (message) => { if (message.type() === "error") console.error(`[${email}] browser console: ${message.text()}`); });
+  }
   await page.goto(`${FRONT}/login`);
   await page.fill('input[type="email"]', email);
   await page.fill('input[type="password"]', PW);

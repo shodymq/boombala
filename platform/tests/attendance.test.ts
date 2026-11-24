@@ -577,7 +577,7 @@ describe("Deployment order: migrations -> roles -> verification", () => {
       const { writeFileSync, readFileSync } = await import("node:fs");
       writeFileSync(join(edited, "013_attendance.sql"), readFileSync(join(edited, "013_attendance.sql"), "utf8") + "\n-- edited\n");
       const r1 = await preflight(db.pool, edited);
-      assert.ok(r1.problems.some((p) => p.startsWith("migration_changed_after_apply: 013_attendance.sql")));
+      assert.ok(r1.problems.some((p) => p.startsWith("migration_changed_after_apply: 013_attendance.sql")), r1.problems.join("; "));
       writeFileSync(join(edited, "014_future.sql"), "SELECT 1;");
       assert.ok((await preflight(db.pool, edited)).problems.some((p) => p.startsWith("migration_missing: 014_future.sql")));
     } finally {

@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { almatyToday } from "../src/core/dates.ts";
 import {
-  ensureStaging, googleSheetsClient, parseAmount, parseCsv, readCsv, loadCatalog, loadCrmSnapshot, normalizeRow, readSheet, reconcile, stageRows, summarize,
-  type CrmSnapshot, type RawRow, type SheetsClient,
+  ensureStaging, parseAmount, parseCsv, readCsv, loadCatalog, loadCrmSnapshot, normalizeRow, reconcile, stageRows, summarize,
+  type CrmSnapshot, type RawRow,
 } from "../src/core/sheets-import/index.ts";
 import { seedFromSite, startTestDb, type TestDb } from "./helpers/db.ts";
 
@@ -146,22 +145,8 @@ describe("sheets import: reconciliation", () => {
   });
 });
 
-describe("sheets import: reader", () => {
-  const sheetRows = [["Банкеты"], HEADER, ["20.11.2026", "14:00", "Стандарт", "", "Космос", "К", "8 707 111 22 33", "Р", "7", "20000", "10", "5"], [], ["", "", "", "", "", "", "", "", "", "", "", ""],
-    ["21.11.2026", "10:00", "Стандарт", "", "Джунгли", "К2", "8 707 111 22 44", "", "", "", "", ""]];
-  const fake: SheetsClient = {
-    getMeta: async () => ({ timeZone: "Europe/Moscow", sheets: [{ sheetId: 77, title: "Лист 1", rowCount: 1000 }] }),
-    getValues: async () => sheetRows,
-  };
-  it("reads the whole used range, finds the header below a title row and skips blank rows", async () => {
-    const r = await readSheet(fake, SID);
-    assert.equal(r.rows.length, 2);
-    assert.equal(r.blankRows, 2);
-    assert.equal(r.sheetId, 77);
-    assert.equal(r.rows[1].source.rowNumber, 6);
-    assert.equal(r.spreadsheetTimeZone, "Europe/Moscow");
-  });
-  it("CSV goes through the same normalizer and reconciliation as the API and yields identical keys", async () => {
+describe("sheets import: local CSV", () => {
+  it("uses the canonical normalizer and preserves identity when row positions change", () => {
     const csv = "\uFEFF" + [HEADER.join(";"), "20.11.2026;13:00;Стандарт;;Космос;\"К, Клиент\";8 707 111 22 33;Р;7;20000;10;5", ";;;;;;;;;;;", "21.11.2026;16:00;Стандарт;;Джунгли;К2;8 707 111 22 44;;;;;"].join("\r\n");
     const c = readCsv(csv, { spreadsheetId: SID, sheetId: 77 });
     assert.equal(c.rows.length, 2);
@@ -170,33 +155,15 @@ describe("sheets import: reader", () => {
     assert.deepEqual(viaCsv.map((r) => r.time), ["13:00", "16:00"]);
     assert.ok(viaCsv.every((r) => r.status === "CANDIDATE"));
     assert.equal(viaCsv[0].customerName, "К, Клиент");
-    const api = await readSheet({ getMeta: async () => ({ timeZone: "Europe/Moscow", sheets: [{ sheetId: 77, title: "x", rowCount: 9 }] }), getValues: async () => parseCsv(csv) }, SID);
-    const viaApi = reconcile(api.rows.map((r) => normalizeRow(r.raw, r.source, CATALOG)), EMPTY_CRM, TODAY);
-    assert.deepEqual(viaApi.map((r) => [r.sourceKey, r.fingerprint]), viaCsv.map((r) => [r.sourceKey, r.fingerprint]));
+
+    const shiftedCsv = [HEADER.join(";"), ";;;;;;;;;;;", ...parseCsv(csv).slice(1).map((row) => row.join(";"))].join("\r\n");
+    const shifted = readCsv(shiftedCsv, { spreadsheetId: SID, sheetId: 77 });
+    const shiftedRows = shifted.rows.map((r) => normalizeRow(r.raw, r.source, CATALOG));
+    assert.equal(shiftedRows[0].source.rowNumber, viaCsv[0].source.rowNumber + 1);
+    assert.deepEqual(shiftedRows.map((r) => [r.sourceKey, r.fingerprint]), viaCsv.map((r) => [r.sourceKey, r.fingerprint]));
   });
   it("a CSV without the header fails without echoing any cell", () => {
     assert.throws(() => readCsv("secret,+77070000000\nx,y", { spreadsheetId: SID, sheetId: 1 }), (e: Error) => e.message === "header_not_found");
-  });
-  it("uses the read-only scope, sends only a bearer token and never writes", async () => {
-    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const calls: Array<{ url: string; method: string; body?: string }> = [];
-    const f = (async (url: string | URL | Request, init: RequestInit = {}) => {
-      calls.push({ url: String(url), method: init.method ?? "GET", body: init.body ? String(init.body) : undefined });
-      if (String(url).includes("oauth2")) return new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }));
-      return new Response(JSON.stringify({ values: [["x"]] }));
-    }) as typeof fetch;
-    const c = googleSheetsClient({ client_email: "sa@example.iam", private_key: privateKey.export({ type: "pkcs8", format: "pem" }).toString() }, f);
-    await c.getValues(SID, "'A'");
-    assert.ok(calls.every((x) => x.method === "GET" || x.url.includes("oauth2")));
-    const assertion = new URLSearchParams(calls[0].body).get("assertion")!;
-    assert.ok(Buffer.from(assertion.split(".")[1], "base64url").toString().includes("spreadsheets.readonly"));
-    assert.ok(!Buffer.from(assertion.split(".")[1], "base64url").toString().includes("auth/spreadsheets\""));
-  });
-  it("explains a missing share instead of failing silently", async () => {
-    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const f = (async (url: string | URL | Request) => (String(url).includes("oauth2") ? new Response(JSON.stringify({ access_token: "t", expires_in: 3600 })) : new Response("", { status: 403 }))) as typeof fetch;
-    const c = googleSheetsClient({ client_email: "sa@example.iam", private_key: privateKey.export({ type: "pkcs8", format: "pem" }).toString() }, f);
-    await assert.rejects(c.getMeta(SID), /sheets_access_denied/);
   });
 });
 

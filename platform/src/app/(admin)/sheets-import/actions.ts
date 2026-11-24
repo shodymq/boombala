@@ -6,7 +6,6 @@ import { importBookingSheetBlocks, parseBookingSheetsText, SheetBlockImportError
 import { FastApiCrmError, legacyCrmBridgeEnabled, unifiedFastapiCrmEnabled } from "@/server/fastapi-crm";
 import { withFastApiClient } from "@/server/crm-actor";
 import { requirePermission } from "@/server/dal";
-import { runSheetsLiveSync } from "@/server/sheets-live-sync";
 
 function fail(code: string): never {
   const safe = /^[a-z0-9_]{1,60}$/.test(code) ? code : "import_failed";
@@ -42,18 +41,4 @@ export async function runBookingSheetsBlockImport(formData: FormData): Promise<v
   const params = new URLSearchParams({ run: "1" });
   for (const [key, value] of Object.entries(result.counts)) params.set(key, String(value));
   redirect(`/sheets-import?${params.toString()}`);
-}
-
-/** Owner-only manual trigger for the server-side, read-only Sheets reader and the shared production booking writer. */
-export async function runSheetsSyncNow(): Promise<void> {
-  const session = await requirePermission("bookings.manage");
-  if (session.user.role !== "owner") redirect("/bookings?error=forbidden");
-  try {
-    await runSheetsLiveSync({ mode: "auto", trigger: "manual" });
-  } catch (error) {
-    const code = error instanceof Error && /^[a-z0-9_]{1,60}$/.test(error.message) ? error.message : "sync_failed";
-    fail(code);
-  }
-  revalidatePath("/sheets-import");
-  redirect("/sheets-import?sync=1");
 }
