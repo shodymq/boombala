@@ -71,13 +71,16 @@ sudo -u postgres pgbackrest --stanza=boombala --repo=1 verify
 
 Only if a second repository is actually configured and healthy, repeat with `--repo=2`. Do not claim independent disaster recovery from repo1. Run the already-validated isolated restore verifier against this fresh backup; require PostgreSQL startup, table/migration/checksum parity, RLS and booking-constraint checks to PASS. If the verifier or restore target is unavailable, stop before migration. No Production restore or replacement is part of this release.
 
-## 3. Prove migrations 017→019 on the isolated restored copy
+## 3. Prove migrations 017→022 on the isolated restored copy
 
-The migration order is exactly:
+The migration runner applies the pending files in lexical order. For this RC, prove this exact sequence on the isolated restored copy:
 
-1. `017_sheets_live_sync.sql` — adds shared occupancy and sync metadata; it does not replace or delete reservation IDs.
-2. `018_birthday_crm_v2.sql` — adds V4.2 catalog and booking-card history additively; it does not rewrite historical payment facts. Legacy package retirement is a later, separate catalog operation.
-3. `019_lead_preferred_start_time.sql` — adds nullable `preferred_start_time` and a new intake overload while retaining the old overload.
+1. `017_sheets_live_sync.sql` — adds shared occupancy and sync metadata, retaining reservation IDs and payment facts.
+2. `018_birthday_crm_v2.sql` — adds the V4.2 catalog and booking-card history; it does not rewrite historical payment facts or retire legacy packages.
+3. `019_lead_preferred_start_time.sql` — adds nullable `preferred_start_time` and an intake overload while retaining the old signature.
+4. `020_lead_follow_up.sql` — adds follow-up fields to existing requests; current IDs/statuses remain intact.
+5. `021_booking_whole_hour_starts.sql` — validates whole-hour starts for new reservation inserts only. It does not rewrite existing off-hour reservations; legacy intervals remain visible and continue to occupy their rooms.
+6. `022_sheets_apps_script_webhook.sql` — adds webhook request/nonce audit storage. It does not publish/enable the endpoint, change nginx, or install a timer.
 
 On a disposable restored clone only, run the same release scripts with the clone's owner connection. Never point these commands at Production during this proof:
 
@@ -92,15 +95,16 @@ npm run verify:roles
 npm run backup:check
 ```
 
-Require the clone to report migrations 001–019 with matching checksums, `preflight: OK`, role verification PASS, all three V4.2 IDs (`happy-party`, `star-party`, `boom-bala-party`) with approved prices, and unchanged active-block IDs/fingerprint and payment-fact aggregate. Destroy only the isolated clone using the verifier's guaranteed cleanup. Do not run `catalog:retire-legacy` during this release; retain compatibility until the new public site is confirmed live.
+Require the clone to report migrations 001–022 with matching checksums, `preflight: OK`, role verification PASS, all three V4.2 IDs (`happy-party`, `star-party`, `boom-bala-party`) with approved prices, and unchanged active reservation/block IDs, ownership mappings, and payment-fact aggregate. Check existing non-whole-hour reservations remain present and continue to occupy their original intervals. Repeat the sync handover regression on the clone. Destroy only the isolated clone using the verifier's guaranteed cleanup. Do not run `catalog:retire-legacy` or activate Sheets writes; retain old package IDs and all CRM-owned reservations.
 
 ## 4. Production rollout order (after a separate GO)
 
 The live site is already configured for `LEAD_PIPELINE=strict`; confirm that fact and the absence of `DATABASE_URL` / `TELEGRAM_*` in the site environment without printing values. Confirm `PLATFORM_URL` targets the loopback API and the site/API intake-token fingerprints match, without displaying tokens. Confirm `PLATFORM_PROFILE=kz-production`, `LEAD_PIPELINE=strict`, and `TELEGRAM_NOTIFY_LEVEL=minimal`.
 
-1. Re-run the aggregate baseline and fresh-backup/restore gates above immediately before the window. Verify the Sheets timer is disabled and remains disabled.
+0. **Vercel Preview gate:** build the exact integration PR SHA as Preview for the connected `boombala` and `boombala-platform` projects. Confirm each READY deployment's Git SHA equals the reviewed RC and run the CRM browser smoke through the Preview bridge. Recent PR checks were `Ignored` by the Vercel build-ignore step; a cancelled/ignored check is not a build. Do not promote Preview or merge into the configured Production branch as a substitute for this gate. Confirm the project's Production Branch and auto-deploy behavior in Vercel before any merge; if unavailable, keep merge blocked.
+1. Re-run the aggregate baseline and fresh-backup/restore gates above immediately before the window. Verify the Sheets timer is absent/disabled and the webhook/apply flags are disabled.
 2. Install the verified artifact under a new immutable `/opt/boombala/releases/<full-sha>/` directory. Verify its archive SHA and `RELEASE.json`; prepare writable `.next/cache` directories for the service users. Do not change either active symlink yet.
-3. Apply the migrations on Production in order 017, 018, 019 using the tested owner environment. The migration runner applies pending files in order: `npm run db:migrate`.
+3. Apply pending migrations in order 017, 018, 019, 020, 021, 022 using the tested owner environment. The migration runner applies pending files in order: `npm run db:migrate`.
 4. Immediately refresh app-role grants because migrations can replace function ACLs:
 
    ```sh
@@ -110,10 +114,11 @@ The live site is already configured for `LEAD_PIPELINE=strict`; confirm that fac
    ```
 
    Run this from the protected migration environment; do not put secret values on a command line or in shell history. `preflight:final` is intentionally not used here because legacy package retirement is not part of this release.
-5. Switch `/opt/boombala/platform` atomically to the verified release and restart only `bb-api.service` and `bb-admin.service`; keep `bb-outbox.timer` active. Check their health and safe logs. The old site remains compatible with the retained intake-function overload.
-6. Switch `/opt/boombala/site` atomically to the same release and restart only `bb-site.service`. No nginx, DNS, PostgreSQL listener, firewall or WireGuard changes are part of this release.
-7. Run local loopback API/site health and external public smoke checks. Check `/`, `/birthdays`, `/consent`, `/rules`, `/personal-data-consent`, `/privacy`, and `/menu`; confirm the site has the short consent UI and independent legal links. Do not enable the Sheets timer.
-8. Run the synthetic strict end-to-end scenario described below only after owner GO. It creates one clearly marked synthetic request in Production, so it is excluded from this pre-GO preparation. The operator must preserve an audit record and remove only that tracked synthetic record using the approved cleanup path after verification.
+5. Switch `/opt/boombala/platform` atomically to the verified release and restart only `bb-api.service` and `bb-admin.service`; keep the existing outbox worker running unchanged. The Sheets webhook remains fail-closed and nginx does not proxy it. Check bridge health and safe logs.
+6. Promote/deploy the exact reviewed Platform Preview to the intended Production target only after the separate GO. If Production is connected to GitHub auto-deploy, follow the verified project Production Branch behavior; do not merge first and discover the deploy policy afterward. Keep rollback to the previous Production deployment immediately available.
+7. If the approved RC includes the strict public site change, switch `/opt/boombala/site` atomically to the same verified release and restart only `bb-site.service`. No nginx, DNS, PostgreSQL listener, firewall or WireGuard changes are part of this release.
+8. Run local bridge/site health and external smoke checks. Check `/`, `/birthdays`, `/consent`, `/rules`, `/personal-data-consent`, `/privacy`, and `/menu`; confirm the short consent UI and independent legal links. Keep `SHEETS_WEBHOOK_ENABLED=0`, `SHEETS_SYNC_ENABLED=0`; do not install/enable a timer.
+9. Run the synthetic strict end-to-end scenario described below only after owner GO. It creates one clearly marked synthetic request in Production, so it is excluded from this pre-GO preparation. Preserve its audit record and remove only that tracked synthetic record using the approved cleanup path after verification.
 
 ## 5. Strict intake acceptance checks
 
@@ -134,11 +139,11 @@ Never send a real client's details as a test. Do not run a bulk retry of `dead` 
 
 Before switching, record the exact old site/platform symlink targets and retain the prior release directory. If API/admin/site smoke fails:
 
-1. Point only `/opt/boombala/site` and `/opt/boombala/platform` back to their recorded old release targets.
-2. Restart only the services that were switched (`bb-site`, `bb-api`, `bb-admin`).
-3. Confirm the prior release serves traffic, strict intake is not silently redirected to a broken route, and all active-block fingerprints remain unchanged.
-4. Do not reverse migrations 017–019, edit historical legal records, alter bookings/payment facts, or re-enable Sheets sync during rollback. Migration 019 is additive and retains the legacy intake overload specifically for code rollback compatibility.
-5. If the DB preflight or role check fails after migration, keep the old code active if compatible, leave traffic/booking data untouched, capture only safe error codes, and stop for a database-specific recovery plan. Never restore over Production as an automatic rollback.
+1. Roll back the Vercel Production deployment to the recorded previous deployment if the CRM frontend was promoted; do not point users to a Preview URL.
+2. Point only `/opt/boombala/site` and `/opt/boombala/platform` back to their recorded old release targets and restart only the services actually switched (`bb-site`, `bb-api`, `bb-admin`).
+3. Keep webhook/apply flags off and the Sheets timer disabled. Confirm the prior release serves traffic, strict intake follows its tested compatible path, and active reservation/block fingerprints, payment facts, lead counts, and Sheets mappings match the post-migration checkpoint.
+4. Do not reverse migrations 017–022, edit historical legal records, alter bookings/payment facts, or re-enable Sheets sync during rollback. Migrations are additive; 019 retains the legacy intake overload. Never restore over Production as an automatic rollback.
+5. If DB preflight or role checks fail after migration, leave the old compatible code active, stop traffic changes, capture only safe error codes, and prepare a database-specific recovery plan.
 
 ## 7. Public privacy page — factual corrections pending owner/legal approval
 
