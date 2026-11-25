@@ -117,11 +117,20 @@ const shot = async (page, name) => SHOTS && (await page.screenshot({ path: join(
 const plusDays = (n) => new Date(Date.now() + 5 * 3600_000 + n * 86400_000).toISOString().slice(0, 10);
 const D = plusDays(30);
 const text = async (page, sel = "body") => (await page.locator(sel).first().innerText()).replace(/\s+/g, " ");
+async function closeMobileMenuIfOpen(page) {
+  const nav = page.locator('nav[aria-label="Разделы"]');
+  if (await nav.getAttribute("data-open") === "true") {
+    await page.getByRole("button", { name: "Закрыть меню" }).click();
+    await nav.locator(".snow-nav-sections").waitFor({ state: "hidden" });
+  }
+  return await nav.getAttribute("data-open");
+}
 const dbOne = async (sql, p = []) => (await owner.query(sql, p)).rows[0];
 let checkedMobileTimeStep = false;
 
 async function createRequest(page, { name, phone, room, start, pkg = "star-party", guestCount = 8 }) {
   await page.goto(`${FRONT}/bookings?date=${D}`);
+  await closeMobileMenuIfOpen(page);
   await page.locator(`[data-mobile-room="${room}"]`).getByRole("link", { name: /Создать бронь ·/ }).click();
   await page.waitForURL((u) => u.searchParams.get("new") === "1", { timeout: 10000 });
   await page.waitForSelector('form[aria-label="Новая заявка на праздник"]');
@@ -254,6 +263,7 @@ try {
   }
   await anna.setViewportSize({ width: 390, height: 450 });
   await anna.goto(`${FRONT}/bookings?date=${D}`);
+  ok(await closeMobileMenuIfOpen(anna) === "false", "secondary menu is closed before selecting a mobile booking slot");
   await anna.locator('[data-mobile-room="roblox-room"]').getByRole("link", { name: /Создать бронь ·/ }).click();
   await anna.waitForURL((u) => u.searchParams.get("new") === "1", { timeout: 10000 });
   await anna.waitForSelector('form[aria-label="Новая заявка на праздник"]', { timeout: 10000 });
