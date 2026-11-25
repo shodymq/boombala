@@ -42,7 +42,10 @@ export const API_GRANTS: Record<string, ApiTable> = {
 export const API_FUNCTION_PREFIX = "intake_";
 
 /** Tables the staff application may delete from (everything else is append-only or never deleted). */
-export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "news_posts", "news_images"] as const;
+export const ADMIN_DELETE = ["sessions", "login_attempts", "user_mfa", "mfa_recovery_codes", "news_posts", "news_images", "sheet_sync_webhook_nonces"] as const;
+// Added by migration 022. Older databases remain operable while being upgraded; when present, the nonce table is still
+// classified and receives only the bounded cleanup privilege below.
+const OPTIONAL_ADMIN_DELETE = new Set<string>(["sheet_sync_webhook_nonces"]);
 /** Append-only booking facts need no UPDATE/DELETE privilege; their triggers remain a second guard. */
 export const ADMIN_APPEND_ONLY = ["booking_operations", "manual_payment_facts", "booking_card_events", "guest_tariffs"] as const;
 
@@ -77,7 +80,9 @@ export async function applyRoles(pool: Pool, opts: RoleOptions): Promise<{ api: 
     )).rows.map((r) => r.column_name),
   );
   for (const t of Object.keys(API_GRANTS)) if (!tables.includes(t)) throw new Error(`API_GRANTS names a table that does not exist: ${t}`);
-  for (const t of ADMIN_DELETE) if (!tables.includes(t)) throw new Error(`ADMIN_DELETE names a table that does not exist: ${t}`);
+  for (const t of ADMIN_DELETE) {
+    if (!tables.includes(t) && !OPTIONAL_ADMIN_DELETE.has(t)) throw new Error(`ADMIN_DELETE names a table that does not exist: ${t}`);
+  }
 
   for (const role of [api, admin]) {
     await pool.query(`REVOKE ALL ON ALL TABLES IN SCHEMA bb FROM ${ident(role)}`);

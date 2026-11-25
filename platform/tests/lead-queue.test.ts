@@ -89,6 +89,26 @@ describe("request queue: server-side search, pagination, single record, counters
     assert.equal(await getLead(db.pool, manager, "1' OR '1'='1"), null);
   });
 
+  it("surfaces same-customer, same-date candidates without merging separate orders", async () => {
+    const contact = await db.pool.query<{ id: string }>(
+      "INSERT INTO bb.contacts (name,name_key,phone_e164,source) VALUES ('Synthetic duplicate customer','synthetic duplicate customer','+77070000001','birthday_form') RETURNING id",
+    );
+    const packageId = (await db.pool.query<{ id: string }>("SELECT id FROM bb.packages ORDER BY sort_order LIMIT 1")).rows[0].id;
+    const date = "2099-06-12";
+    const insertOrder = async (time: string | null) => db.pool.query<{ id: string }>(
+      `INSERT INTO bb.lead_requests (idempotency_key,contact_id,package_id,requested_date,preferred_start_time,children,status)
+       VALUES (gen_random_uuid(),$1,$2,$3,$4::time,6,'new') RETURNING id`,
+      [contact.rows[0].id, packageId, date, time],
+    );
+    const first = await insertOrder("13:00");
+    await insertOrder("18:00"); // same client/date, but a distinct requested start remains a separate order
+    await insertOrder(null); // even incomplete same-day enquiries are visible for a manager check
+    const detail = await getLead(db.pool, manager, first.rows[0].id);
+    assert.deepEqual(detail?.possibleDuplicates.map((candidate) => candidate.preferredStartTime).sort((a, b) => (a ?? "").localeCompare(b ?? "")), [null, "18:00"]);
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.lead_requests WHERE contact_id=$1 AND requested_date=$2", [contact.rows[0].id, date])).rows[0].n, 3);
+    assert.equal(new Set(detail?.possibleDuplicates.map((candidate) => candidate.id)).size, 2);
+  });
+
   it("shows the recorded manual prepayment on the record", async () => {
     const user = manager.id;
     await db.pool.query("INSERT INTO bb.manual_payment_facts (lead_request_id, amount_kzt, payment_method, idempotency_key, recorded_by) VALUES ($1, 10000, 'cash', 'k-lead-queue-1', $2)", [firstId, user]);
@@ -126,7 +146,7 @@ describe("request queue: server-side search, pagination, single record, counters
     const before = await dashboardCounters(db.pool, "manager");
     assert.equal(before.date, today);
     assert.deepEqual(before.bookings, { booked: 0, blocked: 0 });
-    assert.deepEqual(before.requests, { new: TOTAL - TOTAL / 10, inProgress: TOTAL / 10 });
+    assert.deepEqual(before.requests, { new: TOTAL - TOTAL / 10 + 3, inProgress: TOTAL / 10 }, "includes the three independent orders created by the duplicate-candidate test");
     await add("booking", room[0], slots[0], today);
     await add("booking", room[1], slots[0], today);
     await add("block", room[2], slots[1], today);

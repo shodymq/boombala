@@ -45,6 +45,8 @@ export interface LeadPage {
 export interface LeadDetail extends LeadQueueItem {
   /** Manual prepayment fact in tenge, or null when none is recorded. */
   prepaymentKzt: number | null;
+  /** Same customer/date candidates for manager review only. Similarity never merges or suppresses orders. */
+  possibleDuplicates: Array<{ id: string; seq: number; status: string; requestedDate: string; preferredStartTime: string | null }>;
 }
 
 const LEAD_COLUMNS = `l.id, l.seq, l.created_at, l.status, c.name, c.phone_e164, to_char(l.requested_date, 'YYYY-MM-DD') AS requested_date,
@@ -137,12 +139,22 @@ export async function getLead(pool: Pool, actor: Actor, id: string): Promise<Lea
   assertCan(actor, "requests.manage");
   if (!UUID.test(id)) return null;
   const { rows } = await pool.query(
-    `SELECT ${LEAD_COLUMNS}, (SELECT p.amount_kzt FROM bb.manual_payment_facts p WHERE p.lead_request_id = l.id ORDER BY p.created_at LIMIT 1) AS prepayment_kzt
+    `SELECT ${LEAD_COLUMNS}, c.name_key AS contact_name_key,
+            (SELECT p.amount_kzt FROM bb.manual_payment_facts p WHERE p.lead_request_id = l.id ORDER BY p.created_at LIMIT 1) AS prepayment_kzt
        FROM bb.lead_requests l JOIN bb.contacts c ON c.id = l.contact_id LEFT JOIN bb.users assignee ON assignee.id = l.assigned_to WHERE l.id = $1`,
     [id],
   );
   if (!rows[0]) return null;
-  return { ...leadRow(rows[0]), prepaymentKzt: rows[0].prepayment_kzt === null ? null : Number(rows[0].prepayment_kzt) };
+  const possibleDuplicates = (await pool.query<{ id: string; seq: number; status: string; requested_date: string; preferred_start_time: string | null }>(
+    `SELECT l.id,l.seq,l.status,to_char(l.requested_date,'YYYY-MM-DD') AS requested_date,
+            to_char(l.preferred_start_time,'HH24:MI') AS preferred_start_time
+       FROM bb.lead_requests l JOIN bb.contacts c ON c.id=l.contact_id
+      WHERE l.id<>$1 AND c.phone_e164=$2 AND c.name_key=$3 AND l.requested_date=$4::date
+        AND l.status IN ('new','in_progress','confirmed')
+      ORDER BY l.created_at DESC,l.seq DESC LIMIT 10`,
+    [id, rows[0].phone_e164, rows[0].contact_name_key, rows[0].requested_date],
+  )).rows.map((row) => ({ id: row.id, seq: Number(row.seq), status: row.status, requestedDate: row.requested_date, preferredStartTime: row.preferred_start_time }));
+  return { ...leadRow(rows[0]), prepaymentKzt: rows[0].prepayment_kzt === null ? null : Number(rows[0].prepayment_kzt), possibleDuplicates };
 }
 
 export interface DashboardCounters {

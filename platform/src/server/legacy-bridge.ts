@@ -31,6 +31,7 @@ import { writeAudit } from "../core/audit.ts";
 import { ensureCard, followReschedule, getCardView, handoverSheetRecord, parseCardPatch, recordCancellation, recordPrepayment, saveCard } from "../core/booking-card.ts";
 import { mfaRequired, mfaKey } from "./env.ts";
 import { getPool } from "./db.ts";
+import { getLatestSheetSyncStatus } from "./sheets-sync-status.ts";
 import { requestMeta } from "./request.ts";
 import { runWithPerf } from "../core/perf.ts";
 import type { RawRow } from "../core/sheets-import/types.ts";
@@ -62,9 +63,30 @@ async function persistSheetSyncRecord(tx: import("../core/db.ts").Client, record
      VALUES ($1,$2,$3,$4,'active',$5,$6::jsonb,now(),NULL,now())
      ON CONFLICT (source_key) DO UPDATE SET fingerprint=EXCLUDED.fingerprint,legacy_key_prefix=EXCLUDED.legacy_key_prefix,
        reservation_id=EXCLUDED.reservation_id,state='active',safe_review_code=NULL,source_row_number=EXCLUDED.source_row_number,
-       source_payload=EXCLUDED.source_payload,last_seen_at=now(),missing_since=NULL,updated_at=now()`,
+       source_payload=EXCLUDED.source_payload,last_seen_at=now(),missing_since=NULL,updated_at=now()
+     WHERE bb.sheet_sync_records.state <> 'crm_managed'`,
     [record.sourceKey, record.fingerprint, record.legacyKeyPrefix, reservationId, record.sourceRowNumber, JSON.stringify(record.sourcePayload)],
   );
+}
+
+/** Fence every booking-writer mutation against a concurrent CRM handover. Lock order matches handoverSheetRecord:
+ * reservation row first (when present), then the source-ownership row. */
+async function lockSheetSyncOwnership(
+  tx: import("../core/db.ts").Client,
+  record: SheetSyncRecordInput,
+  expectedReservationId?: string,
+): Promise<void> {
+  const result = await tx.query<{ state: string; reservation_id: string | null }>(
+    "SELECT state,reservation_id FROM bb.sheet_sync_records WHERE source_key=$1 FOR UPDATE",
+    [record.sourceKey],
+  );
+  const current = result.rows[0];
+  if (!current) return;
+  if (current.state === "crm_managed") throw new ConflictError("source_handed_over");
+  if (expectedReservationId && current.reservation_id && current.reservation_id !== expectedReservationId) {
+    throw new ConflictError("source_reservation_changed");
+  }
+  if (!expectedReservationId && current.reservation_id) throw new ConflictError("source_reservation_already_mapped");
 }
 
 function serviceToken(): string {
@@ -624,6 +646,7 @@ async function bridgeRescheduleWithActor(pool: Pool, actor: Actor, input: Record
     const old = await tx.query<{ kind: "booking" | "block"; room_id: string; lead_request_id: string | null; contact_id: string | null; package_id: string | null; children: number | null; price_kzt: number | null; price_source: string | null; note: string | null; created_by: string; slot_date: string; start_time: string }>("SELECT kind,room_id,lead_request_id,contact_id,package_id,children,price_kzt,price_source,note,created_by,to_char(slot_date,'YYYY-MM-DD') slot_date,to_char(starts_at AT TIME ZONE 'Asia/Almaty','HH24:MI') start_time FROM bb.slot_reservations WHERE id=$1 AND released_at IS NULL FOR UPDATE", [id]);
     if (!old.rows[0]) throw new NotFoundError();
     if (sourceSync && old.rows[0].kind !== "block") throw new ConflictError("source_sync_only_manages_blocks");
+    if (sourceSync && syncRecord) await lockSheetSyncOwnership(tx, syncRecord, id);
     const { startSql, endSql } = almatyInterval(date, start);
     await tx.query("UPDATE bb.slot_reservations SET released_at=now(),released_by=$2,release_reason='rescheduled' WHERE id=$1", [id, actor.id]);
     const nextNote = sourceSync ? text(input.note, 300) : old.rows[0].note;
@@ -708,6 +731,7 @@ async function bridgeBlockWithActor(pool: Pool, actor: Actor, input: Record<stri
   ensureKnownBranch(input.branchId);
   const key = text(input.idempotencyKey, 200); const date = parseDate(input.bookingDate); const start = parseTime(input.startTime); ensureWorkingHours(start); const roomId = text(input.roomId, 120); const { startSql, endSql } = almatyInterval(date, start);
   return ensureIdempotent(pool, actor, key, "block", input, async (tx) => {
+    if (sourceSync && syncRecord) await lockSheetSyncOwnership(tx, syncRecord);
     const row = await tx.query<{ id: string }>("INSERT INTO bb.slot_reservations (kind,slot_date,slot_id,room_id,note,created_by,starts_at,ends_at) VALUES ('block',$1,NULL,$2,$3,$4,$5,$6) RETURNING id", [date, roomId, text(input.reason, 300), actor.id, startSql, endSql]);
     if (sourceSync && syncRecord) await persistSheetSyncRecord(tx, syncRecord, row.rows[0].id);
     if (sourceSync) await writeAudit(tx, { actorUserId: actor.id, action: "sheet_sync.block_created", entityType: "slot_reservation", entityId: row.rows[0].id, after: { date, roomId, start }, ...meta });
@@ -776,6 +800,10 @@ async function rpcCore(request: NextRequest, marks: { op: string; sessionMs: num
       case "calendar.catalog": return Response.json(await bookingCatalog(pool), { headers: { "Cache-Control": "no-store" } });
       case "calendar.timeline": return Response.json(await bookingTimeline(pool, session, parseDate(input.date)), { headers: { "Cache-Control": "no-store" } });
       case "operations.overview": return Response.json(await operationsOverview(pool, session, input.dates), { headers: { "Cache-Control": "no-store" } });
+      case "sheets.status": {
+        if (session.user.role !== "owner" || !can(session.user.role, "bookings.manage")) throw new ForbiddenError();
+        return Response.json(await getLatestSheetSyncStatus(pool), { headers: { "Cache-Control": "no-store" } });
+      }
       case "calendar.leads": { const leads = await listLeads(pool, actor, {}); return Response.json({ items: leads.map((l) => ({ id: l.id, type: "birthday_request", status: l.status, phone: l.phone, customerName: l.name, createdAt: l.createdAt.toISOString(), requestedDate: l.requestedDate, branch: { id: "almaty" } })), total: leads.length }); }
       case "calendar.lead": { const state = await calendarLeadState(pool, text(input.id, 80)); if (!state) throw new NotFoundError(); return Response.json(state); }
       case "booking.request": return Response.json(await bridgeCreateRequest(pool, session, input));

@@ -38,7 +38,12 @@ const leadRow = z.object({
   followUpOverdue: z.boolean(),
 });
 const leadPage = z.object({ items: z.array(leadRow), total: z.number(), page: z.number(), pageSize: z.number() });
-const leadDetail = leadRow.extend({ prepaymentKzt: z.number().nullable() });
+const leadDetail = leadRow.extend({
+  prepaymentKzt: z.number().nullable(),
+  possibleDuplicates: z.array(z.object({
+    id: z.string().uuid(), seq: z.number(), status: z.string(), requestedDate: z.string(), preferredStartTime: z.string().regex(/^\d{2}:00$/).nullable(),
+  })),
+});
 
 async function token(): Promise<string> {
   const value = (await cookies()).get(SESSION_COOKIE)?.value;

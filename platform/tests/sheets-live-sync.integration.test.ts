@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHmac, randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { registerHooks } from "node:module";
-import type { SheetRead } from "../src/core/sheets-import/reader.ts";
+import type { SheetRead } from "../src/core/sheets-import/types.ts";
 import type { RawRow } from "../src/core/sheets-import/types.ts";
 import { stableSourceIdentity } from "../src/core/sheets-import/identity.ts";
 import { releaseReservation } from "../src/core/bookings.ts";
@@ -16,6 +17,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier === "next/headers" ? "next/headers.js" : specifier, context);
 } });
 const { runSheetsLiveSync } = await import("../src/server/sheets-live-sync.ts");
+const { processSignedSheetsWebhook, readBoundedRequestBody, SheetsWebhookError } = await import("../src/server/sheets-webhook.ts");
 
 const HMAC = "test-only-hmac-key-that-is-at-least-thirty-two-bytes-long";
 const DATE = "2099-02-20";
@@ -37,13 +39,25 @@ function sheet(rows: RawRow[]): SheetRead {
   };
 }
 
+function signedRequest(payload: Record<string, unknown>, options: { timestamp?: string; nonce?: string; signature?: string } = {}) {
+  const rawBody = JSON.stringify(payload);
+  const timestamp = options.timestamp ?? String(Math.floor(NOW.getTime() / 1000));
+  const nonce = options.nonce ?? randomUUID();
+  const signature = options.signature ?? createHmac("sha256", HMAC).update(`${timestamp}.${nonce}.${rawBody}`).digest("hex");
+  return { timestamp, nonce, signature, rawBody };
+}
+
 describe("Google Sheets live sync against isolated PostgreSQL", () => {
   let db: TestDb;
   let originalEnabled: string | undefined;
   let originalHmac: string | undefined;
+  let originalWebhookEnabled: string | undefined;
+  let originalWebhookHmac: string | undefined;
   before(async () => {
     originalEnabled = process.env.SHEETS_SYNC_ENABLED;
     originalHmac = process.env.SHEETS_SYNC_HMAC_KEY;
+    originalWebhookEnabled = process.env.SHEETS_WEBHOOK_ENABLED;
+    originalWebhookHmac = process.env.SHEETS_WEBHOOK_HMAC_KEY;
     process.env.SHEETS_SYNC_HMAC_KEY = HMAC;
     db = await startTestDb();
     await db.pool.query("INSERT INTO rooms (id,name) VALUES ('sync-test-exclusive','Синтетическая exclusive комната')");
@@ -54,6 +68,10 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     else process.env.SHEETS_SYNC_ENABLED = originalEnabled;
     if (originalHmac === undefined) delete process.env.SHEETS_SYNC_HMAC_KEY;
     else process.env.SHEETS_SYNC_HMAC_KEY = originalHmac;
+    if (originalWebhookEnabled === undefined) delete process.env.SHEETS_WEBHOOK_ENABLED;
+    else process.env.SHEETS_WEBHOOK_ENABLED = originalWebhookEnabled;
+    if (originalWebhookHmac === undefined) delete process.env.SHEETS_WEBHOOK_HMAC_KEY;
+    else process.env.SHEETS_WEBHOOK_HMAC_KEY = originalWebhookHmac;
     await db.stop();
   });
 
@@ -322,5 +340,146 @@ describe("Google Sheets live sync against isolated PostgreSQL", () => {
     assert.equal(card.rows[0].child_name, "QA ребёнок handover-41");
     assert.equal(card.rows[0].children_total, 3);
     assert.equal(card.rows[0].responsible_user_id, manager.id);
+  });
+
+  it("preserves CRM ownership through invalid, valid, changed, and missing source rows", async () => {
+    process.env.SHEETS_SYNC_ENABLED = "1";
+    const date = "2099-04-11";
+    const sourceId = "event-qa-handover-sequence";
+    const original = event(sourceId, date, "13:00", "Синтетическая exclusive комната", "handover-sequence");
+    const created = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([original]) });
+    assert.equal(created.counts.created, 1);
+    const sourceKey = stableSourceIdentity(original, HMAC).sourceKey!;
+    const reservationId = (await db.pool.query<{ reservation_id: string }>("SELECT reservation_id FROM bb.sheet_sync_records WHERE source_key=$1", [sourceKey])).rows[0].reservation_id;
+    const manager = await createUser(db.pool, null, { email: "handover-sequence@example.test", name: "Менеджер sequence", role: "manager", password: "correct horse battery staple" });
+    await withTx(db.pool, (tx) => handoverSheetRecord(tx, manager.id, reservationId));
+    const before = await db.pool.query<{ id: string; room_id: string; starts_at: Date; ends_at: Date; released_at: Date | null; state: string; source_key: string; responsible_user_id: string | null }>(
+      `SELECT r.id,r.room_id,r.starts_at,r.ends_at,r.released_at,s.state,s.source_key,c.responsible_user_id
+         FROM bb.slot_reservations r JOIN bb.sheet_sync_records s ON s.reservation_id=r.id
+         JOIN bb.booking_cards c ON c.reservation_id=r.id WHERE r.id=$1`, [reservationId]);
+
+    const assertPreserved = async () => {
+      const current = await db.pool.query<{ id: string; room_id: string; starts_at: Date; ends_at: Date; released_at: Date | null; state: string; source_key: string; responsible_user_id: string | null }>(
+        `SELECT r.id,r.room_id,r.starts_at,r.ends_at,r.released_at,s.state,s.source_key,c.responsible_user_id
+           FROM bb.slot_reservations r JOIN bb.sheet_sync_records s ON s.reservation_id=r.id
+           JOIN bb.booking_cards c ON c.reservation_id=r.id WHERE r.id=$1`, [reservationId]);
+      assert.deepEqual(current.rows, before.rows);
+      assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE room_id='sync-test-exclusive' AND slot_date=$1 AND released_at IS NULL", [date])).rows[0].n, 1);
+    };
+
+    const invalid = { ...original, time: "13:45" };
+    const invalidRun = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([invalid]) });
+    assert.equal(invalidRun.counts.manualReview, 1);
+    await assertPreserved();
+
+    const valid = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([original]) });
+    assert.equal(valid.counts.unchanged, 1);
+    await assertPreserved();
+
+    const changed = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([event(sourceId, date, "14:00", "Синтетическая exclusive комната", "handover-sequence")]) });
+    assert.equal(changed.counts.unchanged, 1);
+    await assertPreserved();
+
+    const missing = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([]) });
+    assert.equal(missing.counts.sourceMissing, 0);
+    await assertPreserved();
+  });
+
+  it("fences a stale sync snapshot when CRM handover commits concurrently", async () => {
+    process.env.SHEETS_SYNC_ENABLED = "1";
+    const date = "2099-04-12";
+    const sourceId = "event-qa-handover-race";
+    const original = event(sourceId, date, "13:00", "Синтетическая exclusive комната", "handover-race");
+    const created = await runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: db.pool, now: NOW, readSource: async () => sheet([original]) });
+    assert.equal(created.counts.created, 1);
+    const sourceKey = stableSourceIdentity(original, HMAC).sourceKey!;
+    const mapped = await db.pool.query<{ source_key: string; reservation_id: string }>("SELECT source_key,reservation_id FROM bb.sheet_sync_records WHERE source_key=$1", [sourceKey]);
+    const manager = await createUser(db.pool, null, { email: "handover-race@example.test", name: "Менеджер race", role: "manager", password: "correct horse battery staple" });
+
+    let snapshotRead!: () => void;
+    let continueSync!: () => void;
+    const snapshotReady = new Promise<void>((resolve) => { snapshotRead = resolve; });
+    const gate = new Promise<void>((resolve) => { continueSync = resolve; });
+    let paused = false;
+    const racingPool = new Proxy(db.pool, {
+      get(target, property, receiver) {
+        if (property === "query") return async (...args: Parameters<typeof target.query>) => {
+          const result = await target.query(...args);
+          const sql = typeof args[0] === "string" ? args[0] : (args[0] as unknown as { text: string }).text;
+          if (!paused && sql.startsWith("SELECT source_key,fingerprint,legacy_key_prefix,reservation_id,state,source_row_number,source_payload FROM bb.sheet_sync_records")) {
+            paused = true;
+            snapshotRead();
+            await gate;
+          }
+          return result;
+        };
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const sync = runSheetsLiveSync({ mode: "apply", trigger: "manual", pool: racingPool, now: NOW, readSource: async () => sheet([event(sourceId, date, "14:00", "Синтетическая exclusive комната", "handover-race")]) });
+    await snapshotReady;
+    await withTx(db.pool, (tx) => handoverSheetRecord(tx, manager.id, mapped.rows[0].reservation_id));
+    continueSync();
+    const result = await sync;
+    assert.equal(result.counts.unchanged, 1);
+    const state = await db.pool.query<{ state: string; reservation_id: string }>("SELECT state,reservation_id FROM bb.sheet_sync_records WHERE source_key=$1", [mapped.rows[0].source_key]);
+    assert.equal(state.rows[0].state, "crm_managed");
+    assert.equal(state.rows[0].reservation_id, mapped.rows[0].reservation_id);
+    const active = await db.pool.query<{ id: string; starts_at: Date; released_at: Date | null }>("SELECT id,starts_at,released_at FROM bb.slot_reservations WHERE slot_date=$1 AND room_id='sync-test-exclusive' AND released_at IS NULL", [date]);
+    assert.equal(active.rowCount, 1);
+    assert.equal(active.rows[0].id, mapped.rows[0].reservation_id);
+    assert.equal(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Almaty", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(active.rows[0].starts_at), "13:00");
+  });
+
+  it("authenticates private Apps Script snapshots, rejects replay/tampering, and deduplicates dry-run and apply", async () => {
+    process.env.SHEETS_WEBHOOK_ENABLED = "1";
+    process.env.SHEETS_WEBHOOK_HMAC_KEY = HMAC;
+    process.env.SHEETS_SYNC_ENABLED = "0";
+    const oldVercel = process.env.VERCEL;
+    process.env.VERCEL = "1";
+    await assert.rejects(() => processSignedSheetsWebhook({ ...signedRequest({}), pool: db.pool, now: NOW }), (error) => error instanceof SheetsWebhookError && error.status === 404);
+    if (oldVercel === undefined) delete process.env.VERCEL; else process.env.VERCEL = oldVercel;
+    await assert.rejects(() => readBoundedRequestBody(new Request("https://example.invalid/", { method: "POST", body: "{}" })), (error) => error instanceof SheetsWebhookError && error.status === 400);
+    const source = event("event-webhook-dry-run", "2099-04-18", "10:00", "Синтетическая exclusive комната", "webhook-dry");
+    const payload = {
+      requestId: randomUUID(), spreadsheetId: BOOKING_SHEETS_ID, sheetId: 77, sheetTitle: "Лист1",
+      spreadsheetTimeZone: "Asia/Almaty", mode: "dry_run", blankRows: 0,
+      rows: [{ rowNumber: 3, raw: source }],
+    };
+    await assert.rejects(() => processSignedSheetsWebhook({ ...signedRequest(payload, { signature: "0".repeat(64) }), pool: db.pool, now: NOW }), (error) => error instanceof SheetsWebhookError && error.status === 401);
+    await assert.rejects(() => processSignedSheetsWebhook({ ...signedRequest(payload, { timestamp: String(Math.floor(NOW.getTime() / 1000) - 301) }), pool: db.pool, now: NOW }), (error) => error instanceof SheetsWebhookError && error.status === 401);
+
+    const request = signedRequest(payload);
+    const dry = await processSignedSheetsWebhook({ ...request, pool: db.pool, now: NOW });
+    assert.equal(dry.ok, true);
+    if (!dry.ok) throw new Error("expected_dry_run_result");
+    assert.equal(dry.result.mode, "dry_run");
+    assert.equal(dry.result.counts.created, 1);
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE room_id='sync-test-exclusive' AND slot_date='2099-04-18' AND released_at IS NULL")).rows[0].n, 0);
+    const replay = await processSignedSheetsWebhook({ ...request, pool: db.pool, now: NOW });
+    assert.equal(replay.ok, true);
+    if (replay.ok) assert.equal(replay.replay, true);
+    const requestRow = await db.pool.query<{ status: string; result: object; body_hash: string }>("SELECT status,result,body_hash FROM bb.sheet_sync_webhook_requests WHERE request_id=$1", [payload.requestId]);
+    assert.equal(requestRow.rows[0].status, "completed");
+    assert.ok(!JSON.stringify(requestRow.rows[0]).includes("QA клиент"), "persistent webhook audit stores no source PII");
+
+    const modified = { ...payload, rows: [{ rowNumber: 3, raw: { ...source, time: "11:00" } }] };
+    await assert.rejects(() => processSignedSheetsWebhook({ ...signedRequest(modified, { nonce: randomUUID() }), pool: db.pool, now: NOW }), (error) => error instanceof SheetsWebhookError && error.status === 409);
+    const replayedNoncePayload = { ...payload, requestId: randomUUID() };
+    await assert.rejects(() => processSignedSheetsWebhook({ ...signedRequest(replayedNoncePayload, { nonce: request.nonce }), pool: db.pool, now: NOW }), (error) => error instanceof SheetsWebhookError && error.status === 409);
+
+    process.env.SHEETS_SYNC_ENABLED = "1";
+    const applyPayload = { ...payload, requestId: randomUUID(), mode: "apply", rows: [{ rowNumber: 4, raw: event("event-webhook-apply", "2099-04-18", "14:00", "Синтетическая exclusive комната", "webhook-apply") }] };
+    const applyRequest = signedRequest(applyPayload);
+    const applied = await processSignedSheetsWebhook({ ...applyRequest, pool: db.pool, now: NOW });
+    assert.equal(applied.ok, true);
+    if (applied.ok) assert.equal(applied.result.counts.created, 1);
+    const retried = await processSignedSheetsWebhook({ ...applyRequest, pool: db.pool, now: NOW });
+    assert.equal(retried.ok, true);
+    if (retried.ok) assert.equal(retried.replay, true);
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.slot_reservations WHERE room_id='sync-test-exclusive' AND slot_date='2099-04-18' AND released_at IS NULL")).rows[0].n, 1);
+    delete process.env.SHEETS_WEBHOOK_ENABLED;
+    delete process.env.SHEETS_WEBHOOK_HMAC_KEY;
   });
 });

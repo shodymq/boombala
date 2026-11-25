@@ -1,14 +1,11 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
-import { isAbsolute } from "node:path";
 import { almatyToday } from "../core/dates.ts";
 import { normalizeRow } from "../core/sheets-import/normalize.ts";
 import { reviewSourceIdentity, stableSourceIdentity, sheetPayload, sheetRowFingerprint } from "../core/sheets-import/identity.ts";
 import { BOOKING_SHEETS_ID } from "../core/sheets-import/production-block-import.ts";
-import { googleSheetsClient, readSheet, type SheetRead } from "../core/sheets-import/reader.ts";
-import type { RawRow } from "../core/sheets-import/types.ts";
+import type { RawRow, SheetRead } from "../core/sheets-import/types.ts";
 import type { BookingTimeline } from "./fastapi-crm.ts";
 import { bridgeBlockFromSheetSync, bridgeRescheduleFromSheetSync } from "./legacy-bridge.ts";
 import { getPool } from "./db.ts";
@@ -80,19 +77,6 @@ function hasOverlap(start: number, end: number, reservation: Reservation): boole
   return reservation.status !== "released" && Number.isFinite(otherStart) && Number.isFinite(otherEnd) && start < otherEnd && otherStart < end;
 }
 
-function serviceAccountKey(): { client_email: string; private_key: string } {
-  const filename = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE?.trim() ?? "";
-  if (!isAbsolute(filename)) throw new Error("google_key_file_not_configured");
-  const stat = lstatSync(filename);
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || (typeof process.geteuid === "function" && stat.uid !== process.geteuid())) {
-    throw new Error("google_key_file_permissions");
-  }
-  const value: unknown = JSON.parse(readFileSync(filename, "utf8"));
-  if (!value || typeof value !== "object" || !("client_email" in value) || !("private_key" in value) ||
-      typeof value.client_email !== "string" || typeof value.private_key !== "string") throw new Error("google_key_file_invalid");
-  return { client_email: value.client_email, private_key: value.private_key };
-}
-
 async function readCatalog(pool: Pool): Promise<{ rooms: Room[]; packages: Array<{ id: string; name: string }> }> {
   const [rooms, packages] = await Promise.all([
     pool.query<{ id: string; name: string; occupancy_mode: string }>("SELECT id,name,occupancy_mode FROM bb.rooms WHERE is_active ORDER BY sort_order,id"),
@@ -144,8 +128,8 @@ async function loadLegacySheetBlocks(pool: Pool, hmacKey: string): Promise<Map<s
   return result;
 }
 
-function eventsFromSheet(sheet: Awaited<ReturnType<typeof readSheet>>, rooms: Room[], packages: Array<{ id: string; name: string }>, hmacKey: string): { events: EventRow[]; unresolved: Item[]; scanned: number } {
-  // `readSheet` has already mapped the header and canonical fields. Row numbers remain informational only.
+function eventsFromSheet(sheet: SheetRead, rooms: Room[], packages: Array<{ id: string; name: string }>, hmacKey: string): { events: EventRow[]; unresolved: Item[]; scanned: number } {
+  // The canonical snapshot already maps the header and fields. Row numbers remain informational only.
   const events: EventRow[] = [];
   const unresolved: Item[] = [];
   const occurrences = new Map<string, number>();
@@ -206,7 +190,8 @@ async function upsertRecord(pool: Pool, event: EventRow, reservationId: string |
      ON CONFLICT (source_key) DO UPDATE SET fingerprint=EXCLUDED.fingerprint,legacy_key_prefix=EXCLUDED.legacy_key_prefix,
        reservation_id=COALESCE(EXCLUDED.reservation_id,bb.sheet_sync_records.reservation_id),state=EXCLUDED.state,
        safe_review_code=EXCLUDED.safe_review_code,source_row_number=EXCLUDED.source_row_number,source_payload=EXCLUDED.source_payload,
-       last_seen_at=now(),missing_since=NULL,updated_at=now()`,
+       last_seen_at=now(),missing_since=NULL,updated_at=now()
+     WHERE bb.sheet_sync_records.state <> 'crm_managed'`,
     [event.sourceKey, event.fingerprint, event.legacyPrefix, reservationId, state, reviewCode, event.rowNumber, JSON.stringify(event.payload)],
   );
 }
@@ -217,7 +202,8 @@ async function upsertManualReview(pool: Pool, item: Item): Promise<void> {
     `INSERT INTO bb.sheet_sync_records (source_key,fingerprint,state,safe_review_code,source_row_number,source_payload,last_seen_at,updated_at)
      VALUES ($1,$2,'manual_review',$3,$4,$5::jsonb,now(),now())
      ON CONFLICT (source_key) DO UPDATE SET fingerprint=EXCLUDED.fingerprint,state='manual_review',safe_review_code=EXCLUDED.safe_review_code,
-       source_row_number=EXCLUDED.source_row_number,source_payload=EXCLUDED.source_payload,last_seen_at=now(),missing_since=NULL,updated_at=now()`,
+       source_row_number=EXCLUDED.source_row_number,source_payload=EXCLUDED.source_payload,last_seen_at=now(),missing_since=NULL,updated_at=now()
+     WHERE bb.sheet_sync_records.state <> 'crm_managed'`,
     [item.sourceKey, sheetRowFingerprint(item.raw, process.env.SHEETS_SYNC_HMAC_KEY ?? ""), item.safeCode ?? "manual_review", item.rowNumber, JSON.stringify(sheetPayload(item.raw))],
   );
 }
@@ -239,21 +225,10 @@ async function saveRun(pool: Pool, id: number, outcome: "completed" | "failed", 
   await pool.query("UPDATE bb.sheet_sync_runs SET outcome=$2,finished_at=now(),counts=$3::jsonb,review_items=$4::jsonb,safe_error_code=$5 WHERE id=$1", [id, outcome, JSON.stringify(counts), JSON.stringify(reviewItems), code ?? null]);
 }
 
-export async function getLatestSheetSyncStatus(pool: Pool = getPool()): Promise<{ lastUpdated: string | null; counts: SheetSyncCounts | null; reviewItems: SheetSyncReviewItem[]; outcome: string | null; safeErrorCode: string | null; enabled: boolean; manualReview: number; sourceMissing: number }>{
-  try {
-    const [run, records] = await Promise.all([
-      pool.query<{ finished_at: Date | null; outcome: string; counts: SheetSyncCounts; review_items: SheetSyncReviewItem[]; safe_error_code: string | null }>("SELECT finished_at,outcome,counts,review_items,safe_error_code FROM bb.sheet_sync_runs ORDER BY id DESC LIMIT 1"),
-      pool.query<{ manual_review: number; source_missing: number }>("SELECT count(*) FILTER (WHERE state='manual_review')::int manual_review,count(*) FILTER (WHERE state='source_missing')::int source_missing FROM bb.sheet_sync_records"),
-    ]);
-    return { lastUpdated: run.rows[0]?.finished_at?.toISOString() ?? null, counts: run.rows[0]?.counts ?? null, reviewItems: run.rows[0]?.review_items ?? [], outcome: run.rows[0]?.outcome ?? null, safeErrorCode: run.rows[0]?.safe_error_code ?? null, enabled: process.env.SHEETS_SYNC_ENABLED === "1", manualReview: records.rows[0]?.manual_review ?? 0, sourceMissing: records.rows[0]?.source_missing ?? 0 };
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "42P01") return { lastUpdated: null, counts: null, reviewItems: [], outcome: "migration_required", safeErrorCode: "migration_required", enabled: false, manualReview: 0, sourceMissing: 0 };
-    throw error;
-  }
-}
+export { getLatestSheetSyncStatus } from "./sheets-sync-status.ts";
 
 /** One serialized read/plan/apply pass. Dry-run records only safe run metadata; booking rows are never touched. */
-export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "apply"; trigger?: "timer" | "manual" | "dry_run"; pool?: Pool; now?: Date; readSource?: () => Promise<SheetRead> } = {}): Promise<SheetSyncResult> {
+export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "apply"; trigger?: "timer" | "manual" | "dry_run" | "webhook"; pool?: Pool; now?: Date; readSource: () => Promise<SheetRead> }): Promise<SheetSyncResult> {
   const pool = options.pool ?? getPool();
   const enabled = process.env.SHEETS_SYNC_ENABLED === "1";
   const requestedMode = options.mode ?? "auto";
@@ -281,9 +256,7 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
     const previousKey = await lock.query<{ fingerprint: string }>("SELECT identity_key_fingerprint fingerprint FROM bb.sheet_sync_runs WHERE outcome='completed' AND identity_key_fingerprint IS NOT NULL ORDER BY id LIMIT 1");
     if (previousKey.rows[0] && previousKey.rows[0].fingerprint !== identityKeyFingerprint) throw new Error("sheets_sync_key_changed");
     const worker = apply ? await syncActor(pool) : null;
-    const sheet = options.readSource
-      ? await options.readSource()
-      : await readSheet(googleSheetsClient(serviceAccountKey()), BOOKING_SHEETS_ID, { sheetTitle: TAB });
+    const sheet = await options.readSource();
     if (sheet.spreadsheetId !== BOOKING_SHEETS_ID || sheet.sheetTitle !== TAB) throw new Error("sheet_identity_mismatch");
     const catalog = await readCatalog(pool);
     const { events, unresolved, scanned } = eventsFromSheet(sheet, catalog.rooms, catalog.packages, hmacKey);
@@ -352,8 +325,8 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
             items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: nextId, status: "updated" });
           } catch (error) {
             const code = safeCode(error);
-            await persistReview(pool, event, existing.id, code);
-            items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: existing.id, status: code === "room_interval_conflict" ? "conflict" : "error", safeCode: code });
+            if (code !== "source_handed_over") await persistReview(pool, event, existing.id, code);
+            items.push({ rowNumber: event.rowNumber, sourceKey: event.sourceKey, reservationId: existing.id, status: code === "source_handed_over" ? "unchanged" : code === "room_interval_conflict" ? "conflict" : "error", safeCode: code === "source_handed_over" ? undefined : code });
           }
           continue;
         }
@@ -460,8 +433,8 @@ export async function runSheetsLiveSync(options: { mode?: "auto" | "dry_run" | "
       for (const item of unresolved) await upsertManualReview(pool, item);
       const absent = allRecords.rows.filter((record) => record.state !== "source_missing" && record.state !== "crm_managed" && !seen.has(record.source_key));
       for (const record of absent) {
-        await pool.query("UPDATE bb.sheet_sync_records SET state='source_missing',safe_review_code='source_row_missing',missing_since=COALESCE(missing_since,now()),updated_at=now() WHERE source_key=$1", [record.source_key]);
-        items.push({ rowNumber: record.source_row_number ?? 0, sourceKey: record.source_key, reservationId: record.reservation_id, status: "source_missing", safeCode: "source_row_missing" });
+        const missing = await pool.query("UPDATE bb.sheet_sync_records SET state='source_missing',safe_review_code='source_row_missing',missing_since=COALESCE(missing_since,now()),updated_at=now() WHERE source_key=$1 AND state <> 'crm_managed'", [record.source_key]);
+        if (missing.rowCount) items.push({ rowNumber: record.source_row_number ?? 0, sourceKey: record.source_key, reservationId: record.reservation_id, status: "source_missing", safeCode: "source_row_missing" });
       }
     } else {
       const absent = allRecords.rows.filter((record) => record.state !== "source_missing" && record.state !== "crm_managed" && !seen.has(record.source_key));

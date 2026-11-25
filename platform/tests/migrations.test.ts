@@ -176,7 +176,7 @@ describe("migrations and DB-level guarantees", () => {
       const oldLead = (await prior.pool.query("INSERT INTO bb.lead_requests (idempotency_key,contact_id,requested_date,slot_id,status) VALUES ($1,$2,'2099-02-03',2,'new') RETURNING id,seq,slot_id", [randomUUID(), contact])).rows[0];
 
       const applied = await migrate(prior.pool, MIGRATIONS_DIR);
-      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql", "020_lead_follow_up.sql", "021_booking_whole_hour_starts.sql"]);
+      assert.deepEqual(applied.applied, ["019_lead_preferred_start_time.sql", "020_lead_follow_up.sql", "021_booking_whole_hour_starts.sql", "022_sheets_apps_script_webhook.sql"]);
       const after = (await prior.pool.query("SELECT id,seq,slot_id,preferred_start_time FROM bb.lead_requests WHERE id=$1", [oldLead.id])).rows[0];
       assert.deepEqual(after, { ...oldLead, preferred_start_time: null }, "old identity, slot and status are preserved; no preference is invented");
 
@@ -225,7 +225,7 @@ describe("migrations and DB-level guarantees", () => {
       )).rows[0];
 
       const applied = await migrate(prior.pool, MIGRATIONS_DIR);
-      assert.deepEqual(applied.applied, ["021_booking_whole_hour_starts.sql"]);
+      assert.deepEqual(applied.applied, ["021_booking_whole_hour_starts.sql", "022_sheets_apps_script_webhook.sql"]);
       const after = (await prior.pool.query("SELECT id,starts_at,ends_at,released_at FROM bb.slot_reservations WHERE id=$1", [old.id])).rows[0];
       assert.deepEqual(after, old, "the additive guard does not rewrite existing reservations");
 

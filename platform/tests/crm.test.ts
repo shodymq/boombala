@@ -134,6 +134,7 @@ describe("CRM: intake, outbox, Telegram, export", () => {
     assert.equal((await submitLead(db.pool, input)).duplicate, true);
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.lead_requests WHERE idempotency_key=$1", [input.idempotencyKey])).rows[0].n, 1);
     assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.consent_events WHERE lead_request_id=$1", [results[0].leadId])).rows[0].n, 1);
+    assert.equal((await db.pool.query("SELECT count(*)::int n FROM bb.outbox WHERE ref_id=$1", [results[0].leadId])).rows[0].n, 1, "an exact idempotent retry queues only one notification");
     // two workers draining at once still send one message
     const drains = await Promise.all(pools.map((p) => drainOutbox(p, { send, level: "full", onlyRefId: results[0].leadId })));
     assert.equal(drains.reduce((s, d) => s + d.sent, 0), 1);

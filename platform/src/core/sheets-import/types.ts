@@ -6,6 +6,16 @@ export interface SourceRef {
   rowNumber: number;
 }
 
+/** Canonical full-sheet snapshot consumed by reconciliation, whether read from a local fixture or Apps Script push. */
+export interface SheetRead {
+  spreadsheetId: string;
+  sheetId: number;
+  sheetTitle: string;
+  spreadsheetTimeZone: string;
+  rows: Array<{ raw: RawRow; source: SourceRef }>;
+  blankRows: number;
+}
+
 /** Raw cells exactly as the Sheets API returned them (FORMATTED_VALUE), keyed by canonical column. */
 export type RawRow = Partial<Record<Column, string>>;
 
